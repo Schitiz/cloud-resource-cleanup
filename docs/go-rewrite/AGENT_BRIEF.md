@@ -10,13 +10,14 @@ branch `refactor/go-rewrite`. Read these first, in order:
 
 ## Rules
 
-- Do not run `git commit`, `git push`, or create/switch branches. Leave all
-  changes in the working tree for human review.
+- Work only on branch `refactor/go-rewrite`. Commit and push there with
+  clear messages. Never force-push, rewrite history, or touch other branches.
 - Do not call real cloud APIs, Slack or InfluxDB. No credentials are needed;
   use fakes in tests.
 - Keep the Python code untouched. Go code lives alongside it.
 - Go code: before writing or editing each Go file, use the `use-modern-go`
-  skill (`sh ~/.cursor/skills/use-modern-go/scripts/run-tool.sh list --go-version 1.24`)
+  skill in `.cursor/skills/use-modern-go`
+  (`sh .cursor/skills/use-modern-go/scripts/run-tool.sh list --go-version 1.24`)
   and follow the guidelines it returns. Source:
   https://github.com/JetBrains/go-modern-guidelines
 - Where HLD.md and the Python code disagree, HLD.md wins only for the items
