@@ -111,3 +111,7 @@ Scope: `git diff ef1f718..HEAD` (commits `a9f0d1d`, `0cabd20`), read against `gi
 Test count: 7489 passed, 1 failed (baseline 7379 at `ef1f718`; +111 new tests), the same as round 1.
 
 ROUND 2 VERDICT: CHANGES_REQUESTED
+
+## Integration (local driver)
+
+Round 2's blocking item is resolved by its option (c): `crc/azu/_base.py` / `crc.azu._base` stay on both legacy lists, so ARCH-003 does not apply to it and `make check` is green. The module keeps its types and parity tests. It leaves the ratchet in the CLI rung, when `crc.py` passes the credentials in (same plan as `crc/oci/_base.py` from PL-OCI). `crc/azu/README.md` no longer calls the package fully refactored, and `Base` was dropped from its Public API list (ARCH-002 does not scan legacy modules).

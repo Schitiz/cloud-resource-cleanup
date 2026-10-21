@@ -22,7 +22,6 @@ The ip, nic and disk modules are refactored, so the names below are synced with 
 The vm and spot_vm subpackages document their own API in their own READMEs. The VM delete helpers module is refactored too (rung PL-AZ); the base module is typed but still on the legacy ratchet. The package init holds only a
 copyright comment and declares no export list.
 
-- `Base`: Azure credential from the environment plus the lazily built, shared compute and network clients of one resource group (see Safety Invariants for the variables); the two client getter methods return the same object after the first call and are typed as any object because each cleaner narrows the client with its own Protocol.
 - `DeletePoller`: Protocol of the handle begin_delete returns (result(timeout)), used by the delete helpers.
 - `begin_delete_vm_and_wait()`: starts a VM delete and waits on the poller (default timeout 3600 s), then logs the completion; errors propagate.
 - `delete_vm_primary_nic()`: deletes the NIC named after the VM plus a suffix (default "-NIC") with up to 24 attempts 15 s apart; not-found counts as deleted and a final failure is logged, never raised.
