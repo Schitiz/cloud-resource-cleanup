@@ -1,0 +1,63 @@
+[project]
+name = "cloud-resource-cleanup"
+version = "0.1.0"
+description = "Delete and stop leftover cloud resources across AWS, Azure, GCP and OCI."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE.md" }
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+# ---------------------------------------------------------------------------
+# LEGACY RATCHET: this list may only shrink. It names the modules that have not
+# been refactored yet and are therefore exempt from ruff and mypy. Each rung
+# removes the modules it refactors, in the same change that refactors them.
+# Never add an entry. The mypy block below must list the same modules.
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = [
+    "crc.py",
+    "crc",
+    "tests",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "FURB", "SIM", "PERF", "C901", "PLR", "RUF"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-statements = 40
+max-args = 6
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+
+# LEGACY RATCHET: this list may only shrink. Each rung removes the modules it
+# refactors. Keep it in sync with ruff `extend-exclude` above.
+[[tool.mypy.overrides]]
+module = ["crc", "crc.*"]
+ignore_errors = true
+
+[tool.importlinter]
+root_package = "crc"
+
+[[tool.importlinter.contracts]]
+name = "Cloud packages are independent"
+type = "independence"
+modules = ["crc.aws", "crc.azu", "crc.gcp", "crc.oci"]
+
+# TODO(core rung): once crc/core exists, add the layer contract, for example:
+#   [[tool.importlinter.contracts]]
+#   name = "Core never imports cloud packages"
+#   type = "forbidden"
+#   source_modules = ["crc.core"]
+#   forbidden_modules = ["crc.aws", "crc.azu", "crc.gcp", "crc.oci"]
+# and a "forbidden" contract keeping crc.core off cloud SDKs (boto3, azure,
+# google, oci) via allow_indirect_imports / external forbidden modules.
