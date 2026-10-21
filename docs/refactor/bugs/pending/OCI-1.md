@@ -2,8 +2,10 @@
 
 Queued for `docs/refactor/BUGS.md` (lane rules: parallel lanes do not edit it). Same columns as
 `BUGS.md`; the ID column is `NEW` until the integrator assigns a number. Locations are `file:line`
-on `main`, verified with `git show main:<path>`. None of these is fixed in rung OCI-1; each is
-pinned by a case in `tests/test_oci_disk_parity.py` (case ids in the Title column). BUG-004 already
+on `main`, verified with `git show main:<path>`. None of these is fixed in rung OCI-1; each row
+from the coding pass is pinned by a case in `tests/test_oci_disk_parity.py` (case ids in the Title
+column); the three rows found in round 2 are behaviour shared verbatim by main and the refactor and
+have no dedicated case yet. BUG-004 already
 covers the fail-open custom age tag (`crc/oci/disk.py:146`, `:149`).
 
 | ID | Title | Location on main | Exists on main | Effect | Risk | Found in | Status |
@@ -20,3 +22,6 @@ covers the fail-open custom age tag (`crc/oci/disk.py:146`, `:149`).
 | NEW | Deletes are not isolated from reads: block volumes of a region are deleted before the boot volume attachments of that region are listed, and a non-connectivity error later in the run leaves the earlier deletions in place with no summary logged (the registered Cleaner path lists everything in `plan()` first, so it fails before deleting anything; a documented difference in the failure case only) | `crc/oci/disk.py:186-218` | yes | cosmetic | low | OCI-1 | open |
 | NEW | Results and reports use `display_name`, not the OCID: two volumes with the same name appear twice and a volume with no name is reported as `None` (cases `duplicate-display-names`, `display-name-none`) | `crc/oci/disk.py:173` | yes | cosmetic | low | OCI-1 | open |
 | NEW | Compartment is hard-coded (`COMPARTMENT_ID`), so only that compartment is ever listed; and the OCI private key content/file is read in `Base.__init__`, so even a dry run raises `KeyError` when neither variable is set | `crc/oci/_base.py:14`, `:33`, `:35-40`; `crc/oci/disk.py:73`, `:93`, `:192`, `:196` | yes | keeps what it should delete | low | OCI-1 | open |
+| NEW | Tag spec values are matched with `tags[key] in value`, and `--filter_tags` / `--exception_tags` / `--notags` are parsed with `ast.literal_eval`, so a string value (`{'keep': 'true'}` instead of `{'keep': ['true']}`) is a substring test: an empty tag value or `t` matches `'true'`; a too-broad `filter_tags` match selects volumes the owner did not mean (the shared `crc.core.policy._key_matches` keeps the same reading, likely in every module that uses it) (found in OCI-1 round 2) | `crc/oci/disk.py:111`, `:119`, `:133`; `crc.py:1063-1064`, `:1072-1073`, `:1161-1162` | yes | deletes what it should keep | low | OCI-1 | open |
+| NEW | Only `freeform_tags` are read for filter, exception, notags and custom age: an `exception_tags` key set as an OCI defined tag is ignored, so the volume is deleted (`crc/oci/spot_vm.py` does read `defined_tags`) (found in OCI-1 round 2) | `crc/oci/disk.py:107`, `:131`, `:144` | yes | deletes what it should keep | low | OCI-1 | open |
+| NEW | Volume and boot volume attachments are listed only in `COMPARTMENT_ID`: a volume of that compartment attached to an instance in another compartment has no listed attachment and passes the attachment check (whether OCI then rejects the delete of an attached volume was not verified) (found in OCI-1 round 2) | `crc/oci/disk.py:71-74`, `:90-94`; `crc/oci/_base.py:14`, `:33` | yes | deletes what it should keep | low | OCI-1 | open |

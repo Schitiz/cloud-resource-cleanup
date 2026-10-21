@@ -75,3 +75,85 @@ Scope reviewed: `git diff 9b5c85a..HEAD` (`crc/oci/disk.py`, `crc/oci/disk_api.p
 Test count: 2703 before OCI-1 (`9b5c85a`), 2913 after OCI-1 (+210).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 9b5c85a..HEAD` (the coding commit `88b74e8`, `56b883c` and round 1's `727697f`),
+read against `git show main:crc/oci/disk.py`, `main:crc/oci/_base.py`, `main:crc/oci/connectivity.py`,
+`main:crc.py`, `crc/core/policy.py`, `crc/core/age.py`, `crc/core/engine.py`, `AGENTS.md`,
+`CLEANUP_SAFETY.md`, `docs/refactor/BUGS.md` and `REVIEW_CHECKLIST.md`.
+
+### Round 1 fixes assessment
+
+- **Pending table (Effect values, risk order, citations):** correct. All Effect values are now one of
+  the four allowed by `BUGS.md` Rule 5 and the rows are sorted high, medium, low (Rule 4). I re-checked
+  every citation with `git show main:<path>` (`crc/oci/disk.py:17`, `:26-51`, `:63-80`, `:82-100`,
+  `:107-149`, `:161`, `:167-177`, `:186-218`; `crc/oci/_base.py:14`, `:33`, `:35-40`, `:65-84`,
+  `:119-129`; `crc/oci/connectivity.py:14-18`); all point at the described code.
+- **`FakeOci.paginate` records `list_call_get_all_results`:** strictly stronger; a list call that
+  bypasses pagination now fails parity. No behaviour change in production code.
+- **Ordered log comparison in `test_cleaner_protocol_matches_main`:** strictly stronger than the old
+  `sorted(...)` multiset check plus tail check: plan logs, then apply logs, then summary logs, in
+  main's relative order. It matches the documented Cleaner-path difference (all reads before deletes)
+  and nothing else. No test was weakened, skipped or deleted.
+
+### Independent review
+
+- **Parity, adapter path** (`crc/oci/disk.py:350-391` vs `main:crc/oci/disk.py:151-231`): same SDK
+  call order (regions, compute then block storage client inside the region `try`, list volumes, list
+  boot volumes, volume attachments, per-volume delete, availability domains, boot attachments,
+  per-boot-volume delete), same skip order (state, attached, exception/notags, filter, age), same
+  `except Exception` around delete + log + append, same summary lines. `policy._key_matches` is the
+  exact main expression `key in tags and (not value or tags[key] in value)`; `notags_all` and
+  `filter_tags_any_key` reproduce main's empty-spec handling; `effective_age` is `retention_age or age`;
+  `now.astimezone(created_time.tzinfo)` is evaluated before `logging.info(tags)` as on main.
+  `normalize_tags` stringifies values, which cannot differ for OCI freeform tags (`Dict[str, str]`).
+- **Mutation checks (my own, reverted):** dropping `ATTACHING` from `IN_USE_ATTACHMENT_STATES` (6
+  failures), swapping `delete_volume` / `delete_boot_volume` (107 failures), removing the dry-run
+  summary in `plan()` (4 failures). The parity and unit tests assert outcomes, not just execution.
+- **Safety (CLEANUP_SAFETY.md):** no age gate weakened; the custom age tag stays fail open exactly as
+  on main (BUG-004, SAF-009); `MAX_AGE` still applies only inside `core_age.is_old` (SAF-010); no new
+  per-resource isolation beyond main's delete `except`. `plan()` is read-only (ARCH-005) and
+  `crc.core.engine.run` skips `apply()` in dry run (`crc/core/engine.py:99-100`).
+- **Architecture and typing:** registration through `@register("oci", "disk")`; SDK behind
+  `VolumeApi` (`Any` only at the SDK edge in `crc/oci/disk_api.py:110-111`, `:158`, `:174`);
+  `crc/oci/disk.py` removed from both ratchet lists, nothing added, one per-SDK mypy override for
+  `oci`; both files under 400 lines; `crc/oci/README.md` symbol list matches the public names.
+  No forbidden or other-lane file is touched (`crc.py`, `crc/core/**`, `BUGS.md`, `STATUS.md`,
+  `FILTER_VARIANTS.md`, `crc/README.md`, `tests/README.md`, `tests/legacy/README.md`).
+
+### BLOCKING (fixed)
+
+None.
+
+### NIT (left)
+
+1. `DiskCleaner.remove` returns `Failure(id=candidate.name, ...)` (`crc/oci/disk.py:230`) while
+   `Candidate.id` and `Skipped.id` are OCIDs; the display name matches main's report but the id field
+   is inconsistent. Harmless today (only the engine report reads it).
+2. `test_factory_builds_a_disk_cleaner` (`tests/test_oci_disk.py:251-255`) checks only `cloud` and
+   `kind`, not that `RunContext.options` reach `DiskSettings` (filter, exception, notags, age, custom
+   age key). Worth one more assertion when the engine wiring rung lands.
+3. The adapter calls the clock once per volume, also for volumes skipped before the age check
+   (`crc/oci/disk.py:389`); main reads `datetime.now()` only in the age check. Not observable with
+   the default clock.
+4. Three new low-risk quirks (string tag-spec values are substring tests; only freeform tags are read;
+   attachments are listed in one compartment only) are added to `docs/refactor/bugs/pending/OCI-1.md`.
+   The first also concerns `crc.core.policy._key_matches` and other modules; the integrator may want a
+   line in `FILTER_VARIANTS.md` section 7 (not edited here, lane rule).
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check` (local interpreter is
+Python 3.12; CI uses 3.11):
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed |
+| `mypy` | Success: no issues found |
+| `lint-imports` | 5 kept, 0 broken |
+| `pytest -q` | 2913 passed |
+
+Test count: 2703 before OCI-1 (`9b5c85a`), 2913 after (+210); round 2 adds no tests and removes none.
+
+ROUND 2 VERDICT: APPROVE
