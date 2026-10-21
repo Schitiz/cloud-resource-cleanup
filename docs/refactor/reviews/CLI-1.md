@@ -80,7 +80,7 @@ Scope: `git diff d1918f3..HEAD` (commits `8d18379`, `4dc6717`), read against `AG
   `test_raw_parser_definition_matches_main`, which compares the parser attributes and every action
   field against the oracle; the same mutation now fails it, then reverted.
 - **NIT (left):** the summary says "5 quirks" and lists 6 (round 1 noted it); the file now has 7.
-- **NIT (left):** round 1 reported `mypy` on "75 source files"; this run checks 182.
+- **NIT (left):** round 1 reported `mypy` on "75 source files" and `lint-imports` "7 contracts kept"; this run checks 182 files and import-linter reports 5 contracts kept, 0 broken.
 - **NIT (left):** the rule "`crc.cli` imports no cloud package, no `crc.notify`, no SDK"
   (`crc/cli/README.md:39`) is not enforced by an import-linter contract; adding one needs a
   `pyproject.toml` change, which is outside this lane.
@@ -93,7 +93,7 @@ Scope: `git diff d1918f3..HEAD` (commits `8d18379`, `4dc6717`), read against `AG
 ### Gates
 
 `pip install -r requirements.txt -r requirements-dev.txt` then `make check` (Python 3.12.3; 3.11 is
-not installed): `ruff check .` passed, `mypy` passed (182 source files), `lint-imports` 7 contracts
+not installed): `ruff check .` passed, `mypy` passed (182 source files), `lint-imports` 5 contracts
 kept, `pytest -q` 12562 passed (12561 before this round, +1 new test).
 
 ROUND 2 VERDICT: APPROVE
