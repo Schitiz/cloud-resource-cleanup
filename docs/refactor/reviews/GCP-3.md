@@ -37,7 +37,8 @@ Rung GCP-3: `crc/gcp/vm.py` refactored into a `Cleaner` (lane `refactor/lane-gcp
 - **Gates.** `ruff check .`, `mypy` (strict), `lint-imports` and `pytest -q` pass.
   `crc/gcp/vm.py` and `crc.gcp.vm` are removed from both ratchet lists in `pyproject.toml`; no
   new override (the `googleapiclient` one from GCP-2 is reused).
-- **Open issues.** New quirks are in `docs/refactor/bugs/pending/GCP-3.md` (14 rows, none fixed): unvalidated
+- **Open issues.** New quirks are in `docs/refactor/bugs/pending/GCP-3.md` (15 rows after round 2, none fixed;
+  round 2 added the exact, case-sensitive `--resource_states` match): unvalidated
   age, swallowed action errors, unawaited operations, run-aborting errors outside the per-instance `try`,
   strict timestamp format, closed service reused, unpaginated zones, no zone-listing error/connectivity
   fallback, cumulative summary and side-effect count logs, ignored stop state / shared mutable default,
@@ -125,3 +126,82 @@ Scope reviewed: `git diff eb84fab..HEAD` (`crc/gcp/vm.py`, `crc/gcp/README.md`, 
 Test count: 4028 before GCP-3 (`eb84fab`), 4322 on `af32d6b`, 4323 after Round 1 (+295 total: 281 in `tests/test_gcp_vm_parity.py`, 14 in `tests/test_gcp_vm.py`).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff eb84fab..HEAD` (commits `97c1a22`, `af32d6b`, `7f45bbf`) against `git show main:crc/gcp/vm.py`,
+`git show main:crc.py`, `crc/core/policy.py`, `crc/core/age.py`, `CLEANUP_SAFETY.md`, `docs/refactor/BUGS.md`,
+`docs/refactor/FILTER_VARIANTS.md` and `REVIEW_CHECKLIST.md`.
+
+### Round 1 fixes assessment
+
+1. **STOP ignores `instance_state` in `build_vm_cleaner` (`crc/gcp/vm.py:281-283`)**: correct. It matches
+   `main:crc/gcp/vm.py:281` (`stop()` always passes `default_instance_state`), and `crc.py` never passes states
+   to `stop_vm` (`main:crc.py:1584-1585`). The test change in `_cleaner_context`
+   (`tests/test_gcp_vm_parity.py:633-634`) strengthens the test: it now also feeds the custom state to the STOP
+   Cleaner. Mutation check: reverting the fix fails
+   `test_cleaner_protocol_matches_main[state-custom-ignored-by-stop]`. No behaviour of the `VM` adapter changed.
+2. **Pending-bug table schema, order and citations**: correct. Every `main` citation I relied on was re-verified
+   with `git show main:...` (`crc/gcp/vm.py:30`, `:35`, `:70-71`, `:131-134`, `:140`, `:150-165`, `:173-200`,
+   `:212`, `:219`, `:237`, `:251-257`, `:261`, `:281`; `crc.py:117`, `:154`, `:354-389`, `:561-565`,
+   `:750-754`, `:1097-1103`, `:1408`). Two wordings were inaccurate; see the second NIT below (fixed in the doc).
+   No test was weakened: round 1 only removed a condition that hid a case from the Cleaner path.
+
+### Independent review
+
+- **Parity.** Status, exception/notags, filter and age decisions follow `main:crc/gcp/vm.py:140-146` in the same
+  order. The `policy` helpers have the same semantics: `_key_matches` is `key in tags and (not values or
+  tags[key] in values)` (`crc/core/policy.py:90-91`), the same as `main:crc/gcp/vm.py:212`, `:219`, `:237`.
+  `effective_age` is `retention_age or age`. The labels are only read when a spec is set, as on main
+  (`crc/gcp/vm.py:239-240`, `:246-247`); mutating that short-circuit fails 182 tests. Error text uses
+  `Operation.value` (`"delete"` / `"stop"`, `crc/core/cleaner.py:21-22`), so it is identical to
+  `operation_type`. The service closes after the zones are listed, and deletes and stops reuse it, as on main.
+- **Oracle.** `tests/legacy/gcp_vm.txt` is byte-identical to `git show main:crc/gcp/vm.py` (`diff` empty).
+- **Tests.** The parity tests compare SDK calls in order (including lazy page steps and `close`), results,
+  counts, logs, stdout and errors for 101 cases. `QUIRKS` asserts concrete outcomes on both the oracle and the
+  new code. The Cleaner-path relaxations (multiset logs when more than one instance is listed, no action on a
+  listing error) match GCP-1 and GCP-2. Unit tests assert call lists and results; none is vacuous.
+- **Safety (`CLEANUP_SAFETY.md`).** `plan()` makes only read calls, and `apply()` makes no SDK call in a dry run
+  (`crc/gcp/vm.py:222`). No age gate was weakened, and the custom age label stays fail open as on main (BUG-004).
+  `MAX_AGE` is still applied inside `core_age.is_old`. No SAF ID is specific to GCP VM.
+- **Architecture and typing.** The ratchet only shrank (`pyproject.toml`: two lines removed, no override added).
+  The SDK sits behind Protocols, registration uses the decorator, and nothing calls the cloud at import time.
+  The `# type: ignore[arg-type]` in `tests/test_gcp_vm.py:194`, `:206` is justified: main's `age: int` annotation
+  is kept and is BUG-071 shape. The README `### Public API` and safety bullets are accurate (ARCH-002 passes).
+
+### BLOCKING (fixed)
+
+None.
+
+### NIT (left, or doc-only fix)
+
+- New quirk added to `docs/refactor/bugs/pending/GCP-3.md`: `--resource_states` is matched exactly and case
+  sensitively against the GCP status (`main:crc.py:1051-1058`, `:108-111`; `main:crc/gcp/vm.py:140`). Its help
+  example `['RUNNING', 'STOPPED']` never matches a stopped GCP instance (GCP reports `TERMINATED`), and an
+  AWS-style `['running']` matches nothing. Pinned by `state-lowercase-not-matched` and
+  `state-exact-not-substring`.
+- Pending-row wording fixed in place. Row 1: `crc.py` checks `isinstance(age, dict)` when `age` is not `None`
+  (`main:crc.py:1264-1271`), not "when truthy". Substring row: `crc.py` rejects non-list `--filter_tags` /
+  `--exception_tags` values (`main:crc.py:1404-1405`, `:1274-1283`), so from the CLI only the unvalidated
+  `--notags` can be a string, which keeps more instances. The integrator may want the same note on `BUG-108`
+  (it cites `crc.py:1063-1064` / `:1072-1073` but not the validation); `BUGS.md` is outside this lane.
+- Round 1 NITs still stand: `VmCleaner.apply()` with `dry_run=True` logs the summary a second time; and
+  `client or ComputeVmClient()` (`crc/gcp/vm.py:325`) should be `is not None`. Neither is reachable through
+  `crc.py` or `crc.core.engine.run`.
+- `FILTER_VARIANTS.md` (outside this lane): the `gcp/vm.py` row could say that the status list comes from
+  `--resource_states` for `delete` (exact match), and that `stop` always uses `["RUNNING"]`.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`:
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed |
+| `mypy` | Success: no issues found in 101 source files |
+| `lint-imports` | Contracts: 5 kept, 0 broken |
+| `pytest -q` | 4323 passed |
+
+Test count: 4323. This is the same as after round 1, and 4028 before the rung (+295). Round 2 changed docs only.
+
+ROUND 2 VERDICT: APPROVE
