@@ -4,25 +4,28 @@
 
 Legacy Azure cleaners (azure-mgmt SDK). They delete or stop leftover VMs, disks, IPs and NICs in one resource group.
 
-**Mostly legacy.** `ip.py` (rung AZ-1), `nic.py` (rung AZ-2), `disk.py` (rung AZ-3), `vm/` (rung AZ-4) and `spot_vm/` (rung AZ-5) are refactored into registered `Cleaner`s; the other modules are the same as on `main` (no behaviour change). Any change must follow `ARCHITECTURE.md` and the refactor rung for this package in `docs/refactor/PLAN.md` (Rung R4+), with `make check` green.
+**Refactored.** `ip.py` (rung AZ-1), `nic.py` (rung AZ-2), `disk.py` (rung AZ-3), `vm/` (rung AZ-4) and `spot_vm/` (rung AZ-5) are refactored into registered `Cleaner`s; `_base.py`, `vm_delete_helpers.py` and `__init__.py` (rung PL-AZ) are strict-typed plumbing with the same behaviour as on `main`. Any change must follow `ARCHITECTURE.md` and the refactor rung for this package in `docs/refactor/PLAN.md` (Rung R4+), with `make check` green.
 
 Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.md`):
 
-- `_base.py`: `Base`: compute and network clients for a resource group
+- `_base.py`: `Base`: Azure credential from the `AZURE_CREDENTIALS_*` variables, and lazily built compute and network clients for a resource group (rung PL-AZ)
 - `disk.py`: `AzureDiskCleaner` (registered as `azure`/`disk`) and the legacy adapter `Disk`: deletes unattached managed disks (`begin_delete`); any-key tag filter, age gate
 - `ip.py`: `AzureIpCleaner` (registered as `azure`/`ip`) and the legacy adapter `IP`: deletes IPs without an IP configuration (`begin_delete`); any-key tag filter
 - `nic.py`: `AzureNicCleaner` (registered as `azure`/`nic`) and the legacy adapter `NIC`: deletes NICs not attached to a VM (`begin_delete(...).result()`, three attempts); plain substring name filters
 - `spot_vm/`: `AzureSpotVmCleaner` (registered as `azure`/`spot_instances`) and the legacy adapter `SpotVM`: deletes stopped or deallocated Spot VMs and their leftover disks and NICs (subpackage with its own README, rung AZ-5)
 - `vm/`: subpackage (own README): `VmCleaner` (registered as `azure`/`vm`) and the legacy adapter `VM`: deletes (via `vm_delete_helpers`) or stops (`begin_power_off`) VMs by status; `from crc.azu.vm import VM` still works
-- `vm_delete_helpers.py`: `begin_delete_vm_and_wait`, `delete_vm_primary_nic`: delete helpers, no filtering
+- `vm_delete_helpers.py`: `begin_delete_vm_and_wait`, `delete_vm_primary_nic`: delete helpers, no filtering (rung PL-AZ)
 
 ## Public API
 
 The ip, nic and disk modules are refactored, so the names below are synced with this README by ARCH-002.
-The vm and spot_vm subpackages document their own API in their own READMEs. The other modules (Base, begin_delete_vm_and_wait, delete_vm_primary_nic) are
-legacy. The package init holds only a
+The vm and spot_vm subpackages document their own API in their own READMEs. The base module and the VM delete helpers module are refactored too (rung PL-AZ). The package init holds only a
 copyright comment and declares no export list.
 
+- `Base`: Azure credential from the environment plus the lazily built, shared compute and network clients of one resource group (see Safety Invariants for the variables); the two client getter methods return the same object after the first call and are typed as any object because each cleaner narrows the client with its own Protocol.
+- `DeletePoller`: Protocol of the handle begin_delete returns (result(timeout)), used by the delete helpers.
+- `begin_delete_vm_and_wait()`: starts a VM delete and waits on the poller (default timeout 3600 s), then logs the completion; errors propagate.
+- `delete_vm_primary_nic()`: deletes the NIC named after the VM plus a suffix (default "-NIC") with up to 24 attempts 15 s apart; not-found counts as deleted and a final failure is logged, never raised.
 - `PublicIpOperations`: Protocol of the two public IP calls used, list_all and begin_delete; tests pass fakes.
 - `IpNetworkClient`: Protocol of the network client part used (the public_ip_addresses operations).
 - `AzureIpCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus list_ips, decide and delete_candidate used by the adapter); the client factory is injected through the constructor.
@@ -52,6 +55,7 @@ copyright comment and declares no export list.
 - Azure disks (AZ-3): `plan()` only calls `disks.list`; `disks.begin_delete(resource_group, name)` is called from `apply()` (and `Disk.delete()`) only and never in a dry run. Selection (an empty `filter_tags` selects every disk, so SAF-011 is not met by the tag filter): `filter_tags` any key (empty selects all, untagged disks match only when no filter), `exception_tags` any key, `notags` all keys, age through `core_age.get_retention_age` (custom age tag fails open, BUG-004) and `core_age.is_old`, then the state test, which is a substring test (BUG-019). Nothing is isolated per disk: every error propagates and earlier disks stay deleted; the delete poller is not awaited; `list` is subscription-wide while the delete uses the configured resource group. Quirks in `docs/refactor/bugs/pending/AZ-3.md`.
 - Azure VMs (AZ-4): see `crc/azu/vm/README.md`. `plan()` only calls `list_all` and `instance_view`; the VM and NIC deletes and `begin_power_off` run from `apply()` (and `VM.delete()` / `VM.stop()`) only, never in a dry run. Untagged VMs are skipped (SAF-042), age goes through `crc.core.age`, per-VM errors are logged and swallowed, and BUG-002, BUG-003, BUG-010 are preserved. Quirks in `docs/refactor/bugs/pending/AZ-4.md`.
 - Azure Spot VMs (AZ-5): see `crc/azu/spot_vm/README.md`; `plan()` is read-only, `SpotVM.delete` re-raises when the list call fails (SAF-005), Spot VMs without tags are skipped (SAF-042).
+- Azure plumbing (PL-AZ): `Base` reads `AZURE_CREDENTIALS_SUBSCRIPTION_ID`, `AZURE_CREDENTIALS_TENANT_ID`, `AZURE_CREDENTIALS_CLIENT_ID` and `AZURE_CREDENTIALS_CLIENT_SECRET` (in that order) and `AZURE_RESOURCE_GROUP` (only when the resource group argument is falsy); it reads credentials from the environment only (a missing variable raises `KeyError` at construction, even in a dry run) and never logs the secret. `begin_delete_vm_and_wait` and `delete_vm_primary_nic` are called by the VM and Spot VM cleaners only after their dry-run check (`delete_vm_primary_nic` with `dry_run=True` makes no SDK call). The NIC helper never raises and records a not-found NIC as deleted (BUG-200, BUG-203, BUG-252, BUG-254; new quirks in `docs/refactor/bugs/pending/PL-AZ.md`). Parity with main: `tests/test_azure_base_parity.py`, `tests/test_azure_vm_delete_helpers_parity.py`.
 - Do not call real cloud APIs in tests; mock every SDK client.
 
 ## Extension Rules
@@ -62,4 +66,5 @@ copyright comment and declares no export list.
    cleaner"), not as another legacy class.
 3. A new or refactored module follows `ip.py`, `nic.py`, `disk.py`, `vm/` and `spot_vm/`: a Cleaner with an injected client Protocol, `@register("azure", ...)`, a parity test against a frozen oracle in `tests/legacy/`. Refactoring a module means removing it from the ruff `extend-exclude` and mypy override lists in
    the same change (the legacy ratchet only shrinks), then updating this README and its symbol list.
+5. Keep `Base`, the delete helpers and their call order, environment variables, log lines and swallowed errors as they are; a cleaner narrows the `Any` clients with its own Protocol instead of changing the plumbing's return types.
 4. Record every new bug or quirk in `docs/refactor/BUGS.md` with its `main` file:line.
