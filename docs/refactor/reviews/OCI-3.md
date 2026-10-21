@@ -38,3 +38,35 @@
 
 VERDICT: APPROVE
 
+
+## Round 2 (Opus)
+
+Scope: `git diff e7926e2..HEAD` (rung commit `93eb5b4` and round 1 commit `60ee8e8`).
+
+### Round 1 fixes assessment
+
+- **`Plan.related` in a dry run** (`crc/oci/spot_vm/cleaner.py:103-110`): correct. `crc/core/engine.py:99-105` calls only `plan()` in a dry run and `Report.from_plan` reads `plan.related` (`crc/core/report.py:121-123`), so the leftover volumes now reach the `Disk` section (`notify_empty=False`, as `crc.py:517-519` sends the disk message only when non-empty). The live plan keeps `related` empty; the live report comes from `Result.related`. No behaviour change on the adapter path (`SpotVM.delete()` does not use `plan()`).
+- **Parity harness** (`tests/test_oci_spot_instances_parity.py:763-771`): correct and stronger, not weaker. A dry run now asserts on `plan()` output only, which is what the engine runs; the dry-run `apply()` path is still asserted in `tests/test_oci_spot_instances.py:127-135`, which round 1 also extended with `plan.related["Disk"] == ("v2",)`.
+- **Pending bug table**: the high-risk row now leads, and the four tightened citations match `git show main:crc/oci/spot_vm.py` (`:92-94` `_tags_protect` untagged, `:144-149` attachment listing, `:216-225` `get_volume` failure, `:226-231` volume tag check). I also checked `main:crc/oci/_base.py:14`, `:33`, `:35-40`, `:65-84` (`:79-84` fallback).
+
+### Independent review
+
+- **Parity, adapter.** `SpotVM.delete()` / `_process` (`crc/oci/spot_vm/adapter.py:145-190`) follow `main:crc/oci/spot_vm.py:244-330` line by line: client creation order (compute, then block storage, then `list_instances`), the region error split (`CONNECTIVITY_ERRORS` vs `Exception`), check order, attachment failure, terminate with `preserve_boot_volume=False`, wait only with leftovers, append before volume deletes, dry-run volume listing, and the summary. The delegated helpers match main's inline code: `policy.should_skip_by_tags` (exception any, notags all with an empty spec giving False, like main's `if self.notags and all(...)`), `policy.filter_tags_all_keys`, `policy.state_in` (exact membership), `policy.oci_is_managed_or_oke_node` (same markers, non-dict namespaces and metadata ignored), `policy.effective_age` (`retention_age or age`), `core_age.validated_retention_age` (fail closed) and `core_age.is_old` (same `MAX_AGE` override). `clock().astimezone(created.tzinfo)` equals main's `datetime.now(tz=created.tzinfo)`. The oracle `tests/legacy/oci_spot_vm.txt` is byte-identical to `git show main:crc/oci/spot_vm.py`.
+- **Safety (CLEANUP_SAFETY.md).** `plan()` makes only reads (list, attachments, `get_volume` in a dry run); `terminate_instance` and `delete_volume` are only reached from `apply()` / `terminate()` (SAF-040 order kept, SAF-046 attachment failure keeps the instance, SAF-044 volume tag check kept, SAF-041 fail-closed custom age tag, positive age required by both the adapter and the factory). Mutation check: replacing the leftover volume tag check in `SpotVmCleaner.terminate()` with `True` fails 20 tests in `tests/test_oci_spot_instances_parity.py` (reverted). No safety test changed: `tests/test_oci_spot_vm.py` is untouched in the diff.
+- **Tests.** Assertions are on outcomes (SDK call sequences, results, log records, stdout, errors); no vacuous test found. The wait loop is driven by a fake monotonic clock, so the timeout case runs instantly.
+- **Architecture and typing.** `make check` covers import-linter, ARCH-001..005 and mypy strict on the new package; the ratchet only shrank (`crc/oci/spot_vm.py` and `crc.oci.spot_vm` removed from `pyproject.toml`, nothing added). `crc/oci/README.md` `### spot_vm`-related lines and `crc/oci/spot_vm/README.md` are accurate.
+
+### New findings
+
+- **NIT (left)** — `crc/oci/spot_vm/cleaner.py:169-177` with `crc/core/report.py:121-123`: `Candidate.id` is the OCID, so once the engine is wired a dry-run report lists OCIDs while a live report (`Result.succeeded`, display names) and main's dry run (`instance_names_to_delete`) list display names. Same shape as OCI-2 (`crc/oci/vm.py:173-177`) and the open item in `docs/refactor/STATUS.md:132-133`; `crc.py` does not use the engine yet, so nothing changes today. Decide at the wiring rung (either `Candidate.id = display_name` or a name-based `from_plan`). The parity harness compares `[c.name for c in plan.candidates]`, so it does not cover this.
+- **NIT (left)** — `crc/oci/spot_vm/cleaner.py:129`: `Failure.id` is the OCID, while `crc/oci/vm.py:204` and `crc/oci/disk.py:230` use the display name. Cosmetic; `Failure` is not reported by `crc.py` today.
+- **NIT (left)** — `crc/oci/spot_vm/cleaner.py:124`, `:218-220`: `_clients_of()` runs outside the per-candidate `try`; it only calls the factory when `apply()` receives a plan from another cleaner instance (the engine uses one instance, `crc/core/engine.py:94-100`), and a factory error would then abort the remaining candidates.
+- **New pending bug** — serial terminate waits (up to 180 s per instance with volumes) can push the run past the job timeout: added to `docs/refactor/bugs/pending/OCI-3.md` (`main:crc/oci/spot_vm.py:27-28`, `:177-207`, `:293-295`).
+
+No blocking problem found; no code changed in round 2.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`: ruff, mypy, lint-imports and pytest all green. **pytest: 4910 passed** (same as the coding summary and round 1; 4681 on the lane base, +229).
+
+ROUND 2 VERDICT: APPROVE
