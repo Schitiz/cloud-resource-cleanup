@@ -3,13 +3,13 @@
 ## Purpose
 
 Top-level package of the cleanup tool. The CLI entry point is `crc.py` in the repository root
-(same name as this package; argument parsing and validators live in `cli/`, `crc.py` keeps the `CRC` class, `main()` and the constants); the cloud code lives in the sub-packages. Direct modules:
+(same name as this package; argument parsing, validators and the `CRC` class live in `cli/`, `crc.py` keeps `main()` and re-exports the adapter names, the constants and `CRC`); the cloud code lives in the sub-packages. Direct modules:
 
 - `service.py`: `Service`, the base class of every cleaner (age gate, custom age tag, `is_old`).
   Age handling delegates to `crc/core/age.py`.
 - `notifications.py`: compatibility shim re-exporting the Slack helpers that moved to `notify/slack.py`.
 - `utils.py`: `init_logging`.
-- `cli/` (refactored, see `crc/cli/README.md`): the argparse definition (`get_argparser`) and the input validators that `crc.py` imports back under the same names.
+- `cli/` (refactored, see `crc/cli/README.md`): the argparse definition (`get_argparser`), the input validators and the `CRC` class (split into notify, VM and resource mixins) that `crc.py` imports back under the same names.
 - `core/` (refactored, see `crc/core/README.md`), `notify/` (refactored, see `crc/notify/README.md`), `aws/`, `azu/`, `gcp/`, `oci/` (legacy, one README each).
 
 `crc/__init__.py` holds only a copyright comment. The modules directly in `crc/` are legacy,
