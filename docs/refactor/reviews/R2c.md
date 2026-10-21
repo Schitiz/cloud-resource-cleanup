@@ -95,3 +95,68 @@ Checked all 11 new `README.md` files (`crc/README.md`, `crc/aws/README.md`,
 Test count: 984 before R2c (`27e6870`), 994 on `41b5dfe`, 996 after review fixes.
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 27e6870..HEAD` (commits `41b5dfe` and round 1 `2d63513`). `crc.py`,
+`crc/aws`, `crc/azu`, `crc/gcp`, `crc/oci` are identical to `main` apart from the new
+`README.md` files (`git diff main --stat`), so legacy behaviour parity holds.
+
+### Round 1 fixes assessment
+
+- `directories_with_files` (`tests/archtest/readmes.py:116-132`): correct. The ancestor walk
+  stops at the root, skips only `README_EXEMPT_DIRS`, and excluded trees are pruned before
+  they are visited. On this checkout it returns the 13 directories that `git ls-files` implies,
+  minus the exempt ones (`.`, `.cursor`, `.cursor/skills`) and excluded ones (`.claude`, `.github`).
+- `.cursor/skills` in `README_EXEMPT_DIRS`: needed after the ancestor walk; matches the R2c brief.
+- New self-tests are not vacuous: `test_arch002_selftest_fires_on_parent_directory_without_direct_files`
+  fails on the pre-fix walk, and `test_arch002_selftest_every_repo_directory_fires_when_readme_removed`
+  hides the real `README.md` from both `os.walk` and `Path.is_file`, so `docs/` must fire through
+  the ancestor walk. No test was deleted or weakened. `test_arch002_selftest_ignores_legacy_only_packages`
+  became `..._legacy_only_package_skips_symbol_sync` plus `..._still_needs_readme` and
+  `..._needs_sections`, which is stricter and was in the R2c brief. ARCH-002 tests are not in
+  `safety_lock.json`.
+
+### BLOCKING (fixed)
+
+1. Unjustified `# type: ignore[no-untyped-def]` on `fake_walk` in round 1's
+   `test_arch002_selftest_every_repo_directory_fires_when_readme_removed` (checklist section 5).
+   Replaced with a real return type `Iterator[tuple[str, list[str], list[str]]]`
+   (`tests/archtest/test_arch002_readmes.py`). No behaviour change; mypy strict passes.
+
+### New bug recorded
+
+- `BUG-040` (low, cosmetic): `--cloud all --resource snapshot` runs AWS
+  `Snapshot(age_days=90).delete()` once per cloud, because the snapshot branch is inside
+  `for cloud in clouds` (`main:crc.py:39`, `:1532`, `:1544`, `:1629-1643`). Added to
+  `docs/refactor/BUGS.md` (now 40 rows, low 22).
+
+### Citations re-checked with `git show main:<path>`
+
+`BUG-001` (`crc/gcp/ip.py:91-95`), `BUG-002`/`BUG-003`/`BUG-010` (`crc/azu/vm.py:134`, `:257-259`,
+`:293-294`), `BUG-007`/`BUG-008`/`BUG-014`/`BUG-015` (`crc/aws/kms.py:131-158`), `BUG-009`
+(`crc.py:1629-1647`), `BUG-011` (`crc/aws/elastic_ips.py:89-109`, `:125-127`; `all(<bool>,)` raises
+`TypeError` on the first tag once `notags` is set), `BUG-017` (`crc.py:799-800`, `:823`), `BUG-018`
+and `BUG-035`/`BUG-036` (`crc.py:1363-1397`, `:1546-1552`), `BUG-019` (`crc/azu/disk.py:16`,
+`:124-126`). All correct. SAF IDs cited in the cloud READMEs (SAF-005, -014, -028, -038, -041,
+-042, -044 spot-checked) exist in `CLEANUP_SAFETY.md` with the stated meaning.
+
+### NIT (left)
+
+1. `crc/azu/README.md` Purpose says the cleaners work "in one resource group"; `VM` lists
+   subscription-wide (`BUG-002`, cited in the same README). Wording only.
+2. `README_EXCLUDED_DIRS` matches by basename anywhere in the tree, so a future directory named
+   `logs`, `build` or `dist` (for example under `docs/`) would escape the section check. `crc/`
+   packages with non-legacy modules are still caught through `package_dirs`.
+3. The ARCH-002 repo test walks the disk, not `git ls-files`: an untracked, non-excluded directory
+   (for example `*.egg-info`, `.hypothesis`) fails `make check` locally. Already listed in STATUS.md.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check` on Python 3.12.3
+(3.11 not installed here): `ruff check .` all checks passed; `mypy` no issues in 71 source files;
+`lint-imports` 3 kept, 0 broken; `pytest -q` 996 passed.
+
+Test count: 984 before R2c, 996 after round 1, 996 after round 2 (no tests added or removed).
+
+ROUND 2 VERDICT: APPROVE

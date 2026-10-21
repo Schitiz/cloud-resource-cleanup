@@ -1,6 +1,7 @@
 """ARCH-002 check and self-tests."""
 
 import os
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -125,7 +126,9 @@ def test_arch002_selftest_every_repo_directory_fires_when_readme_removed(
         target_readme = target / "README.md"
         where = relpath(REPO_ROOT, target)
 
-        def fake_walk(top: Path, _target: Path = target):  # type: ignore[no-untyped-def]
+        def fake_walk(
+            top: Path, _target: Path = target
+        ) -> Iterator[tuple[str, list[str], list[str]]]:
             for current, dirnames, filenames in real_walk(top):
                 if Path(current) == _target:
                     filenames = [f for f in filenames if f != "README.md"]

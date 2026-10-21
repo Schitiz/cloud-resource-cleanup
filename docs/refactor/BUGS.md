@@ -64,10 +64,11 @@ Related: `docs/refactor/FILTER_VARIANTS.md` (how each module filters, section 7 
 | BUG-037 | `MAX_AGE` is set in `os.environ` and deleted only at the end of `main()`, not in a `finally`, so any exception leaves it set | `crc.py:1421-1424`, `:1645-1647` | yes | cosmetic | low | R2b | open |
 | BUG-038 | `clouds == "all"` is always False after `clouds` became a list, so the scan list comes from the dead else branch | `crc.py:1439` | yes | cosmetic | low | R2b | open |
 | BUG-039 | An `--operation_type` other than `delete` or `stop` silently does nothing for `vm` (unreachable via argparse `choices`) | `crc.py:1576-1584` | yes | cosmetic | low | R2b | open |
+| BUG-040 | `--cloud all --resource snapshot` runs the AWS `Snapshot(age_days=90).delete()` once per cloud (4 times): the snapshot branch sits inside `for cloud in clouds` and ignores `cloud`; later passes repeat the AWS scan and the dry-run message | `crc.py:39`, `:1532`, `:1544`, `:1629-1643` | yes | cosmetic | low | R2c round 2 | open |
 
 ## Counts
 
-39 rows: critical 2, high 7, medium 9, low 21. All open.
+40 rows: critical 2, high 7, medium 9, low 22. All open.
 
 ## Notes
 
