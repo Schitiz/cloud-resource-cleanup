@@ -101,10 +101,12 @@ class SpotVmCleaner:
                 except Exception as e:
                     log_instance_error(getattr(instance, "display_name", "?"), e)
         if context.dry_run:
-            log_summary(
-                [c.name for c in candidates],
-                [v for c in candidates for v in c.extra["volumes"]],
-                dry_run=True,
+            volumes = [v for c in candidates for v in c.extra["volumes"]]
+            log_summary([c.name for c in candidates], volumes, dry_run=True)
+            return Plan(
+                candidates=tuple(candidates),
+                skipped=tuple(skipped),
+                related={VOLUMES_LABEL: tuple(volumes)},
             )
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
 

@@ -762,9 +762,13 @@ def _run_cleaner(
     try:
         cleaner = build_spot_vm_cleaner(context)
         plan = cleaner.plan(context)
-        result = cleaner.apply(plan, context)
-        acted = list(result.succeeded)
-        volumes = list(result.related["Disk"])
+        if case.dry_run:
+            acted = [c.name for c in plan.candidates]
+            volumes = list(plan.related["Disk"])
+        else:
+            result = cleaner.apply(plan, context)
+            acted = list(result.succeeded)
+            volumes = list(result.related["Disk"])
     except Exception as e:
         error = (type(e).__name__, str(e))
     logs = [(r.name, r.levelno, r.getMessage()) for r in caplog.records]

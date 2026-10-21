@@ -14,3 +14,27 @@
   - `docs/refactor/FILTER_VARIANTS.md`, `crc/oci/spot_vm.py` row in section 5 and the OCI OKE skip paragraph: the module is now `crc/oci/spot_vm/` (`decide.py`) and filters through `policy.state_in`, `policy.oci_is_managed_or_oke_node`, `policy.should_skip_by_tags`, `policy.filter_tags_all_keys`, `policy.effective_age` (line numbers still cite `main`, frozen in `tests/legacy/oci_spot_vm.txt`); no variant changed, so no new policy function was needed and `crc/core/**` is untouched.
   - `tests/README.md` and `tests/legacy/README.md`: list `test_oci_spot_instances.py`, `test_oci_spot_instances_parity.py` and the `oci_spot_vm.txt` oracle.
   - `docs/refactor/STATUS.md`: record rung OCI-3; `docs/refactor/bugs/pending/README.md`: list `OCI-3.md`.
+
+## Round 1 (Argon)
+
+### Findings
+
+- **BLOCKING (fixed)** — `crc/oci/spot_vm/cleaner.py:103-110`, `tests/test_oci_spot_instances_parity.py:763-771`, `tests/test_oci_spot_instances.py:127-135`: In `crc/core/engine.py:99-105`, a dry run invokes only `cleaner.plan(context)` and constructs the report via `Report.from_plan(...)`, which populates related resource sections from `plan.related`. `SpotVmCleaner.plan()` tag-checked leftover volumes in a dry run and logged them via `log_summary`, but returned `Plan(candidates=tuple(candidates), skipped=tuple(skipped))` with an empty `related` mapping (`related={}`), dropping the `"Disk"` volumes from `Plan.related`. In addition, `_run_cleaner` in `tests/test_oci_spot_instances_parity.py` called `cleaner.apply(plan, context)` even on `case.dry_run=True` (contrary to its own module docstring at lines 5–6), which hid the missing `plan.related["Disk"]`. Fixed `SpotVmCleaner.plan()` to populate `related={VOLUMES_LABEL: tuple(volumes)}` in dry-run mode, updated `_run_cleaner` to read `acted` and `volumes` from `plan` without calling `apply()` when `case.dry_run` is `True`, and added an assertion on `plan.related["Disk"]` in `test_dry_run_plan_tag_checks_volumes_and_apply_returns_them`.
+- **NIT (fixed)** — `docs/refactor/bugs/pending/OCI-3.md:12-27`: Moved the single `high`-risk row (unconditional deletion of attached block volumes unless protected by `exception_tags`/`notags`) to the top of the table so rows are ordered by risk (`high` → `medium` → `low`) per `docs/refactor/BUGS.md`, and tightened four `main:crc/oci/spot_vm.py` line citations (`:92-94`, `:144-149`, `:216-225`, `:226-231`).
+- **NIT (left)** — `crc/oci/spot_vm/cleaner.py:153`: If `instance.time_created` is missing (`AttributeError` inside `skip_reason`), the error is caught by the per-instance `except Exception` in `SpotVmCleaner.plan()` (`cleaner.py:101-102`) rather than inside `consider()`, so `SpotVmCleaner.plan()` logs the same `"Error processing OCI preemptible instance ..."` message and omits the instance from `candidates` just like `main`, though a direct caller of `consider()` would see the `AttributeError` propagate.
+
+### Checklist Verification
+
+1. **Behaviour parity with `git show main:crc/oci/spot_vm.py`**: Verified every SDK call (`get_all_regions`, `get_compute_client`, `get_blockstorage_client`, `list_instances`, `list_volume_attachments`, `terminate_instance(..., preserve_boot_volume=False)`, `get_instance` poll loop, `get_volume`, `delete_volume`), filter decision (`policy.state_in` with `["RUNNING", "STOPPED"]`, `is_preemptible`, `policy.oci_is_managed_or_oke_node`, `policy.should_skip_by_tags` with untagged returning `False`, `policy.filter_tags_all_keys`), age decision (`core_age.require_positive_age`, `core_age.validated_retention_age` fail-closed, `policy.effective_age`, `core_age.is_old`, naive `time_created` coerced to local tz), log lines, error handling, and dry-run path.
+2. **Oracle & parity test**: `tests/legacy/oci_spot_vm.txt` is byte-identical to `git show main:crc/oci/spot_vm.py` (`diff -u` empty). Verified parity test strength with a deliberate one-line change in `crc/oci/spot_vm/decide.py` (`filter_tags_all_keys` → `filter_tags_any_key`), which caused 3 failures in `tests/test_oci_spot_instances_parity.py`, then reverted.
+3. **Architecture & typing**: `SpotVmCleaner` implements `Cleaner` and is registered via `@register("oci", "spot_instances")`; `plan()` makes zero mutating calls (`ARCH-005` passes); `policy.*` functions match `docs/refactor/FILTER_VARIANTS.md`; OCI SDK is behind typed `Protocol`s (`ComputeClient`, `BlockClient`); `crc/oci/spot_vm.py` / `crc.oci.spot_vm` removed from both ratchet lists in `pyproject.toml` with nothing added and only the per-SDK `oci` mypy override retained.
+4. **Boundaries & docs**: `crc.py` and all other cleaners are untouched; `crc/oci/README.md` (`### spot_vm` section) and `crc/oci/spot_vm/README.md` match `__all__` (`ARCH-002` passes); no files forbidden by the lane rules were modified.
+5. **Pending bugs**: All 16 rows in `docs/refactor/bugs/pending/OCI-3.md` verified against `git show main:crc/oci/spot_vm.py`, `git show main:crc/oci/_base.py`, and `git show main:crc/oci/connectivity.py`.
+6. **Gates & test count**:
+   - `ruff check .`: passed
+   - `mypy`: passed (111 source files)
+   - `lint-imports`: passed (5 kept, 0 broken)
+   - `pytest -q`: **4910 passed** (218 in `tests/test_oci_spot_instances_parity.py`, 11 in `tests/test_oci_spot_instances.py`, 15 in `tests/test_oci_spot_vm.py`).
+
+VERDICT: APPROVE
+

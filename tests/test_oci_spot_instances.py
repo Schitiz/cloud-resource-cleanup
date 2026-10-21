@@ -128,6 +128,7 @@ def test_dry_run_plan_tag_checks_volumes_and_apply_returns_them() -> None:
     client = FakeClient([inst("a")], {"a": ["v1", "v2"]}, {"v1": {"keep": "1"}})
     cleaner = make_cleaner(client, exception_tags={"keep": ["1"]})
     plan = cleaner.plan(context(dry_run=True))
+    assert plan.related["Disk"] == ("v2",)
     result = cleaner.apply(plan, context(dry_run=True))
     assert result.succeeded == ("name-a",)
     assert result.related["Disk"] == ("v2",)
