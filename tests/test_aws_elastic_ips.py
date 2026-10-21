@@ -133,6 +133,15 @@ def test_apply_empty_plan_calls_nothing() -> None:
     assert aws.calls == []
 
 
+def test_apply_skips_region_on_connectivity_error() -> None:
+    aws = Aws({"r1": [tagged("1.1.1.1", a="b")], "r2": [tagged("2.2.2.2", a="b")]})
+    subject = cleaner(aws)
+    plan = subject.plan(context())
+    aws.errors["r1"] = EndpointConnectionError(endpoint_url="https://ec2.example")
+    result = subject.apply(plan, context())
+    assert result.succeeded == ("2.2.2.2",)
+
+
 def test_notags_raises_as_on_main() -> None:
     aws = Aws({"r1": [tagged("1.1.1.1", a="b")]})
     with pytest.raises(TypeError, match="'bool' object is not iterable"):

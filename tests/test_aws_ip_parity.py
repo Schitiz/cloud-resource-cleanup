@@ -266,6 +266,16 @@ CASES = [
         filter_tags={"a": []},
     ),
     Case(
+        "tag-key-without-value-value-filter-raises",
+        {"us-west-2": [eip("1.1.1.1", [{"Key": "a"}])]},
+        filter_tags={"a": ["v"]},
+    ),
+    Case(
+        "tag-key-without-value-exception-value-filter-raises",
+        {"us-west-2": [eip("1.1.1.1", [{"Key": "a"}])]},
+        exception_tags={"a": ["v"]},
+    ),
+    Case(
         "describe-regions-client-error-propagates",
         {"us-west-2": [eip("1.1.1.1", ENV)]},
         regions_error=client_error("DescribeRegions"),
@@ -466,7 +476,7 @@ def test_cleaner_protocol_matches_main(
         if len(case.regions) <= 1:
             assert new.logs == old.logs[:-1]
             assert _without_client(new.calls) == _without_client(old.calls)
-    elif new.error[0] == "ClientError" or case.id.startswith("release"):
+    else:
         assert new_releases == old_releases
 
 
@@ -505,6 +515,11 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
     ("describe-regions-client-error-propagates", lambda o: o.error is not None and o.deleted == []),
     ("describe-regions-connection-error-falls-back", lambda o: o.deleted == ["1.1.1.1"]),
     ("tag-without-key-with-filter", lambda o: o.error == ("KeyError", "'Key'")),
+    ("tag-key-without-value-value-filter-raises", lambda o: o.error == ("KeyError", "'Value'")),
+    (
+        "tag-key-without-value-exception-value-filter-raises",
+        lambda o: o.error == ("KeyError", "'Value'"),
+    ),
     ("tags-none-with-filter-raises", lambda o: o.error is not None and o.error[0] == "TypeError"),
     ("missing-allocation-id", lambda o: o.error == ("KeyError", "'AllocationId'")),
     ("filter-case-sensitive", lambda o: o.deleted == []),
@@ -533,6 +548,7 @@ SKIP_TAGS: Sequence[Any] = [
     PROD,
     tags({"owner": "qa", "env": "test"}),
     [{"Value": "v"}],
+    [{"Key": "owner"}],
 ]
 SKIP_SPECS: Sequence[tuple[Any, Any]] = [
     ({}, {}),

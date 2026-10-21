@@ -78,8 +78,10 @@ def _log_summary(deleted: Sequence[str], *, dry_run: bool) -> None:
         )
 
 
-def _pair(tag: Mapping[str, Any]) -> dict[str, Any]:
-    return {tag["Key"]: tag.get("Value", "")}
+def _pair(tag: Mapping[str, Any], spec: TagSpec | None) -> dict[str, Any]:
+    key = tag["Key"]
+    value = tag["Value"] if spec and key in spec and spec[key] else ""
+    return {key: value}
 
 
 class ElasticIpCleaner:
@@ -181,7 +183,7 @@ class ElasticIpCleaner:
         if not self._exception_tags and not self._notags:
             return False
         for tag in tags:
-            pair = _pair(tag)
+            pair = _pair(tag, self._exception_tags)
             if self._exception_tags and policy.aws_eip_should_skip(pair, self._exception_tags):
                 return True
             if self._notags:
@@ -194,7 +196,7 @@ class ElasticIpCleaner:
             return True
         matched = False
         for tag in tags:
-            if policy.filter_tags_any_key(_pair(tag), self._filter_tags):
+            if policy.filter_tags_any_key(_pair(tag, self._filter_tags), self._filter_tags):
                 matched = True
         return matched
 
