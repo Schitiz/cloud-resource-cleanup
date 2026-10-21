@@ -19,6 +19,7 @@ change.
 | `ARCHITECTURE.md` | Dependency rules, Cleaner contract, legacy ratchet, how to add a cleaner |
 | `CLEANUP_SAFETY.md` | Destructive-cleanup invariants. Authoritative for safety |
 | `docs/refactor/STATUS.md` | Which rung is done, open issues |
+| `tests/archtest/README.md` | Rule IDs ARCH-001..005 and SAF-LOCK, how failures are fixed |
 | `docs/refactor/SKILL_SELECTION.md` | Why the project skill is shaped as it is |
 | `README.md` | User-facing CLI documentation |
 
@@ -27,6 +28,10 @@ change.
 ```
 make check     # ruff check ., mypy (crc/ and tests/), lint-imports, pytest -q
 ```
+
+CI (`.github/workflows/ci.yml`) runs the same `make check` on Python 3.11. A failing
+`ARCH-xxx` or `SAF-LOCK` test ends with a `REMEDIATION:` paragraph: follow it, do not
+edit `tests/archtest/` or its baseline and lock files to make it pass.
 
 Setup: `pip install -r requirements.txt -r requirements-dev.txt` on Python 3.11.
 `make check` must be green before every commit. A rung must also keep the

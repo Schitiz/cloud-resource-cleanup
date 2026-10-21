@@ -73,6 +73,12 @@ the same change, and the refactored code must then pass ruff (complexity 10,
 statements 40, args 6) and mypy strict. Narrow the lists as modules move;
 never widen them.
 
+Enforced by `tests/archtest` (rule IDs in `tests/archtest/README.md`): ARCH-001 ratchet
+only shrinks (baseline in `legacy_baseline.txt`), ARCH-002 package README sections and
+symbol sync, ARCH-003 no `re`, wall clock, env reads, `print` or `sys.exit` in cloud
+packages, ARCH-004 files of at most 400 lines, ARCH-005 read-only `plan()`, and SAF-LOCK
+(`SAF-NNN` tags in `CLEANUP_SAFETY.md` tied to hashed tests in `safety_lock.json`).
+
 ## Add a resource cleaner
 
 1. Read `CLEANUP_SAFETY.md` and the nearest existing cleaner in the same cloud.
