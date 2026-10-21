@@ -10,7 +10,7 @@ Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.
 
 - `_base.py`: `get_all_regions` (region list via `describe_regions`)
 - `connectivity.py`: `log_skipped_region` (unreachable regions are logged and skipped)
-- `disk.py`: `Disk`: deletes available EBS volumes (`delete_volume`); tags, regex, `yb_task` and Kubernetes skips, CloudWatch detach age; opt-in `--cloud aws --resource disk`
+- `disk/`: package (`__init__.py` keeps the import path `crc.aws.disk`): `DiskCleaner` (registered as `aws` / `disk`) and the `Disk` adapter: deletes available EBS volumes (`delete_volume`); tags, regex, `yb_task` and Kubernetes skips, CloudWatch detach age; opt-in `--cloud aws --resource disk`. See `crc/aws/disk/README.md`
 - `elastic_ips.py`: `ElasticIpCleaner` (registered as `aws` / `ip`) and the `ElasticIPs` adapter: releases unassociated, tagged Elastic IPs (`release_address`)
 - `keypairs.py`: `KeyPairCleaner` (registered as `aws` / `keypair`) and the `KeyPairs` adapter: deletes key pairs by name regex (`delete_key_pair`)
 - `kms.py`: `KmsCleaner` (registered as `aws` / `kms`) and the `Kms` adapter: schedules key deletion (`schedule_key_deletion`) for keys matching description and user ARN
@@ -83,6 +83,10 @@ Safety Invariants: plan() only describes (a dry run is plan() alone and also per
 
 Extension Rules: changes need tests/test_aws_spot_instance_requests_parity.py (oracle tests/legacy/aws_spot_instance_requests.txt, a frozen copy of main, never edit it), tests/test_aws_spot_instance_requests_cleaner.py and tests/test_aws_spot_instance_requests.py to stay green.
 
+### disk
+
+The EBS disk cleaner is a subpackage with its own README (crc/aws/disk/README.md) that lists its public names. It exports the Cleaner (registered as aws / disk), the legacy adapter class that crc.py calls, the runtime dataclass and the registry factory, with the typed Protocols of the boto3 EC2 and CloudWatch calls it uses in client.py.
+
 ## Safety Invariants
 
 - Authoritative text: `CLEANUP_SAFETY.md`. Applicable IDs: SAF-006 to SAF-013 (age gates, shared by all clouds), SAF-001, SAF-003, SAF-004, SAF-014, SAF-015, SAF-016, SAF-017 to SAF-020, SAF-025, SAF-026 to SAF-037.
@@ -97,6 +101,10 @@ Extension Rules: changes need tests/test_aws_spot_instance_requests_parity.py (o
 - VMs (AWS-3): `plan()` only calls `describe_instances` and `describe_network_interfaces`; `terminate_instances` and `stop_instances` are called from `apply()` / `apply_region()` (and `VM.delete()` / `VM.stop()` through them) only and never in a dry run. The only server side filters are the instance state (default `running`) and `tag:key` filters (BUG-021); an instance needs a `Tags` key (BUG-020) and a `Name` tag, exception tags (any key, checked tag by tag) and notags (all keys) skip it, and its age is the attach time of its first network interface compared with `--age` or the fail-open custom age tag (`core.age.is_old`, `policy.effective_age`, SAF-006 to SAF-010, BUG-004): an empty age matches every instance and `MAX_AGE` can shorten it. Any error while judging one instance is logged and keeps the instance (fail closed), including connectivity errors; a `describe_instances` connectivity error skips the region (SAF-001, `describe_regions` falls back to the static list, other errors propagate, SAF-004). Termination and stop errors are isolated per instance (logged, instance not recorded). A dry run of `stop` records instance ids, not names (AWS-3 entries in `docs/refactor/bugs/pending/AWS-3.md`). `VM.delete()` keeps the call order of `main` (per region: client, describe, per-instance decision and NIC lookup, then the calls). The Cleaner path lists every region before it mutates, so with several regions a listing error is raised before earlier regions are terminated and its mutating log lines come after all listing lines; the closing summary is logged by `plan()` in a dry run and by `apply()` otherwise. Quirks: BUG-004, BUG-020, BUG-021 and the AWS-3 entries.
 - Do not call real cloud APIs in tests; mock every SDK client.
 
+### disk
+
+- AWS-4: plan() only lists volumes (describe_volumes paginator) and queries CloudWatch get_metric_data; delete_volume is called from apply() and apply_region() only and never in a dry run. An age gate is required (age and/or detach_age), CreateTime is compared with a floor that ignores MAX_AGE, and a missing CreateTime, invalid custom age tag or incomplete CloudWatch answer keeps the volume (SAF-006, SAF-010, SAF-014). Region errors never propagate (connectivity and unauthorised errors skip the region, others are logged and flagged); describe_regions errors other than connectivity propagate. The adapter keeps the call and log order of main; the Cleaner path lists every region before deleting. Quirks: BUG-004, BUG-022 and docs/refactor/bugs/pending/AWS-4.md.
+
 ## Extension Rules
 
 1. Do not edit these modules to add features or fix bugs in a refactor rung; behaviour fixes are
@@ -107,3 +115,7 @@ Extension Rules: changes need tests/test_aws_spot_instance_requests_parity.py (o
 4. Refactoring a module means removing it from the ruff `extend-exclude` and mypy override lists in
    the same change (the legacy ratchet only shrinks), then updating this README and its symbol list.
 5. Record every new bug or quirk in `docs/refactor/BUGS.md` with its `main` file:line.
+
+### disk
+
+Disk changes need tests/test_aws_disk_parity.py (oracle tests/legacy/aws_disk.txt, a frozen copy of main, never edit it), tests/test_aws_disk_cleaner.py and tests/test_aws_disk.py to stay green.
