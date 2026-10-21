@@ -111,6 +111,12 @@ def _cases() -> list[Case]:
         Case("non-string-name-with-filter", {"r": [addr(None)]}, filter_regex=["a"]),
         Case("non-string-filter-entry", ONE, filter_regex=[1]),
         Case("non-string-exception-entry", ONE, exception_regex=[1]),
+        Case(
+            "non-string-exception-evaluated-when-filter-misses",
+            ONE,
+            filter_regex=["zzz"],
+            exception_regex=[1],
+        ),
         Case("non-string-name-in-use-skipped", {"r": [addr(None, "IN_USE")]}, filter_regex=["a"]),
         Case("address-without-name", {"r": [types.SimpleNamespace(status="RESERVED")]}),
         Case("address-without-status", {"r": [types.SimpleNamespace(name="a")]}),
@@ -405,6 +411,10 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
     ("non-string-name-no-filter", lambda o: o.error is None and o.deleted == [None]),
     ("non-string-name-with-filter", lambda o: o.error is not None and o.error[0] == "TypeError"),
     ("non-string-filter-entry", lambda o: o.error is not None and o.error[0] == "TypeError"),
+    (
+        "non-string-exception-evaluated-when-filter-misses",
+        lambda o: o.error is not None and o.error[0] == "TypeError",
+    ),
     ("non-string-name-in-use-skipped", lambda o: o.error is None and o.deleted == []),
     ("address-without-name", lambda o: o.error is not None and "name" in o.error[1]),
     ("address-without-status", lambda o: o.error is not None and "status" in o.error[1]),
