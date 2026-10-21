@@ -136,17 +136,36 @@ ignore_errors = true
 
 [tool.importlinter]
 root_package = "crc"
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "Cloud packages are independent"
 type = "independence"
 modules = ["crc.aws", "crc.azu", "crc.gcp", "crc.oci"]
 
-# TODO(core rung): once crc/core exists, add the layer contract, for example:
-#   [[tool.importlinter.contracts]]
-#   name = "Core never imports cloud packages"
-#   type = "forbidden"
-#   source_modules = ["crc.core"]
-#   forbidden_modules = ["crc.aws", "crc.azu", "crc.gcp", "crc.oci"]
-# and a "forbidden" contract keeping crc.core off cloud SDKs (boto3, azure,
-# google, oci) via allow_indirect_imports / external forbidden modules.
+[[tool.importlinter.contracts]]
+name = "Core never imports cloud packages or services"
+type = "forbidden"
+source_modules = ["crc.core"]
+forbidden_modules = [
+    "crc.aws",
+    "crc.azu",
+    "crc.gcp",
+    "crc.oci",
+    "crc.notifications",
+    "crc.service",
+]
+
+[[tool.importlinter.contracts]]
+name = "Core never imports cloud or telemetry SDKs"
+type = "forbidden"
+source_modules = ["crc.core"]
+forbidden_modules = [
+    "boto3",
+    "botocore",
+    "azure",
+    "google",
+    "oci",
+    "slack_sdk",
+    "influxdb_client",
+]
