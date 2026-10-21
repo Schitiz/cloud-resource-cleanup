@@ -7,7 +7,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from crc.aws.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
-from crc.aws.vm_api import VmScanClient, VmSession
+from crc.aws.vm.client import VmScanClient, VmSession
 
 ScanClientFactory = Callable[[str], VmScanClient]
 SessionFactory = Callable[[], VmSession]

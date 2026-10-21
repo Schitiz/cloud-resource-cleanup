@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from crc.aws.vm import VM, VmRuntime
-from crc.aws.vm_cleaner import VmCleaner, VmSettings
+from crc.aws.vm.cleaner import VmCleaner, VmSettings
 from crc.core.cleaner import Candidate, Operation, Plan, RunContext
 
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=datetime.UTC)
