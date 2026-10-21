@@ -13,7 +13,9 @@ cleaner calls it yet (wiring is one rung per resource).
 The contracts cleaners plug into live here too: `crc.core.cleaner` (the `Cleaner` protocol
 and its frozen DTOs), `crc.core.registry` (decorator registration by cloud and kind) and
 `crc.core.report` (the report model that reproduces what `crc.py` sends to Slack and
-InfluxDB). Nothing is registered or wired yet.
+InfluxDB). `crc.core.engine` runs the registered cleaners of a selection and
+`crc.core.selection` holds the `--cloud` / `--resource` expansion and opt-in gates of
+`crc.py main()`. Nothing is registered or wired yet.
 
 ## Public API
 
@@ -118,6 +120,22 @@ Report (module report.py). Pure model and text builders; sending stays in the no
 - `SNAPSHOT`: label of snapshots.
 - `SPOT_INSTANCE_REQUEST`: label of AWS spot requests and their instances.
 
+Selection (module selection.py). Pure port of crc.py main()'s cloud and resource rules.
+
+- `build_selection()`: expand cloud, resource and operation into the ordered (cloud, kind) pairs plus warnings; raises the ValueError messages of crc.py (stop only for vm, --resource all needs --cloud all, --slack_user_label, KMS options, the AWS EBS opt-in breaker).
+- `Selection`: the ordered pairs (items) and the warning texts of skipped pairs (warnings).
+- `SelectionOptions`: KMS description and user, slack_notify_users and slack_user_label validated with the selection.
+- `CLOUDS`: the --cloud all order of crc.py.
+- `RESOURCES`: the --resource all order of crc.py (spot resources and vpc are not part of it).
+- `EXTRA_RESOURCES`: resources selectable by name only (vpc, spot_instance_requests, spot_instances).
+
+Engine (module engine.py). Orchestration only; Slack and Influx senders are injected.
+
+- `run()`: for each selected pair build the cleaner from a Registry, check supports, plan(), apply() only when not a dry run, build the Report and call the notifiers in order; cleaner errors propagate.
+- `RunOutcome`: cloud, kind, plan, result (None in a dry run) and report of one cleaner.
+- `Notifier`: protocol with name, fail_open and send(report, context); a fail_open notifier error is logged and swallowed, any other propagates.
+- `KIND_LABELS`: report label of each resource kind.
+
 ## Safety Invariants
 
 - `is_old` with an empty age matches every resource (SAF-006). Destructive callers must
@@ -136,6 +154,12 @@ Report (module report.py). Pure model and text builders; sending stays in the no
 - Report text and Influx data keep `crc.py` strings exactly (label spelling, "disks" in owner
   pings, `Dry Run` wording); tests compare against `crc.py` itself. Do not tidy them in a
   refactor rung.
+- The engine calls `apply()` only when `context.dry_run` is False, has no catch-all around
+  cleaners and swallows a notifier error only when the notifier is `fail_open` (Influx, and
+  Slack sends, which `crc.py` catches per message). Pass notifiers in `crc.py` order: Slack
+  first, then Influx. An operation the cleaner does not support raises `ValueError`.
+- `build_selection()` raises the AWS EBS breaker before returning any pair, so no other AWS
+  resource is selected; call it after the input validators of `main()` to keep error order.
 - Registering the same cloud and kind twice raises; lookups of unknown names raise with the
   known names. No import-time cloud calls, no other global state than the default registry.
 - Policy keeps every quirk of the catalogue (inverted GCP IP exception, Elastic IP notags that

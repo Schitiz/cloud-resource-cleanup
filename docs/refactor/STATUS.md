@@ -7,6 +7,7 @@
 | R1a | done, reviewed: APPROVE | Moved age handling out of `crc/service.py` into new pure `crc/core/age.py` (`AgeSpec`, `AGE_KEYS`, `require_positive_age`, `lookup_custom_age_tag`, `validated_retention_age`, `parse_literal`, `get_retention_age`, `get_min_age`, `is_old`) with `crc/core/__init__.py` (`__all__`) and `crc/core/README.md` (ARCH-002). `Service` keeps every method and signature and delegates to `crc.core.age`; `crc/service.py` stays in the legacy ratchet. Enabled the two import-linter contracts from the TODO (core must not import `crc.aws/azu/gcp/oci/notifications/service`, nor boto3, botocore, azure, google, oci, slack_sdk, influxdb_client; `include_external_packages = true` added so SDK names are checked). Added `tests/test_core_age.py`. Review (`docs/refactor/reviews/R1a.md`) added coverage for the `not (set(age) & AGE_KEYS)` branch in `require_positive_age`. No behaviour change: an ad hoc differential run of old vs new `Service` over 2758 input combinations (return values, exception types and messages, log records) was identical. pytest: 190 before, 348 after (190 existing unchanged + 158 new). Policy (tag/regex filtering) untouched. |
 | R1b | done, reviewed: APPROVE | Added `docs/refactor/FILTER_VARIANTS.md` (how every module under `crc/aws`, `azu`, `gcp`, `oci` filters today, with `file:line`, plus a Variants section) and pure `crc/core/policy.py`: `normalize_tags` (AWS Key/Value and KMS TagKey/TagValue lists, dict-like and GCP map tags), one explicitly named function per variant (`filter_tags_any_key`, `filter_tags_all_keys`, `filter_tags_glob_all_keys`, `filter_tags_exact_pairs`, `should_skip_by_tags`, `aws_eip_should_skip`, regex search / match / substring variants, Azure state substring variants, yb_task, Kubernetes, GKE / MIG, OKE, AWS disk age floor, snapshot cutoff, `UntaggedMode`). `crc/core/__init__.py` `__all__` and `crc/core/README.md` synced (ARCH-002). Added `tests/test_core_policy.py` (table-driven, every function and variant). Review (`docs/refactor/reviews/R1b.md`) verified all citations and quirks and tightened KMS/Azure/GCP disk notes in `FILTER_VARIANTS.md`. Nothing wired; no module outside `crc/core` changed, no import-linter or archtest change. pytest: 348 before, 553 after (348 existing unchanged + 205 new). |
 | R2a | done, reviewed: APPROVE | Added the core contracts, nothing wired (`crc.py` and every module outside `crc/core` unchanged). `crc/core/cleaner.py`: `Cleaner` protocol (`cloud`, `kind`, `supports`, read-only `plan(context)`, `apply(plan, context)`), `Operation` (StrEnum delete/stop), frozen slotted `Candidate`, `Skipped`, `Plan` (with `related` and `by_owner`), `Failure`, `Result` (succeeded, failed, related by resource label, `by_owner`), `RunContext` (dry_run, operation, options, caller-supplied `now`); mappings are copied into read-only views. `crc/core/registry.py`: `Registry` class plus default instance and `register(cloud, kind)`, `get`, `kinds_for`, `clouds`, `DuplicateCleanerError`, `UnknownCleanerError`. `crc/core/report.py`: `Report` (from `Result` or `Plan`, including `by_owner`), `Section`, `SlackMessage`, `InfluxPoint`, `get_msg`, `influx_resource_name`, `format_owner_ping`, label constants; pure, strings checked against `crc.py` (loaded with importlib as another module name). `crc/core/__init__.py` `__all__`, `crc/core/README.md` (ARCH-002) and the `ARCHITECTURE.md` cleaner/registry/add-a-cleaner text synced (the task asked for the `ARCHITECTURE.md` edit; it is a CODEOWNERS file). Review (`docs/refactor/reviews/R2a.md`) added `by_owner` and `Plan.related`, mapped `SPOT_INSTANCE_REQUEST` to `VM` for Influx, and matched Azure VM NIC Slack/Influx parity with `crc.py`. pytest: 553 before, 767 after (553 existing unchanged + 214 new: 15 cleaner, 12 registry, 187 report). `make check` green on Python 3.12.3 (3.11 not installed here). |
+| R2b | done, awaiting review | Added the engine, nothing wired (`crc.py` and every module outside `crc/core` unchanged). `crc/core/engine.py`: `run(selection, context, registry, notifiers=())` builds each cleaner from the registry, checks `supports(operation)` (raises `ValueError` when unsupported), calls `plan()`, calls `apply()` only when `context.dry_run` is False, builds the `Report` (`from_plan` in dry run, `from_result` otherwise), calls the notifiers in the given order and returns `list[RunOutcome]` (cloud, kind, plan, result or `None`, report). No catch-all: cleaner exceptions propagate. `Notifier` protocol (`name`, `fail_open`, `send(report, context)`): a `fail_open` notifier error is logged (`logging.error`) and swallowed, any other propagates. `KIND_LABELS` maps kinds to report labels. `crc/core/selection.py`: pure `build_selection(cloud, resource, operation, options)` returning `Selection(items, warnings)`; same `ValueError` messages and order as `crc.py main()` (stop only for vm, `--resource all` needs `--cloud all`, `--slack_user_label`, KMS options, AWS EBS breaker, spot skips with the exact warning texts), `CLOUDS` / `RESOURCES` order copied from `crc.py`. Tests compare with `crc.py main()` itself (loaded under another name, `CRC` replaced by a recorder). `crc/core/__init__.py` `__all__` and `crc/core/README.md` synced (ARCH-002). pytest: 767 before, 849 after (767 existing unchanged + 82 new: 15 engine, 67 selection). `make check` steps (ruff, mypy, lint-imports, pytest) green on Python 3.12 (3.11 not installed here). |
 
 Open issues (R0a):
 
@@ -142,3 +143,46 @@ Bugs and quirks found (R2a), recorded and not fixed:
    is dead code. `crc.py:214` and `crc.py:226` use bare `except:`.
 7. `crc.py:347` (and the other `"#" + self.slack_channel` sends): a channel already starting
    with `#` becomes `##name`, while `crc.py:1509` strips that case for `notify_cleanup`.
+
+Open issues (R2b):
+
+- Slack: the task said `crc.py` catches Influx failures only, but every Slack `chat_postMessage` in
+  `crc.py` is wrapped in `try/except Exception: print` too (`crc.py:345-507`, `604-666`), so both
+  senders are `fail_open` today. The wiring rung must set `fail_open=True` on both notifiers to keep
+  behaviour; the engine only enforces the flag. `crc.py` prints these errors, the engine logs them
+  with `logging.error`.
+- `ValueError` for an unknown cloud or resource in `build_selection` is new but unreachable from the
+  CLI (argparse `choices`); `crc.py` would silently do nothing.
+- Selection warnings are logged when `run()` starts, `crc.py` logs each when its loop reaches the pair.
+- `build_selection` raises the EBS breaker before returning pairs, `crc.py` raises it in the loop, after
+  the `is_valid_*` validators, the Slack and Influx client creation, and the `scan_tag` branch. The CLI
+  rung must call `build_selection` at the same point to keep the order of errors.
+- Selection returns pairs with no cleaner (for example `azure keypair`, `aws nic`, `gcp snapshot`); the
+  engine then raises `UnknownCleanerError` where `crc.py` raised `ValueError` at that pair
+  (`crc.py:800`, `823`) or ran the AWS class (snapshot). The wiring rung must register or reject them.
+- `vpc` and `snapshot` produce no Slack or Influx output in `crc.py`; the engine builds a report for
+  them (`KIND_LABELS`, `vpc` label is a placeholder). The notifier wiring must skip them.
+- `Operation` has no per-kind support table here; each cleaner decides in `supports()`.
+
+Bugs and quirks found (R2b), recorded and not fixed:
+
+1. `crc.py:1394`, `1546-1552`: `--cloud all --resource all` and `--cloud all --resource disk` can never
+   run: `aws` is the first cloud and `disk` the first resource, so the EBS breaker raises on the first
+   pair. `--resource all` is effectively unusable (after the KMS option checks), and `--cloud aws
+   --resource all` fails earlier at `crc.py:1367`.
+2. `crc.py:1630-1643`: `--resource snapshot` always runs the AWS `Snapshot` class with a hard-coded
+   `age_days=90`, for every cloud (`--cloud azure --resource snapshot` touches AWS), and sends nothing
+   to Slack or Influx, it only prints.
+3. `crc.py:799-800`, `823`: `--cloud all --resource keypair` deletes AWS keypairs, then raises
+   `ValueError("Keypair operation is only supported on AWS.")` on Azure; the same shape for `nic` on
+   non-Azure clouds. The run fails after the first cloud has already deleted resources.
+4. `crc.py:1377-1385`: KMS description and user are required for `--resource kms` on every cloud,
+   including clouds that have no KMS cleaner; the error text has the typo "reuired" (kept verbatim).
+5. `crc.py:1366-1371`: the message says `--resources all` but the flag is `--resource` (kept verbatim).
+6. `crc.py:1421-1424`, `1645-1647`: `MAX_AGE` is set in `os.environ` and only deleted at the end of
+   `main()`, not in a `finally`, so any exception (including the EBS breaker) leaves it set.
+7. `crc.py:1439`: `clouds == "all"` is always False there (`clouds` is already a list), so the
+   scan uses `[c for c in clouds]`; same result as `CLOUDS` when `--cloud all`, dead branch otherwise.
+8. `crc.py:1581-1583`: `--operation_type stop` with `--resource vm` is the only stop path; an
+   operation value other than `delete` or `stop` would silently do nothing for `vm` (unreachable,
+   argparse `choices`).

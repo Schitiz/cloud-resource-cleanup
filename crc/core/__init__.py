@@ -22,6 +22,7 @@ from crc.core.cleaner import (
     Skipped,
     candidate_ids,
 )
+from crc.core.engine import KIND_LABELS, Notifier, RunOutcome, run
 from crc.core.policy import (
     SENSITIVE_YB_TASK,
     Tags,
@@ -89,14 +90,26 @@ from crc.core.report import (
     get_msg,
     influx_resource_name,
 )
+from crc.core.selection import (
+    CLOUDS,
+    EXTRA_RESOURCES,
+    RESOURCES,
+    Selection,
+    SelectionOptions,
+    build_selection,
+)
 
 __all__ = [
     "AGE_KEYS",
+    "CLOUDS",
     "DISK",
+    "EXTRA_RESOURCES",
     "IP",
     "KEYPAIR",
+    "KIND_LABELS",
     "KMS",
     "NIC",
+    "RESOURCES",
     "SENSITIVE_YB_TASK",
     "SNAPSHOT",
     "SPOT_INSTANCE_REQUEST",
@@ -107,13 +120,17 @@ __all__ = [
     "DuplicateCleanerError",
     "Failure",
     "InfluxPoint",
+    "Notifier",
     "Operation",
     "Plan",
     "Registry",
     "Report",
     "Result",
     "RunContext",
+    "RunOutcome",
     "Section",
+    "Selection",
+    "SelectionOptions",
     "Skipped",
     "SlackMessage",
     "TagSpec",
@@ -129,6 +146,7 @@ __all__ = [
     "aws_filter_wants_kubernetes",
     "aws_is_kubernetes_volume",
     "aws_spot_has_sensitive_yb_task",
+    "build_selection",
     "candidate_ids",
     "compile_patterns",
     "effective_age",
@@ -163,6 +181,7 @@ __all__ = [
     "parse_literal",
     "register",
     "require_positive_age",
+    "run",
     "should_skip_by_tags",
     "skip_untagged",
     "snapshot_old_enough",
