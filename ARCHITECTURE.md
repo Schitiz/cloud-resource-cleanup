@@ -35,29 +35,43 @@ crc/aws|azu|gcp|oci/      one module per resource, registered by decorator
 
 ```python
 class Cleaner(Protocol):
-    def plan(self) -> Plan: ...   # discovery and policy filtering, read-only
-    def apply(self, plan: Plan) -> Result: ...  # all mutating cloud calls
+    cloud: str
+    kind: str
+    def supports(self, operation: Operation) -> bool: ...
+    def plan(self, context: RunContext) -> Plan: ...   # discovery and policy, read-only
+    def apply(self, plan: Plan, context: RunContext) -> Result: ...  # all mutating cloud calls
 ```
+
+Defined in `crc/core/cleaner.py` with `Operation` (delete, stop), `Candidate`, `Skipped`,
+`Plan`, `Failure`, `Result` and `RunContext`.
 
 - `plan()` makes no mutating cloud call (no delete, stop, cancel, tag write).
   It backs `--dry_run`: a dry run is `plan()` without `apply()`.
 - `apply()` performs the destructive calls for items already in the plan, in
   the order required by `CLEANUP_SAFETY.md` (for example AWS spot: cancel the
   request before terminating the instance).
-- Plans and results are frozen dataclasses. SDK objects do not cross the
-  cleaner boundary; cleaners normalise to domain DTOs.
+- Plans, results and the run context are frozen dataclasses; their mappings are
+  read-only copies. SDK objects do not cross the cleaner boundary; cleaners
+  normalise to `Candidate`.
+- `RunContext.now` is supplied by the caller. Cleaners never read the clock for age
+  decisions; they compare against `context.now`.
 - SDK clients, policy and logger are injected through the constructor so tests
   pass mocks.
+- `crc/core/report.py` turns `Result` or `Plan` into a `Report` that yields the Slack
+  texts, the Influx points and payload `crc.py` sends today. Notifiers only send it.
 
 ## Decorator registration
 
 Cleaners self-register with a typed decorator, for example
-`@register_cleaner(cloud="aws", resource="disk")`, defined in
-`crc/core/registry.py`. The registry maps `(cloud, resource)` to a cleaner
-factory. Rules: no `@singleton`, no hidden mutable globals beyond the registry
-dict owned by the registry module, no import-time cloud calls. The engine
-selects cleaners from the registry using the parsed `--cloud` / `--resource`
-values.
+`@register(cloud="aws", kind="disk")`, defined in `crc/core/registry.py`. The
+registry maps `(cloud, kind)` to a cleaner factory: a callable that takes the
+`RunContext` and returns a `Cleaner` (normally the class itself). `get(cloud, kind)`,
+`kinds_for(cloud)` and `clouds()` read it back. Registering the same pair twice
+raises `DuplicateCleanerError`; unknown lookups raise `UnknownCleanerError`. Rules:
+no `@singleton`, no hidden mutable globals beyond the default `Registry` instance owned
+by the registry module, no import-time cloud calls. Tests build their own `Registry()`
+so registrations never leak. The engine selects cleaners from the registry using the
+parsed `--cloud` / `--resource` values.
 
 ## Legacy ratchet
 
@@ -83,15 +97,18 @@ packages, ARCH-004 files of at most 400 lines, ARCH-005 read-only `plan()`, and 
 
 1. Read `CLEANUP_SAFETY.md` and the nearest existing cleaner in the same cloud.
 2. Create `crc/<cloud>/<resource>.py`. Do not import another cloud package.
-3. Define frozen dataclass DTOs for the candidate and the plan.
+3. Normalise cloud data to `Candidate` (`crc.core.cleaner`); build `Plan` and `Result`
+   from the frozen dataclasses there instead of defining new ones.
 4. Implement the class with an injected SDK client and policy. Require a real
    age gate in `__init__` for destructive resources. Fail closed on missing or
    invalid age, tags or telemetry.
-5. `plan()`: list, normalise, apply policy from `crc.core.policy`. No mutation.
-6. `apply()`: perform the deletes or stops in the documented order, isolate
+5. `plan(context)`: list, normalise, apply policy from `crc.core.policy`, compare ages
+   with `context.now`. No mutation.
+6. `apply(plan, context)`: perform the deletes or stops in the documented order, isolate
    per-resource errors only where `CLEANUP_SAFETY.md` says so, chain errors with
    `raise ... from e`.
-7. Register it with `@register_cleaner(cloud=..., resource=...)`.
+7. Register it with `@register(cloud=..., kind=...)` from `crc.core.registry`; the
+   factory takes the `RunContext` and returns the cleaner. Also implement `supports()`.
 8. Add offline tests under `tests/` using mocks: happy path, fail-closed path,
    dry run makes no mutating call, call order for destructive sequences.
 9. Update the package README and, for destructive behaviour, `CLEANUP_SAFETY.md`.

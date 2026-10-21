@@ -6,6 +6,7 @@
 | R0b | done, reviewed: APPROVE | Added `tests/archtest/` (ARCH-001..005, SAF-LOCK, each with self-tests, README, `legacy_baseline.txt`, `safety_lock.json`, owner-only `update_safety_lock.py`), `[SAF-001]`..`[SAF-046]` tags in `CLEANUP_SAFETY.md`, pinned `requirements-dev.txt`, `.github/workflows/ci.yml` (Python 3.11, `make check`), pointers in AGENTS.md and ARCHITECTURE.md. Review (`docs/refactor/reviews/R0b.md`) removed 4 wrong test mappings in `safety_lock.json` (`SAF-015`, `SAF-032`, `SAF-034`) and moved `SAF-034` to `gaps`. No change to `crc.py`, `crc/` or existing tests. pytest: 110 existing + 80 archtest = 190 passed. 30 of 46 SAF IDs locked to 61 existing test entries; 16 gaps. |
 | R1a | done, reviewed: APPROVE | Moved age handling out of `crc/service.py` into new pure `crc/core/age.py` (`AgeSpec`, `AGE_KEYS`, `require_positive_age`, `lookup_custom_age_tag`, `validated_retention_age`, `parse_literal`, `get_retention_age`, `get_min_age`, `is_old`) with `crc/core/__init__.py` (`__all__`) and `crc/core/README.md` (ARCH-002). `Service` keeps every method and signature and delegates to `crc.core.age`; `crc/service.py` stays in the legacy ratchet. Enabled the two import-linter contracts from the TODO (core must not import `crc.aws/azu/gcp/oci/notifications/service`, nor boto3, botocore, azure, google, oci, slack_sdk, influxdb_client; `include_external_packages = true` added so SDK names are checked). Added `tests/test_core_age.py`. Review (`docs/refactor/reviews/R1a.md`) added coverage for the `not (set(age) & AGE_KEYS)` branch in `require_positive_age`. No behaviour change: an ad hoc differential run of old vs new `Service` over 2758 input combinations (return values, exception types and messages, log records) was identical. pytest: 190 before, 348 after (190 existing unchanged + 158 new). Policy (tag/regex filtering) untouched. |
 | R1b | done, reviewed: APPROVE | Added `docs/refactor/FILTER_VARIANTS.md` (how every module under `crc/aws`, `azu`, `gcp`, `oci` filters today, with `file:line`, plus a Variants section) and pure `crc/core/policy.py`: `normalize_tags` (AWS Key/Value and KMS TagKey/TagValue lists, dict-like and GCP map tags), one explicitly named function per variant (`filter_tags_any_key`, `filter_tags_all_keys`, `filter_tags_glob_all_keys`, `filter_tags_exact_pairs`, `should_skip_by_tags`, `aws_eip_should_skip`, regex search / match / substring variants, Azure state substring variants, yb_task, Kubernetes, GKE / MIG, OKE, AWS disk age floor, snapshot cutoff, `UntaggedMode`). `crc/core/__init__.py` `__all__` and `crc/core/README.md` synced (ARCH-002). Added `tests/test_core_policy.py` (table-driven, every function and variant). Review (`docs/refactor/reviews/R1b.md`) verified all citations and quirks and tightened KMS/Azure/GCP disk notes in `FILTER_VARIANTS.md`. Nothing wired; no module outside `crc/core` changed, no import-linter or archtest change. pytest: 348 before, 553 after (348 existing unchanged + 205 new). |
+| R2a | done, awaiting review | Added the core contracts, nothing wired (`crc.py` and every module outside `crc/core` unchanged). `crc/core/cleaner.py`: `Cleaner` protocol (`cloud`, `kind`, `supports`, read-only `plan(context)`, `apply(plan, context)`), `Operation` (StrEnum delete/stop), frozen slotted `Candidate`, `Skipped`, `Plan`, `Failure`, `Result` (succeeded, failed, related by resource label), `RunContext` (dry_run, operation, options, caller-supplied `now`); mappings are copied into read-only views. `crc/core/registry.py`: `Registry` class plus default instance and `register(cloud, kind)`, `get`, `kinds_for`, `clouds`, `DuplicateCleanerError`, `UnknownCleanerError`. `crc/core/report.py`: `Report` (from `Result` or `Plan`), `Section`, `SlackMessage`, `InfluxPoint`, `get_msg`, `influx_resource_name`, `format_owner_ping`, label constants; pure, strings checked against `crc.py` (loaded with importlib as another module name). `crc/core/__init__.py` `__all__`, `crc/core/README.md` (ARCH-002) and the `ARCHITECTURE.md` cleaner/registry/add-a-cleaner text synced (the task asked for the `ARCHITECTURE.md` edit; it is a CODEOWNERS file). pytest: 553 before, 758 after (553 existing unchanged + 205 new: 15 cleaner, 12 registry, 178 report). `make check` green on Python 3.12.3 (3.11 not installed here). |
 
 Open issues (R0a):
 
@@ -94,3 +95,52 @@ quirks listed above. Proposed new IDs (owner decides): SAF-047 policy tag skip r
 (`test_should_skip_by_tags`, `test_exception_and_notags`, `test_aws_eip_should_skip_ignores_notags`),
 SAF-048 AWS disk Kubernetes volume skip (`test_aws_disk_skips_kubernetes`,
 `test_aws_kubernetes_volume`).
+
+Open issues (R2a):
+
+- The registry decorator is `register(cloud, kind)` as the task specified. `ARCHITECTURE.md`
+  now uses it; `.cursor/skills/crc-python-refactor/SKILL.md` (1.3) and `AGENTS.md` still say
+  `register_cleaner(cloud=..., resource=...)` (guardrail files, not edited). Owner to align.
+- `crc.core.__init__` exports `register` but not `get`, `kinds_for`, `clouds` (too generic as
+  package-level names); use `crc.core.registry.get` etc.
+- Report covers the list and Influx cases. The `slack_notify_users` disk case (get_deleted is a
+  dict of owner to ids, `ping_on_slack`) only has the pure text function `format_owner_ping`;
+  the user and group lookups stay with the notifier, and `Result` has no owner grouping yet.
+  The disk wiring rung must decide where owner grouping lives.
+- `Section.notify_empty` / `link_names` encode today's per-call differences: the extra disk
+  message of spot VMs is sent only when non-empty, `link_names=True` only on the disk list
+  message; Influx points are written even when empty and in dry run. `Report.from_result`
+  gives related sections `notify_empty=False`; the Azure VM NIC section is sent even when empty
+  today, so the Azure wiring rung must build that section explicitly.
+- The Azure VM NIC Slack message is not reproduced as it is today (see quirk 1): the report
+  uses the NIC ids. The wiring rung must decide whether to keep the duplicate text.
+- Whether `succeeded` holds ids or names per cloud (today `get_deleted` is whatever each
+  cleaner stores) is decided by each cleaner rung; `Report.from_plan` uses `Candidate.id`.
+- `datetime` values are not checked for timezone in `RunContext`; cleaners must pass aware or
+  naive values consistently with launch times.
+- Frozen+slots dataclasses raise `TypeError` (not `FrozenInstanceError`) when a new attribute
+  is set on CPython 3.12; the test accepts both. A hash of a dataclass with a mapping field
+  raises `TypeError` (read-only mappings are not hashable); nothing hashes DTOs today.
+- Local `make check` ran on Python 3.12.3 with `pip --user` installs; CI uses 3.11.
+
+Bugs and quirks found (R2a), recorded and not fixed:
+
+1. `crc.py:337` and `crc.py:456` define `notify_deleted_nic_via_slack` twice. The second wins, so
+   `get_deleted_nic` (used at `crc.py:344`) is never read. `crc.py:371-372` (Azure VM and Azure
+   spot VM delete) therefore sends the "NIC" Slack message with `vm.get_deleted`, the VM names,
+   not the NIC names. Influx at `crc.py:567` and `crc.py:615` uses the real `get_deleted_nic`.
+2. `crc.py:267`, `273`, `291`: `ping_on_slack` hard-codes the word "disks" in the owner line and
+   builds `msg + "`N`"` without a space ("Deleted the following`3` aws Disk(s)"). Only disks use
+   it today, so it is harmless there. `format_owner_ping` keeps both.
+3. `crc.py:98-99`, `524-537`: `influxdb_bucket` and `resource_suffix` exist only when
+   `influxdb_conn` is passed. Without it `write_influxdb` raises `AttributeError`, swallowed by
+   the catch-all at `crc.py:538-539` ("Unable to push data to influxDB"). The same catch-all hides
+   `len(None)` when a list attribute is `None`.
+4. `crc.py:480-493`: `notify_deleted_disk_via_slack` sends nothing when `get_deleted` is neither a
+   `list` nor a `dict` (`type(...) ==` also rejects subclasses and tuples), and never says so.
+5. `crc.py:565-567` and the other `write_influxdb` calls: Influx points are written in dry run
+   too, and Slack is notified in dry run ("Dry Run" text), so a dry run still pushes metrics.
+6. `crc.py:243-256`: `operated_list_length` is computed twice in `ping_on_slack`; the first sum
+   is dead code. `crc.py:214` and `crc.py:226` use bare `except:`.
+7. `crc.py:347` (and the other `"#" + self.slack_channel` sends): a channel already starting
+   with `#` becomes `##name`, while `crc.py:1509` strips that case for `notify_cleanup`.

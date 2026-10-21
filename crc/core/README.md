@@ -10,6 +10,11 @@ the cleaners, one explicitly named function per variant catalogued in
 `docs/refactor/FILTER_VARIANTS.md`. Cleaners fetch and normalise; this layer decides. No
 cleaner calls it yet (wiring is one rung per resource).
 
+The contracts cleaners plug into live here too: `crc.core.cleaner` (the `Cleaner` protocol
+and its frozen DTOs), `crc.core.registry` (decorator registration by cloud and kind) and
+`crc.core.report` (the report model that reproduces what `crc.py` sends to Slack and
+InfluxDB). Nothing is registered or wired yet.
+
 ## Public API
 
 An age spec is a dict with days and/or hours integer values.
@@ -71,6 +76,48 @@ key must be present). Functions named for a module are exact copies of that modu
 - `is_older_than_floor()`: AWS disk floor comparison, ignores MAX_AGE.
 - `snapshot_old_enough()`: AWS snapshot cutoff comparison.
 
+Cleaner contract (module cleaner.py). Cleaners normalise SDK data into these frozen
+dataclasses; mappings are copied into read-only views and sequences become tuples.
+
+- `Operation`: enum of run operations, delete and stop (the --operation_type values).
+- `Candidate`: one normalised cloud resource (id, name, region, state, instance type, launch time, console URL, tags, cleaner-specific extra).
+- `Skipped`: a resource kept by policy, with the reason.
+- `Plan`: candidates to act on plus skipped items; what --dry_run computes.
+- `Failure`: a resource that failed, with the error text.
+- `Result`: outcome of apply, succeeded ids, failures, and related resources (NICs, leftover disks) grouped by resource label.
+- `RunContext`: dry run flag, operation, parsed CLI options and the caller-supplied now; cleaners never read the clock.
+- `Cleaner`: protocol with cloud, kind, supports, a read-only plan and a mutating apply.
+- `candidate_ids()`: ids of candidates, in order.
+
+Registry (module registry.py). A factory is a callable taking a RunContext and returning a
+Cleaner, usually the cleaner class. Tests create their own registry so registrations never leak.
+
+- `Registry`: holds the factories; one instance is the default registry.
+- `register()`: decorator that registers a cleaner factory under a cloud and kind in the default registry.
+- `get()`: factory of a cloud and kind from the default registry (import it from crc.core.registry).
+- `kinds_for()`: sorted kinds registered for a cloud in the default registry.
+- `clouds()`: sorted clouds registered in the default registry.
+- `DuplicateCleanerError`: raised when a cloud and kind is registered twice.
+- `UnknownCleanerError`: raised by lookups for an unregistered cloud or kind.
+
+Report (module report.py). Pure model and text builders; sending stays in the notifiers.
+
+- `Report`: cloud, operation, dry run, sections and failures; builds Slack messages and Influx data from results or plans.
+- `Section`: ids of one resource label, with flags for empty-message and link_names behaviour.
+- `SlackMessage`: text and link_names flag of one Slack post.
+- `InfluxPoint`: measurement (the cloud), resource tag, names field and count field of one point.
+- `get_msg()`: Slack text identical to the get_msg method of crc.py.
+- `influx_resource_name()`: resource tag of write_influxdb, the label plus an optional suffix.
+- `format_owner_ping()`: text of one ping_on_slack message for an owner.
+- `NIC`: label of network interfaces.
+- `DISK`: label of disks and volumes.
+- `VM`: label of virtual machines.
+- `IP`: label of IP addresses.
+- `KEYPAIR`: label of key pairs.
+- `KMS`: label of KMS keys.
+- `SNAPSHOT`: label of snapshots.
+- `SPOT_INSTANCE_REQUEST`: label of AWS spot requests and their instances.
+
 ## Safety Invariants
 
 - `is_old` with an empty age matches every resource (SAF-006). Destructive callers must
@@ -84,6 +131,13 @@ key must be present). Functions named for a module are exact copies of that modu
   `crc.notifications`, `crc.service` or any cloud, Slack or Influx SDK
   (import-linter contracts in `pyproject.toml`).
 - Log messages are part of the behaviour; keep them identical.
+- `Cleaner.plan()` never mutates cloud state, since `--dry_run` is `plan()` without `apply()`
+  (ARCH-005 checks real implementations). `apply()` acts only on items of the plan it is given.
+- Report text and Influx data keep `crc.py` strings exactly (label spelling, "disks" in owner
+  pings, `Dry Run` wording); tests compare against `crc.py` itself. Do not tidy them in a
+  refactor rung.
+- Registering the same cloud and kind twice raises; lookups of unknown names raise with the
+  known names. No import-time cloud calls, no other global state than the default registry.
 - Policy keeps every quirk of the catalogue (inverted GCP IP exception, Elastic IP notags that
   never match, KMS multi-value filters that never match, empty `notags` never skips). A quirk
   is only fixed in a named behaviour-fix rung, not while wiring.
