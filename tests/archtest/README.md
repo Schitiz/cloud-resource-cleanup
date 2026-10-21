@@ -20,7 +20,7 @@ a repository root, so its self-test can run it on a `tmp_path` project.
 | Rule ID | Module | Enforces |
 |---------|--------|----------|
 | ARCH-001 | `ratchet.py` | Ruff `extend-exclude` is a subset of `legacy_baseline.txt`; the mypy override modules match it file for file; no directory or glob entries |
-| ARCH-002 | `readmes.py` | Every `crc/` package dir with a non-legacy `.py` has `README.md` with `## Purpose`, `## Public API`, `## Safety Invariants`, `## Extension Rules`; backticked names under Public API equal `__all__` plus public top-level defs |
+| ARCH-002 | `readmes.py` | Every directory that contains files (except the root, `.cursor` itself and the trees in `README_EXCLUDED_DIRS`: `.git`, `.github`, `.claude`, caches including `.import_linter_cache`, virtualenvs, `.tgrep`, build output) has `README.md` with `## Purpose`, `## Public API`, `## Safety Invariants`, `## Extension Rules`. Each `crc/` package dir with a non-legacy `.py` also keeps the symbol sync: backticked names under Public API equal `__all__` plus public top-level defs. Legacy-only packages (every `.py` in the ratchet) need the sections but no symbol sync until their refactor rung |
 | ARCH-003 | `bans.py` | No `re`, wall-clock reads, `os.environ`/`os.getenv`, `print`, `sys.exit` in non-legacy `crc/aws`, `crc/azu`, `crc/gcp`, `crc/oci` (`ARCH003_ALLOWLIST` holds explicit exceptions; `time.monotonic` and `time.sleep` are allowed) |
 | ARCH-004 | `sizes.py` | Non-legacy, non-test files have at most 400 lines |
 | ARCH-005 | `readonly_plan.py` | `plan` methods (and same-module functions or `self` methods they call) make no delete, terminate, cancel, stop, deallocate, release, schedule_key_deletion, begin_*, or tag-write call |

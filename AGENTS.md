@@ -19,6 +19,7 @@ change.
 | `ARCHITECTURE.md` | Dependency rules, Cleaner contract, legacy ratchet, how to add a cleaner |
 | `CLEANUP_SAFETY.md` | Destructive-cleanup invariants. Authoritative for safety |
 | `docs/refactor/STATUS.md` | Which rung is done, open issues |
+| `docs/refactor/BUGS.md` | Register of every known bug and quirk with main file:line |
 | `tests/archtest/README.md` | Rule IDs ARCH-001..005 and SAF-LOCK, how failures are fixed |
 | `docs/refactor/SKILL_SELECTION.md` | Why the project skill is shaped as it is |
 | `README.md` | User-facing CLI documentation |
@@ -59,6 +60,7 @@ Setup: `pip install -r requirements.txt -r requirements-dev.txt` on Python 3.11.
    Never add a module to them. A rung removes the modules it refactors.
 9. Stay inside the current rung. Do not start another rung.
 10. Fail closed: when age, tags or telemetry are uncertain, keep the resource.
+11. Record every bug or quirk you find in docs/refactor/BUGS.md with its main-branch file:line; do not fix it outside a behaviour-fix rung.
 
 ## Adding a cleaner
 

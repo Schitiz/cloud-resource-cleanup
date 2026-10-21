@@ -1,6 +1,7 @@
 """ARCH-002: package READMEs with required sections and symbol sync."""
 
 import ast
+import os
 import re
 from pathlib import Path
 
@@ -10,6 +11,34 @@ RULE = "ARCH-002"
 REQUIRED_SECTIONS = ("Purpose", "Public API", "Safety Invariants", "Extension Rules")
 _HEADING = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
 _BACKTICKED = re.compile(r"`([^`\n]+)`")
+
+# Whole trees that never need a README: VCS, caches, virtualenvs, tool and CI configuration,
+# and the .claude symlink mirror of .cursor/skills.
+README_EXCLUDED_DIRS = frozenset(
+    {
+        ".git",
+        ".github",
+        ".claude",
+        ".venv",
+        "venv",
+        "node_modules",
+        "__pycache__",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".pytest_cache",
+        ".import_linter_cache",
+        ".tgrep",
+        ".idea",
+        ".vscode",
+        "htmlcov",
+        "logs",
+        "build",
+        "dist",
+    }
+)
+# Directories (relative posix paths, "" is the repository root) exempt on their own only:
+# the root README is the user-facing CLI document and .cursor holds only environment.json.
+README_EXEMPT_DIRS = frozenset({"", ".cursor"})
 
 
 def sections(markdown: str) -> dict[str, str]:
@@ -83,17 +112,43 @@ def package_dirs(root: Path, legacy: frozenset[str]) -> dict[Path, list[Path]]:
     return found
 
 
+def directories_with_files(root: Path) -> list[Path]:
+    """Directories that directly contain files, minus `README_EXCLUDED_DIRS` trees."""
+    found: list[Path] = []
+    for current, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if d not in README_EXCLUDED_DIRS)
+        files = [f for f in filenames if not f.endswith((".pyc", ".pyo"))]
+        directory = Path(current)
+        rel = "" if directory == root else relpath(root, directory)
+        if files and rel not in README_EXEMPT_DIRS:
+            found.append(directory)
+    return found
+
+
 def _check_readme(root: Path, directory: Path, modules: list[Path]) -> list[str]:
+    """README with the four sections, plus the Public API symbol sync for `modules`."""
+    problems = _check_sections(root, directory)
+    readme = directory / "README.md"
+    if modules and readme.is_file():
+        found = sections(readme.read_text(encoding="utf-8"))
+        if "Public API" in found:
+            where = relpath(root, directory)
+            problems.extend(_check_symbols(where, found["Public API"], required_names(modules)))
+    return problems
+
+
+def _check_sections(root: Path, directory: Path) -> list[str]:
     where = relpath(root, directory)
     readme = directory / "README.md"
     if not readme.is_file():
         return [
             violation(
                 RULE,
-                f"{where}/ has non-legacy modules but no README.md",
+                f"{where}/ contains files but has no README.md",
                 f"Create {where}/README.md with the sections "
                 + ", ".join(f"`## {s}`" for s in REQUIRED_SECTIONS)
-                + ". List every public name in backticks under `## Public API`.",
+                + ". A package with non-legacy modules lists every public name in backticks "
+                "under `## Public API`; a legacy-only package needs no symbol list.",
             )
         ]
     found = sections(readme.read_text(encoding="utf-8"))
@@ -109,8 +164,6 @@ def _check_readme(root: Path, directory: Path, modules: list[Path]) -> list[str]
                 + ".",
             )
         )
-    if "Public API" in found:
-        problems.extend(_check_symbols(where, found["Public API"], required_names(modules)))
     return problems
 
 
@@ -151,7 +204,14 @@ def _check_symbols(where: str, api_section: str, required: set[str]) -> list[str
 
 
 def check_readmes(root: Path, legacy: frozenset[str]) -> list[str]:
+    """Every directory with files has the four sections; non-legacy packages also sync symbols.
+
+    A package whose modules are all legacy has no symbol sync until its refactor rung removes
+    its files from the legacy list.
+    """
+    packages = package_dirs(root, legacy)
+    directories = set(directories_with_files(root)) | set(packages)
     problems: list[str] = []
-    for directory, modules in sorted(package_dirs(root, legacy).items()):
-        problems.extend(_check_readme(root, directory, modules))
+    for directory in sorted(directories):
+        problems.extend(_check_readme(root, directory, packages.get(directory, [])))
     return problems
