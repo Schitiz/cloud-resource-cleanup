@@ -61,10 +61,14 @@ values.
 
 ## Legacy ratchet
 
-Modules not yet refactored (`crc.py`, everything under `crc/`, `tests/`) are
-exempt from ruff and mypy through one explicit list: ruff `extend-exclude` and
-the `[[tool.mypy.overrides]]` `ignore_errors` block in `pyproject.toml`. The list
-may only shrink. A rung removes the modules it refactors from both places in
+Modules that existed before the refactor (`crc.py`, each pre-existing
+`crc/**/*.py` module and `tests/*.py` file) are exempt from ruff and mypy
+through one explicit per-file list: ruff `extend-exclude` and the
+`[[tool.mypy.overrides]]` `ignore_errors` block in `pyproject.toml`. No
+directory or glob entries, so every new file (for example under `crc/core`,
+`crc/notify` or new tests) is checked by default. mypy checks `crc/` and
+`tests/` through `files`; `crc.py` is left out because its module name clashes
+with the `crc` package, which the CLI rung resolves. The list may only shrink. A rung removes the modules it refactors from both places in
 the same change, and the refactored code must then pass ruff (complexity 10,
 statements 40, args 6) and mypy strict. Narrow the lists as modules move;
 never widen them.

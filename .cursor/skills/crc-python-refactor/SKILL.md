@@ -61,8 +61,12 @@ Forbidden: `async`/`await`, `pydantic`, `httpx`, `tenacity`, `@singleton`,
 - 4.2 Circuit breakers and list/auth failures must raise: the `aws` + `disk`
   opt-in breaker, `describe_regions` auth errors, Azure `SpotVM` list errors.
   Never wrap them in catch-all batch loops or a `BatchResult`.
-- 4.3 Fail closed: if CloudWatch data is incomplete or a custom age tag is
-  empty, malformed, zero or overflows, skip and keep the resource.
+- 4.3 Fail closed: if CloudWatch data is incomplete, keep the volume; where a
+  module uses `Service.validated_retention_age` (spot modules), a custom age
+  tag that is empty, malformed, zero or overflows skips the resource. Modules
+  that fail open on main (`get_retention_age` alone) keep that behaviour in a
+  refactor rung; making them fail closed is a later behaviour-fix rung. New
+  modules must fail closed.
 - 4.4 Isolate per-resource errors only where `CLEANUP_SAFETY.md` says so (per
   volume in AWS disk delete, per VM in Azure SpotVM delete): catch specific SDK
   errors, log the id, set the error flag, continue. Never `except Exception: pass`.
@@ -71,7 +75,9 @@ Forbidden: `async`/`await`, `pydantic`, `httpx`, `tenacity`, `@singleton`,
   `DeleteOnTermination=false` volumes, cancel request, terminate instance, wait
   for volume `available`, delete volumes. Abort termination if cancel fails and
   clear `crc_leftover_of` / `crc_leftover_tag_*` tags on cancel/terminate failure.
-- `--max_age` / `MAX_AGE` must never shorten a floor set by another flag.
+- Keep today's `--max_age` / `MAX_AGE` semantics (on main it can shorten a floor
+  inside `is_old`, see `CLEANUP_SAFETY.md`); never add a new place where it
+  shortens a floor set by another flag.
 
 ## 5. Unit tests and SDK mocking
 

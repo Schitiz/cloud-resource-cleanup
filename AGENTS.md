@@ -25,7 +25,7 @@ change.
 ## Commands
 
 ```
-make check     # ruff check ., mypy crc, lint-imports, pytest -q
+make check     # ruff check ., mypy (crc/ and tests/), lint-imports, pytest -q
 ```
 
 Setup: `pip install -r requirements.txt -r requirements-dev.txt` on Python 3.11.

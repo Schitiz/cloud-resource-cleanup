@@ -5,7 +5,7 @@ failed item and say which one. Write the review to `docs/refactor/reviews/<rung>
 
 ## 1. Gates and scope
 
-- [ ] `make check` is green: `ruff check .`, `mypy crc`, `lint-imports`, `pytest -q`.
+- [ ] `make check` is green: `ruff check .`, `mypy`, `lint-imports`, `pytest -q`.
 - [ ] Test count is not lower than before the rung (compare with STATUS.md).
 - [ ] Only the current rung's scope changed; no other rung started.
 - [ ] No behaviour change; CLI flags, env vars and JSON flag values
@@ -16,14 +16,17 @@ failed item and say which one. Write the review to `docs/refactor/reviews/<rung>
 
 - [ ] No weakened, deleted, skipped or xfail'd safety test.
 - [ ] No age gate weakened; no fail-open tag or age parsing introduced.
-- [ ] Custom age tag that is empty, malformed, zero or overflowing still skips.
+- [ ] Custom age tag that is empty, malformed, zero or overflowing still skips
+      where it skips today (modules using `Service.validated_retention_age`);
+      modules that fail open on main keep doing so until their behaviour-fix rung.
 - [ ] Opt-in circuit breaker (`aws` + `disk`), `describe_regions` auth errors and
       Azure `SpotVM` list errors still raise, not swallowed.
 - [ ] Incomplete CloudWatch data still keeps the volume.
 - [ ] AWS spot order intact: tag volumes, cancel request, terminate, wait
       `available`, delete volumes; cancel failure aborts termination; tags
       cleared on failure.
-- [ ] `--max_age` / `MAX_AGE` cannot shorten another flag's floor.
+- [ ] `--max_age` / `MAX_AGE` semantics unchanged (on main it can still shorten
+      a floor inside `is_old`); no new place where it shortens a floor.
 
 ## 3. Architecture
 
