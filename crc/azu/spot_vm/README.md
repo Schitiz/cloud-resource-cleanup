@@ -6,12 +6,12 @@ Azure Spot VM cleaner (rung AZ-5). Deletes Spot VMs that are stopped or dealloca
 
 ## Public API
 
-- `AzureSpotVmCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus list_vms, decide and power_status used by the adapter); registered as `azure`/`spot_instances`.
+- `AzureSpotVmCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus list_vms, decide and power_status used by the adapter); registered as azure / spot_instances.
 - `SpotVmConfig`: frozen dataclass with the flags of one run (resource group, tag specs, validated age, custom age tag key).
 - `build_spot_vm_cleaner()`: registry factory; reads resource_group, filter_tags, exception_tags, notags, age and custom_age_tag_key from RunContext.options and builds the clients from the legacy Base.
 - `log_summary()`: the closing warning lines main logs.
 - `STOPPED_POWER_STATES`: the two power states that qualify, "VM stopped" and "VM deallocated".
-- `SpotVM`: adapter crc.py calls (delete(), get_deleted, delete_count, get_deleted_nic, nic_delete_count, get_deleted_disks, base); runs the cleaner VM by VM in the order of main. The extra optional `clock` argument defaults to datetime.datetime.now.
+- `SpotVM`: adapter crc.py calls (delete(), get_deleted, delete_count, get_deleted_nic, nic_delete_count, get_deleted_disks, base); runs the cleaner VM by VM in the order of main. The extra optional clock argument defaults to datetime.datetime.now.
 - `SpotComputeClient`, `SpotNetworkClient`, `VirtualMachineOperations`, `DiskOperations`, `Poller`: Protocols of the SDK calls used; tests pass fakes.
 - `ComputeFactory`, `NetworkFactory`: client factories injected through the constructor.
 - `RemovalOps`: the two shared delete helpers (VM delete and NIC delete), swappable.
