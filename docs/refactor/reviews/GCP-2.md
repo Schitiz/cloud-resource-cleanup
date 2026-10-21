@@ -117,3 +117,82 @@ None.
 Test count: 2879 before GCP-2 (`be0a622`), 3191 on `043e0aa`, 3192 after Round 1 (+313 total: 286 in `tests/test_gcp_disk_parity.py`, 27 in `tests/test_gcp_disk.py`).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff be0a622..HEAD` (both commits `d144823` and `569ea19`), read against
+`git show main:crc/gcp/disk.py`, `git show main:crc.py`, `crc/core/policy.py`, `crc/core/age.py`,
+`AGENTS.md`, `docs/refactor/BUGS.md`, `CLEANUP_SAFETY.md` and `REVIEW_CHECKLIST.md`.
+
+### Round 1 fixes assessment
+
+Round 1 (`569ea19`) changed only docs plus one test line:
+- `docs/refactor/bugs/pending/GCP-2.md`: the tightened ranges (`main:crc/gcp/disk.py:41-88` for
+  `__init__`, `:85-88` for the `disk_names_to_delete` init, `:201-224` for recording) are correct
+  (checked with `git show main:crc/gcp/disk.py`). The new bare-name-without-zone row is correct;
+  its `crc.py:473-493` (`notify_deleted_disk_via_slack`) and `:920-924` (Slack and InfluxDB use
+  of `get_deleted`) citations match main.
+- `tests/test_gcp_disk_parity.py:848`: adds the `same-name-two-zones` quirk check. It is an added
+  assertion, and it runs against both the oracle and the adapter. No test was weakened or removed.
+- Correct, and no behaviour changed. Round 1's three NITs stand. None of them can be reached
+  through `crc.py`.
+
+### Independent review
+
+- **Parity.** `crc/gcp/disk.py` matches main's flow step by step: the `users`, exception, filter,
+  `last_detach_timestamp` and age order (`main:crc/gcp/disk.py:183-192`); `clock()` read after
+  `strptime` (`:118-119`); raw `disk.labels` passed to `get_retention_age` (`:121`);
+  `effective_age` = `retention_age or detach_age` (`:124`); delete then log (`:195-200`);
+  `close()` after the summary, as the `with` block of main does (`:175`, `:231-244`). The
+  `policy.*` helpers behave the same as main's inline expressions for `str` to `str` label maps.
+  `tests/legacy/gcp_disk.txt` is byte-identical to `git show main:crc/gcp/disk.py`.
+- **Safety.** The age gate is unchanged (SAF-021, SAF-022: `--detach_age` only, `MAX_AGE` still
+  inside `is_old`). The custom age label is still fail open (BUG-004, as on main). `plan()` makes no
+  mutating call, and `delete_disk` is called only from `apply_disk()`, never in a dry run.
+  Per-disk error isolation is the same as main's (`main:crc/gcp/disk.py:193-230`).
+- **Tests.** Every test function in `tests/test_gcp_disk.py` and `tests/test_gcp_disk_parity.py`
+  asserts something (checked with an AST scan). The parity tests compare exact SDK calls, logs,
+  results, count, stdout and errors, and the quirk checks assert concrete outcomes against both
+  the oracle and the new code.
+- **Architecture and typing.** `lint-imports` keeps all 5 contracts and ARCH-001 to ARCH-005 pass.
+  The ratchet only removes `crc/gcp/disk.py` and `crc.gcp.disk`. The one added override is the
+  per-SDK `googleapiclient` override. `Any` appears only at the discovery-service edge.
+- **Docs.** `crc/gcp/README.md` matches the code. The `crc.py:1129-1146` and `:1409` citations in
+  the pending file match main.
+
+### BLOCKING (fixed)
+
+None.
+
+### NIT (left)
+
+- `plan_zone` stores `policy.normalize_tags(disk.labels)` in `Candidate.tags`, and `_record` groups
+  Slack owners from those tags (`crc/gcp/disk.py:236`, `:140-149`). Main groups them from the raw
+  `disk.labels` (`main:crc/gcp/disk.py:201-222`). The two differ only for labels outside the
+  `DiskView.labels: Mapping[str, str]` contract:
+  - With `--slack_notify_users` and `labels=None`, main deletes the disk, then logs a delete error
+    and does not record it. The new code records it under `not_tagged`.
+  - A non-`str` owner value (for example `1`) becomes the key `"1"` in the new code instead of `1`.
+
+  I confirmed both with a throwaway probe against the oracle. The real `compute_v1.Disk.labels` is
+  always a `str` to `str` map, so this cannot be reached in production. I left it because matching
+  main exactly would mean exposing the raw SDK container in `Candidate`. The main-side quirk (a
+  recording error after a successful delete is reported as a delete error) is a new row in
+  `docs/refactor/bugs/pending/GCP-2.md`.
+- The Coding summary says the test count was 3191 on `043e0aa`, but that commit is not in this
+  branch's history (`d144823` is the coding commit). The final count, 3192, is correct.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`:
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed |
+| `mypy` (`crc`, `tests`) | Success: no issues found in 87 source files |
+| `lint-imports` | Contracts: 5 kept, 0 broken |
+| `pytest -q` | 3192 passed |
+
+Test count: 3192 (2879 before the rung, +313). Round 2 changed no code or tests.
+
+ROUND 2 VERDICT: APPROVE
