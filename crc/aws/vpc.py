@@ -1,252 +1,395 @@
 # Copyright (c) Yugabyte, Inc.
 
+"""AWS VPC cleaner.
+
+`VpcCleaner` implements the `crc.core.cleaner.Cleaner` contract: `plan()` lists the VPCs of
+every region (server side `tag:key` filter) and decides which are protected, `apply()` tears
+the VPCs down and deletes them. `VPC` is the legacy class `crc.py` uses; it keeps its
+constructor and attributes and drives the cleaner region by region, VPC by VPC, in the exact
+call order of the original implementation.
+"""
+
 import logging
-from typing import Dict, List
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any, cast
 
 import boto3
 
 from crc.aws._base import get_all_regions
 from crc.aws.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
+from crc.aws.vpc_api import Ec2Client, Ec2Resource, Vpc
+from crc.core import policy
+from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext, Skipped
+from crc.core.registry import register
 from crc.service import Service
+
+_SERVICE_NAME = "ec2"
+_DEFAULT_REGION = "us-west-2"
+_SKIP_CONTEXT = "VPC cleanup"
+_DELETE_RETRIES = 5
+_VPC = "vpc"
+_PROTECTED = "protected"
+
+TagSpec = Mapping[str, Sequence[str]]
+
+
+ClientFactory = Callable[[str], Ec2Client]
+ResourceFactory = Callable[[str], Ec2Resource]
+RegionLister = Callable[[], Sequence[str]]
+
+
+def _boto3_client(region: str) -> Ec2Client:
+    client: Ec2Client = boto3.client(_SERVICE_NAME, region_name=region)
+    return client
+
+
+def _boto3_resource(region: str) -> Ec2Resource:
+    resource: Ec2Resource = boto3.resource(_SERVICE_NAME, region_name=region)
+    return resource
+
+
+def _all_regions() -> Sequence[str]:
+    return get_all_regions(_SERVICE_NAME, _DEFAULT_REGION)
+
+
+@dataclass(frozen=True, slots=True)
+class VpcRuntime:
+    """Injected collaborators of `VPC`: the SDK client and resource factories and the region
+    lister (no clock: the module has no age gate)."""
+
+    client_factory: ClientFactory = _boto3_client
+    resource_factory: ResourceFactory = _boto3_resource
+    list_regions: RegionLister = _all_regions
+
+
+def _skip_region(region: str, error: BaseException) -> None:
+    log_skipped_region(region, _SKIP_CONTEXT, error)
+
+
+def _log_summary(deleted: Sequence[str], *, dry_run: bool) -> None:
+    items = list(deleted)
+    if dry_run:
+        logging.warning(f"List of AWS VPCs (Total: {len(items)}) which will be deleted: {items}")
+    else:
+        logging.warning(f"Number of AWS VPCs deleted: {len(items)}")
+        logging.warning(f"List of AWS VPCs deleted: {items}")
+
+
+def _detach_default_dhcp_options(ec2: Ec2Resource, vpc: Vpc) -> None:
+    dhcp_options_default = ec2.DhcpOptions("default")
+    if dhcp_options_default:
+        dhcp_options_default.associate_with_vpc(VpcId=vpc.id)
+
+
+def _delete_gateways(vpc: Vpc) -> None:
+    for gw in vpc.internet_gateways.all():
+        vpc.detach_internet_gateway(InternetGatewayId=gw.id)
+        gw.delete()
+
+
+def _delete_route_tables(vpc: Vpc) -> None:
+    for rt in vpc.route_tables.all():
+        for rta in rt.associations:
+            if not rta.main:
+                rta.delete()
+        if not rt.associations:
+            rt.delete()
+
+
+def _terminate_instances(vpc: Vpc) -> None:
+    for subnet in vpc.subnets.all():
+        for instance in subnet.instances.all():
+            instance.terminate()
+
+
+def _delete_endpoints(client: Ec2Client, vpc: Vpc) -> None:
+    for ep in client.describe_vpc_endpoints(Filters=[{"Name": "vpc-id", "Values": [vpc.id]}])[
+        "VpcEndpoints"
+    ]:
+        client.delete_vpc_endpoints(VpcEndpointIds=[ep["VpcEndpointId"]])
+
+
+def _delete_security_groups(vpc: Vpc) -> None:
+    for sg in vpc.security_groups.all():
+        if sg.group_name != "default":
+            sg.delete()
+
+
+def _delete_peering_connections(client: Ec2Client, ec2: Ec2Resource, vpc: Vpc) -> None:
+    peering = client.describe_vpc_peering_connections(
+        Filters=[{"Name": "requester-vpc-info.vpc-id", "Values": [vpc.id]}]
+    )
+    for vpcpeer in peering["VpcPeeringConnections"]:
+        ec2.VpcPeeringConnection(vpcpeer["VpcPeeringConnectionId"]).delete()
+
+
+def _delete_network_acls(vpc: Vpc) -> None:
+    for netacl in vpc.network_acls.all():
+        if not netacl.is_default:
+            netacl.delete()
+
+
+def _delete_subnets(vpc: Vpc) -> None:
+    for subnet in vpc.subnets.all():
+        for interface in subnet.network_interfaces.all():
+            interface.delete()
+        subnet.delete()
+
+
+def _delete_vpc_with_retries(client: Ec2Client, vpc: Vpc) -> None:
+    for _ in range(_DELETE_RETRIES):
+        try:
+            client.delete_vpc(VpcId=vpc.id)
+            break
+        except Exception as e:
+            logging.error(e)
+            logging.error(f"Failed deleting VPC {vpc.id}. Retrying...")
+    else:
+        logging.error(f"Failed to Delete VPC {vpc.id} after {_DELETE_RETRIES} retries")
+
+
+class VpcCleaner:
+    """Deletes the VPCs the server side `tag:key` filter returns, except the protected ones.
+    Applies to every region the injected lister returns."""
+
+    cloud = "aws"
+    kind = "vpc"
+
+    def __init__(
+        self,
+        client_factory: ClientFactory,
+        resource_factory: ResourceFactory,
+        list_regions: RegionLister,
+        filter_tags: TagSpec | None,
+        exception_tags: TagSpec | None,
+        notags: TagSpec | None,
+    ) -> None:
+        self._client_factory = client_factory
+        self._resource_factory = resource_factory
+        self._list_regions = list_regions
+        self._filter_tags = filter_tags
+        self._exception_tags = exception_tags
+        self._notags = notags
+
+    def supports(self, operation: Operation) -> bool:
+        return operation is Operation.DELETE
+
+    def plan(self, context: RunContext) -> Plan:
+        """List every region and decide. Makes no mutating call. Every listed VPC is a
+        candidate (main records them all before the skip check, BUG-012); protected ones carry
+        `protected` in `extra` and are listed in `skipped` too."""
+        vpc_filter = self.build_filter()
+        candidates: list[Candidate] = []
+        skipped: list[Skipped] = []
+        for region in self._list_regions():
+            try:
+                self._client_factory(region)
+                ec2 = self._resource_factory(region)
+                region_plan = self.plan_region(ec2, region, vpc_filter, dry_run=context.dry_run)
+            except CONNECTIVITY_ERRORS as e:
+                _skip_region(region, e)
+                continue
+            candidates.extend(region_plan.candidates)
+            skipped.extend(region_plan.skipped)
+        if context.dry_run:
+            _log_summary([c.id for c in candidates], dry_run=True)
+        return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
+
+    def apply(self, plan: Plan, context: RunContext) -> Result:
+        """Tear down and delete the planned VPCs, region by region (nothing in a dry run)."""
+        ids = [candidate.id for candidate in plan.candidates]
+        if context.dry_run:
+            return Result(succeeded=tuple(ids))
+        by_region: dict[str, list[Candidate]] = {}
+        for candidate in plan.candidates:
+            by_region.setdefault(candidate.region, []).append(candidate)
+        for region, items in by_region.items():
+            try:
+                client = self._client_factory(region)
+                ec2 = self._resource_factory(region)
+                self.apply_region(client, ec2, items)
+            except CONNECTIVITY_ERRORS as e:
+                _skip_region(region, e)
+        _log_summary(ids, dry_run=False)
+        return Result(succeeded=tuple(ids))
+
+    def build_filter(self) -> list[dict[str, Any]]:
+        """EC2 `tag:key` filters of `filter_tags` (the values list is passed unchanged)."""
+        filters: list[dict[str, Any]] = []
+        if self._filter_tags:
+            filters.extend(
+                {"Name": f"tag:{key}", "Values": value} for key, value in self._filter_tags.items()
+            )
+        logging.info(f"Filters created: {filters}")
+        return filters
+
+    def list_vpcs(self, ec2: Ec2Resource, vpc_filter: Sequence[Mapping[str, Any]]) -> list[Vpc]:
+        """The VPCs of one region that match the server side filter."""
+        return list(ec2.vpcs.filter(Filters=vpc_filter))
+
+    def plan_region(
+        self,
+        ec2: Ec2Resource,
+        region: str,
+        vpc_filter: Sequence[Mapping[str, Any]],
+        *,
+        dry_run: bool,
+    ) -> Plan:
+        """List one region; unless `dry_run`, also decide which VPCs are protected."""
+        vpcs = self.list_vpcs(ec2, vpc_filter)
+        ids = [vpc.id for vpc in vpcs]
+        candidates: list[Candidate] = []
+        skipped: list[Skipped] = []
+        for vpc_id, vpc in zip(ids, vpcs, strict=True):
+            protected = False if dry_run else self.is_protected(vpc)
+            candidates.append(
+                Candidate(
+                    id=vpc_id,
+                    name=vpc_id,
+                    region=region,
+                    extra={_VPC: vpc, _PROTECTED: protected},
+                )
+            )
+            if protected:
+                skipped.append(Skipped(id=vpc_id, reason="matches exception_tags or notags"))
+        return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
+
+    def apply_region(
+        self, client: Ec2Client, ec2: Ec2Resource, candidates: Sequence[Candidate]
+    ) -> None:
+        """Tear down every unprotected candidate of one region."""
+        for candidate in candidates:
+            if candidate.extra[_PROTECTED]:
+                continue
+            self.delete_vpc(client, ec2, candidate.extra[_VPC])
+
+    def is_protected(self, vpc: Vpc) -> bool:
+        """BUG-012: main hands the boto3 Vpc resource to a function that iterates tags, so with
+        `exception_tags` or `notags` set a real run raises `TypeError` (a Vpc is not iterable)."""
+        return self.should_skip(cast("Iterable[Mapping[str, str]]", vpc))
+
+    def should_skip(self, tags: Iterable[Mapping[str, str]]) -> bool:
+        """Exception tags (any key) and notags (all keys) decision for one VPC's tags."""
+        if not self._exception_tags and not self._notags:
+            logging.warning("Tags and notags not present")
+            return False
+        all_tags: dict[str, str] = {}
+        for tag in tags:
+            key = tag["Key"]
+            value = tag["Value"]
+            if self._exception_tags and policy.exception_tags_any(
+                {key: value}, self._exception_tags
+            ):
+                return True
+            all_tags[key] = value
+        return policy.notags_all(all_tags, self._notags or {})
+
+    def delete_vpc(self, client: Ec2Client, ec2: Ec2Resource, vpc: Vpc) -> None:
+        """Detach and delete everything the VPC owns, in the order of main, then the VPC."""
+        _detach_default_dhcp_options(ec2, vpc)
+        _delete_gateways(vpc)
+        _delete_route_tables(vpc)
+        _terminate_instances(vpc)
+        _delete_endpoints(client, vpc)
+        _delete_security_groups(vpc)
+        _delete_peering_connections(client, ec2, vpc)
+        _delete_network_acls(vpc)
+        _delete_subnets(vpc)
+        _delete_vpc_with_retries(client, vpc)
+
+
+@register("aws", "vpc")
+def build_vpc_cleaner(context: RunContext) -> Cleaner:
+    """Registry factory. Options: `filter_tags`, `exception_tags` and `notags` (dicts)."""
+    options = context.options
+    return VpcCleaner(
+        client_factory=_boto3_client,
+        resource_factory=_boto3_resource,
+        list_regions=_all_regions,
+        filter_tags=options.get("filter_tags"),
+        exception_tags=options.get("exception_tags"),
+        notags=options.get("notags"),
+    )
 
 
 class VPC(Service):
-    """
-    The VPC class provides an interface for managing AWS VPC vpcs.
-    It inherits from the Service class and uses boto3 to interact with the AWS VPC service.
-    By default, boto3 will clean up attached resources (Route Table, subnets etc.) when a VPC is deleted.
-    The class allows for filtering and excluding VPCs based on specified tags.
-    The class also has properties for the number of VPCs that will be deleted.
+    """Legacy entry point used by `crc.py`: deletes the VPCs that match `filter_tags` (EC2 tag
+    filter) and are not protected by `exception_tags` / `notags`. In dry run it only lists them.
+
+    Attributes: `vpc_ids_to_delete` (ids deleted, or listed in a dry run), `filter_tags`,
+    `exception_tags`, `notags`, `dry_run`. `get_deleted` and `delete_count` read the result.
     """
 
-    service_name = "ec2"
-    """
-    The service_name variable specifies the AWS service that this class will interact with.
-    """
-
-    default_region_name = "us-west-2"
-    """
-    The default_region_name variable specifies the default region to be used when interacting with the AWS service.
-    """
+    service_name = _SERVICE_NAME
+    default_region_name = _DEFAULT_REGION
 
     def __init__(
         self,
         dry_run: bool,
-        filter_tags: Dict[str, List[str]],
-        exception_tags: Dict[str, List[str]],
-        notags: Dict[str, List[str]],
+        filter_tags: TagSpec | None,
+        exception_tags: TagSpec | None,
+        notags: TagSpec | None,
+        runtime: VpcRuntime | None = None,
     ) -> None:
-        """
-        Initializes the object with filter and exception tags to be used when searching for vpcs, as well as an age threshold for vpcs.
-
-        :param dry_run: A boolean variable that indicates whether the class should operate in dry_run mode or not.
-        In dry_run mode, the class will only list the Resources that match the specified filter and exception tags,
-        but will not perform any operations on them.
-        :param filter_tags: dictionary containing key-value pairs as filter tags
-        :type filter_tags: Dict[str, List[str]]
-        :param exception_tags: dictionary containing key-value pairs as exception tags
-        :type exception_tags: Dict[str, List[str]]
-        :param age: dictionary containing key-value pairs as age threshold, the key is either "days" or "hours" or both and value is the number of days or hours.
-        :type age: Dict[str, int]
-        :param notags: dictionary containing key-value pairs as filter tags to exclude vpcs which do not have these tags
-        :type notags: Dict[str, List[str]]
-        """
         super().__init__()
-        self.vpc_ids_to_delete = []
+        self.vpc_ids_to_delete: list[str] = []
         self.dry_run = dry_run
         self.filter_tags = filter_tags
         self.exception_tags = exception_tags
         self.notags = notags
+        self._runtime = runtime or VpcRuntime()
 
     @property
-    def get_deleted(self):
-        """
-        This is a property decorator that returns the list of items in the vpc_ids_to_delete list.
-        It's a read-only property, which means it can be accessed like a variable, but cannot be set like a variable.
-        """
+    def get_deleted(self) -> list[str]:
+        """Ids of the VPCs deleted (listed in a dry run)."""
         return self.vpc_ids_to_delete
 
     @property
-    def delete_count(self):
-        """
-        This is a property decorator that returns the count of items in the vpc_ids_to_delete list.
-        It's a read-only property, which means it can be accessed like a variable, but cannot be set like a variable.
-        """
+    def delete_count(self) -> int:
+        """Number of VPCs deleted (listed in a dry run); logs the count."""
         count = len(self.vpc_ids_to_delete)
         logging.info(f"count of items in vpc_ids_to_delete: {count}")
         return count
 
-    def _get_filter(self) -> List[Dict[str, List[str]]]:
-        """
-        Creates a filter to be used when searching for vpcs, based on the filter tags provided during initialization.
+    def _cleaner(self) -> VpcCleaner:
+        runtime = self._runtime
+        return VpcCleaner(
+            runtime.client_factory,
+            runtime.resource_factory,
+            runtime.list_regions,
+            self.filter_tags,
+            self.exception_tags,
+            self.notags,
+        )
 
-        :return: list of filters.
-        :rtype: List[Dict[str, List[str]]]
-        """
-        filters = []
-        if self.filter_tags:
-            for key, value in self.filter_tags.items():
-                filters.append({"Name": f"tag:{key}", "Values": value})
+    def _get_filter(self) -> list[dict[str, Any]]:
+        return self._cleaner().build_filter()
 
-        logging.info(f"Filters created: {filters}")
-        return filters
+    def _should_skip_vpc(self, tags: Iterable[Mapping[str, str]]) -> bool:
+        return self._cleaner().should_skip(tags)
 
-    def _should_skip_vpc(self, tags: List[Dict[str, str]]) -> bool:
-        """
-        Check if the vpc should be skipped based on the exception tags and vpcs that do not have the specified notags.
-        :param tags: List of tags associated with the vpc
-        :type tags: List[Dict[str,str]]
-        :return: True if the vpc should be skipped, False otherwise
-        :rtype: bool
-        """
-        if not self.exception_tags and not self.notags:
-            logging.warning("Tags and notags not present")
-            return False
-
-        in_no_tags = False
-        all_tags = {}
-
-        for tag in tags:
-            k = tag["Key"]
-            v = tag["Value"]
-
-            if self.exception_tags:
-                if k in self.exception_tags.keys() and (
-                    not self.exception_tags[k] or v in self.exception_tags[k]
-                ):
-                    return True
-
-            all_tags[k] = v
-
-        if self.notags:
-            in_no_tags = all(
-                key in all_tags and (not value or all_tags[key] in value)
-                for key, value in self.notags.items()
-            )
-
-        return in_no_tags
-
-    def get_vpc_ids(self, vpcs):
-        """
-        Given a list of VPCs, return a list of their corresponding VPC IDs.
-
-        Args:
-        - vpcs: a list of Boto3 VPC objects
-
-        Returns:
-        - A list of VPC IDs (strings)
-        """
-        vpc_ids = []
-        for vpc in vpcs:
-            vpc_ids.append(vpc.id)
-        return vpc_ids
+    def get_vpc_ids(self, vpcs: Iterable[Vpc]) -> list[str]:
+        """Ids of the given boto3 VPC objects."""
+        return [vpc.id for vpc in vpcs]
 
     def delete(self) -> None:
-        """
-        Deletes VPCs that match the filter threshold, and also checks for exception tags.
-        It checks if the filter_tags and notags attribute of the class is empty,
-        if so, it returns True because there are no tags set to filter the VPCs, so any VPC should be considered.
-
-        The method will list the VPCs that match the specified filter and exception tags but will not perform any operations
-        on them if dry_run mode is enabled.
-        """
-        vpc_filter = self._get_filter()
-
-        for region in get_all_regions(self.service_name, self.default_region_name):
+        """Delete (or, in a dry run, only list) the matching VPCs of every region."""
+        runtime = self._runtime
+        cleaner = self._cleaner()
+        vpc_filter = cleaner.build_filter()
+        for region in runtime.list_regions():
             try:
-                client = boto3.client(self.service_name, region_name=region)
-                ec2 = boto3.resource(self.service_name, region_name=region)
-                vpcs = list(ec2.vpcs.filter(Filters=vpc_filter))
-
+                client = runtime.client_factory(region)
+                ec2 = runtime.resource_factory(region)
+                vpcs = cleaner.list_vpcs(ec2, vpc_filter)
                 self.vpc_ids_to_delete.extend(self.get_vpc_ids(vpcs))
-
                 if self.dry_run:
                     continue
-
                 for vpc in vpcs:
-                    if self._should_skip_vpc(vpc):
+                    if cleaner.is_protected(vpc):
                         continue
-
-                    # Detach default dhcp_options if associated with the VPC
-                    dhcp_options_default = ec2.DhcpOptions("default")
-                    if dhcp_options_default:
-                        dhcp_options_default.associate_with_vpc(VpcId=vpc.id)
-
-                    # Detach and delete all gateways associated with the VPC
-                    for gw in vpc.internet_gateways.all():
-                        vpc.detach_internet_gateway(InternetGatewayId=gw.id)
-                        gw.delete()
-
-                    # Delete all route table associations
-                    for rt in vpc.route_tables.all():
-                        for rta in rt.associations:
-                            if not rta.main:
-                                rta.delete()
-                        if not rt.associations:
-                            rt.delete()
-
-                    # Delete any instances
-                    for subnet in vpc.subnets.all():
-                        for instance in subnet.instances.all():
-                            instance.terminate()
-
-                    # Delete endpoints
-                    for ep in client.describe_vpc_endpoints(
-                        Filters=[{"Name": "vpc-id", "Values": [vpc.id]}]
-                    )["VpcEndpoints"]:
-                        client.delete_vpc_endpoints(VpcEndpointIds=[ep["VpcEndpointId"]])
-
-                    # Delete security groups
-                    for sg in vpc.security_groups.all():
-                        if sg.group_name != "default":
-                            sg.delete()
-
-                    # Delete VPC peering connections
-                    for vpcpeer in client.describe_vpc_peering_connections(
-                        Filters=[
-                            {
-                                "Name": "requester-vpc-info.vpc-id",
-                                "Values": [vpc.id],
-                            }
-                        ]
-                    )["VpcPeeringConnections"]:
-                        ec2.VpcPeeringConnection(
-                            vpcpeer["VpcPeeringConnectionId"]
-                        ).delete()
-
-                    # Delete non-default network ACLs
-                    for netacl in vpc.network_acls.all():
-                        if not netacl.is_default:
-                            netacl.delete()
-
-                    # Delete network interfaces
-                    for subnet in vpc.subnets.all():
-                        for interface in subnet.network_interfaces.all():
-                            interface.delete()
-                        subnet.delete()
-
-                    # Finally, delete the VPC
-                    retry = 5
-                    for _ in range(retry):
-                        try:
-                            client.delete_vpc(VpcId=vpc.id)
-                            break
-                        except Exception as e:
-                            logging.error(e)
-                            logging.error(f"Failed deleting VPC {vpc.id}. Retrying...")
-                    else:
-                        logging.error(
-                            f"Failed to Delete VPC {vpc.id} after {retry} retries"
-                        )
+                    cleaner.delete_vpc(client, ec2, vpc)
             except CONNECTIVITY_ERRORS as e:
-                log_skipped_region(region, "VPC cleanup", e)
-                continue
-        if self.dry_run:
-            logging.warning(
-                f"List of AWS VPCs (Total: {len(self.vpc_ids_to_delete)}) which will be deleted: {self.vpc_ids_to_delete}"
-            )
-        else:
-            logging.warning(
-                f"Number of AWS VPCs deleted: {len(self.vpc_ids_to_delete)}"
-            )
-            logging.warning(f"List of AWS VPCs deleted: {self.vpc_ids_to_delete}")
+                _skip_region(region, e)
+        _log_summary(self.vpc_ids_to_delete, dry_run=self.dry_run)
