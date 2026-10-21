@@ -85,3 +85,98 @@ Compared `crc/aws/keypairs.py` against `git show main:crc/aws/keypairs.py`:
 Test count: 2077 before R4a (`de2a1e0`), 2148 on `46740e5`, 2201 after review additions (+53).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff de2a1e0..5ea28f1` (R4a plus round 1 fixes), read against `AGENTS.md`,
+`ARCHITECTURE.md`, `CLEANUP_SAFETY.md`, `docs/refactor/BUGS.md`, the review checklist and
+`git show main:crc/aws/keypairs.py`.
+
+### Round 1 fixes assessment
+
+- Summary warnings on the `Cleaner` path (`crc/aws/keypairs.py:72-80`, `:124`, `:139`, `:264`):
+  correct. The text equals `main:crc/aws/keypairs.py:147-155`. `crc.core.engine.run` calls
+  `apply()` only when `dry_run` is False (`crc/core/engine.py:99-100`), so the dry-run summary
+  is logged once, from `plan()`. `KeyPairs.delete()` output is unchanged; its parity test still
+  compares every log record.
+- `options.get("age")` in `build_keypair_cleaner` and the widened `| None` / `| int`
+  annotations: these match `main`, where `KeyPairs.__init__` stores whatever it gets and
+  `is_old` treats a falsy age as "matches everything". `self._age or {}` gives the same
+  result for `None`, `0` and `{}` because `core_age.is_old` returns True for any falsy age
+  (`crc/core/age.py:191-193`). `MAX_AGE` is still applied inside `core_age.is_old` (SAF-010).
+- New tests: `test_cleaner_protocol_matches_main` asserts error and stdout on every case,
+  `deleted` on every case without an error, and the full log and SDK call lists (excluding
+  `client` creation) for cases with one region or none. For the two cases where main deletes
+  some key pairs and then fails, it asserts that the protocol path made no
+  `delete_key_pair` call at all, which is the documented, safer plan-then-apply difference.
+  The test is not vacuous. The `describe_regions` `ClientError` (SAF-004) and connectivity
+  fallback (SAF-001) cases also run against `KeyPairs`, and two new quirk checks back them.
+  The `tests/test_core_registry.py` change (compare against a snapshot taken before the test,
+  not `()`) keeps the same leak check.
+- I re-checked the oracle: `diff <(git show main:crc/aws/keypairs.py) tests/legacy/aws_keypairs.txt`
+  is empty.
+
+No round 1 fix changed behaviour or weakened a test.
+
+### Independent review
+
+- Parity (`KeyPairs.delete`, the path `crc.py:660-661` uses): the SDK call order, the per-region
+  `set` iteration (same names inserted in the same order, so the iteration order is the same
+  as `main`), the exception patterns deduplicated once before `get_all_regions` (a bad
+  `exception_regex` element still raises before any region call), the log text, the dry-run
+  path and the error propagation all match `main:crc/aws/keypairs.py:95-155`. I also ran a
+  string, rather than a list, `name_regex` / `exception_regex` against the oracle; the results
+  are identical.
+- Safety: SAF-001, SAF-004, SAF-006 and SAF-010 hold. `plan()` and `plan_region()` only call
+  `describe_key_pairs` (ARCH-005). No safety-locked test was touched.
+- Architecture: import-linter 5 kept. ARCH-002 to ARCH-005 pass. `crc.aws.keypairs` left both
+  ratchet lists and nothing was added. The new `boto3`/`botocore` mypy override is limited to
+  the SDKs (`ignore_missing_imports`, not `ignore_errors`), so it is not a ratchet entry.
+- Docs: I checked the round 1 BUG-045 to BUG-048 `main` citations line by line; they are
+  accurate. The `crc/aws/README.md` symbol list and safety notes are accurate.
+
+### BLOCKING (fixed)
+
+None.
+
+### NIT (left)
+
+1. **`KeyName` present but `None` (or another falsy value that is not a string).**
+   `policy.name_regex_search_matches` and `policy.exception_regex_search_matches` search
+   `text or ""` (`crc/core/policy.py:182`, `:187`), and `KeyPairCleaner._skip_reason` calls
+   them (`crc/aws/keypairs.py:180-181`). With a non-empty `name_regex` or `exception_regex`,
+   `main` raises `TypeError` from `re.search(p, None)` (`main:crc/aws/keypairs.py:112-117`),
+   while the refactor treats the name as `""`. With `[".*"]` it selects the key pair: in a dry
+   run it is listed as `None`, and outside a dry run `delete_key_pair(KeyName=None)` is called.
+   I confirmed this with an ad-hoc oracle comparison that I did not commit. botocore parses
+   `KeyName` as a string or leaves it out, so this cannot happen against real EC2. The real
+   client would also reject `KeyName=None` with `ParamValidationError` before sending a
+   request. I left it instead of copying CPython's version-specific `TypeError` text into a
+   cloud module. Fix this when the policy `None` handling is revisited.
+2. If `KeyPairCleaner.apply()` is called directly with `dry_run=True`, the summary is logged a
+   second time, after the one from `plan()`. The engine never makes that call
+   (`crc/core/engine.py:100`).
+3. `KeyPairRuntime.clock` defaults to `datetime.datetime.now` (round 1 NIT; still open in
+   STATUS).
+
+### New bugs recorded (`docs/refactor/BUGS.md`, now 50 rows)
+
+- `BUG-049`: there is no in-use check (instances, launch templates) before `delete_key_pair`
+  (`main:crc/aws/keypairs.py:104-142`, `:138`).
+- `BUG-050`: deleted key pairs are reported by bare name without region
+  (`main:crc/aws/keypairs.py:142`, `main:crc.py:446`).
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check` (Python 3.12.3):
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed |
+| `mypy` (`crc`, `tests`) | Success: no issues found |
+| `lint-imports` | Contracts: 5 kept, 0 broken |
+| `pytest -q` | 2201 passed |
+
+Test count: 2201, the same as after round 1. Round 2 changed docs only.
+
+ROUND 2 VERDICT: APPROVE

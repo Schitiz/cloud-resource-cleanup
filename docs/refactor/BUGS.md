@@ -77,10 +77,12 @@ Related: `docs/refactor/FILTER_VARIANTS.md` (how each module filters, section 7 
 | BUG-046 | AWS key pair cleanup is not atomic across regions: it lists and deletes region by region, a non-connectivity error (ClientError, invalid regex, naive `CreateTime`) aborts the run after earlier regions were already deleted, and no summary line is logged; a connectivity error mid-region keeps the names already deleted but skips the rest | `crc/aws/keypairs.py:99-146`, `:143-145`, `:147-155` | yes | cosmetic | low | R4a | open |
 | BUG-047 | AWS key pair deletion order comes from a `set` (and the exception regex patterns are also tried in set order), so it varies between processes and decides which invalid pattern raises | `crc/aws/keypairs.py:95-98`, `:101`, `:136-141` | yes | cosmetic | low | R4a | open |
 | BUG-048 | AWS key pairs without `KeyName` or `CreateTime` are skipped silently (no log); the exception regex is evaluated even when the name regex does not match, so an invalid exception pattern raises for any key pair | `crc/aws/keypairs.py:105-106`, `:112-118` | yes | cosmetic | low | R4a | open |
+| BUG-049 | AWS key pair cleanup does not check whether a key pair is still referenced (running instances, launch templates, Auto Scaling): any old matching key pair is deleted, so later launches from those templates fail; only the name and age decide | `crc/aws/keypairs.py:104-142` (no lookup before `delete_key_pair` at `:138`) | yes | deletes what it should keep | low | R4a (round 2) | open |
+| BUG-050 | Deleted key pairs are recorded by bare name without region (`deleted_keypairs.append(keypair_to_delete)`), so the same name deleted in two regions appears twice in the Slack and InfluxDB report with no way to tell the regions apart | `crc/aws/keypairs.py:142`, `crc.py:446` | yes | cosmetic | low | R4a (round 2) | open |
 
 ## Counts
 
-48 rows: critical 2, high 7, medium 10, low 29. All open.
+50 rows: critical 2, high 7, medium 10, low 31. All open.
 
 ## Notes
 
