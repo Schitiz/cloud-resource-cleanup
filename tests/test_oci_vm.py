@@ -13,7 +13,7 @@ from oci.exceptions import ConnectTimeout
 from crc.core.cleaner import Operation, Plan, RunContext
 from crc.core.registry import DEFAULT_REGISTRY
 from crc.oci.vm import VM, VmCleaner, VmRuntime, VmSettings, build_vm_cleaner
-from crc.oci.vm_api import ComputeApi, OciComputeApi, SdkInstance
+from crc.oci.vm.client import ComputeApi, OciComputeApi, SdkInstance
 
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=datetime.UTC)
 FILTER = {"env": ["ci"]}
