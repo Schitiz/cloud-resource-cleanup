@@ -76,3 +76,67 @@ Scope reviewed: `git diff d3e97b0..HEAD` (`crc/aws/vm.py`, `crc/aws/vm_cleaner.p
 Test count: 4317 before AWS-3 (`d3e97b0`), 4675 on `9411b7c`, 4692 after review additions (+375).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff d3e97b0..HEAD` (both rung commits `9411b7c` and `8e1152a`), read against `git show main:crc/aws/vm.py`, `git show main:crc.py`, `AGENTS.md`, `ARCHITECTURE.md`, `CLEANUP_SAFETY.md`, `docs/refactor/BUGS.md` and `REVIEW_CHECKLIST.md`.
+
+### Round 1 fixes assessment
+
+- **Parity tests added in round 1 are correct and not vacuous.** `test_get_filtered_instances_matches_main` (`tests/test_aws_vm_parity.py:933-956`) compares the return value, SDK calls and logs of `VM._get_filtered_instances` with the oracle on 8 existing cases, including the error paths. `test_repeated_operations_match_main` (`:959-991`) compares two calls on the same object against the oracle.
+- **The `test_cleaner_protocol_matches_main` change made the test stronger.** The removed per-stream equality plus "summary is last" check (`git diff 9411b7c..HEAD -- tests/test_aws_vm_parity.py`) is implied by the new `new.logs == [*listing, *mutating, *summary]` (`:670-673`). Error cases now also assert the listing log and that there was no mutating call (`:660-664`). No assertion was removed without a stronger one replacing it.
+- **Pending-bug corrections are correct.** I re-checked every citation round 1 changed or added with `git show main:crc/aws/vm.py`: `:38-73`, `:196-197`, `:229-235`, `:260-280`, `:311-372`, `:375-402`, `:82-90`, `:100-108`, `:222`, `:330-363`. All of them point at the code described. Moving the duplicate-key `notags` row to `deletes what it should keep` is right.
+- **No round 1 change touched production code** except the `and` typo fix in `crc/aws/README.md`, so behaviour did not change.
+
+### Independent review
+
+- **Parity holds.**
+  - The oracle is byte-identical to `git show main:crc/aws/vm.py` (`diff` is empty).
+  - `should_skip` (`crc/aws/vm_cleaner.py:229-245`) matches main `:255-280`. `exception_tags_any({key: value}, spec)` is equivalent to main's `k in spec and (not spec[k] or v in spec[k])` through `_key_matches`. `notags_all` is `bool(spec) and all(...)`, which matches main's `if self.notags:` guard.
+  - `effective_age` is `retention_age or age`.
+  - The error and success texts render the same strings as main `:336`, `:340`, `:357`, `:361`.
+  - Dry-run `stop` still records ids (main `:365`).
+  - `vm_scan._scan_region` uses `results.extend(<generator>)`. On an exception partway through, CPython keeps the items already appended, so partial-region results match main's per-item `append` (checked directly).
+- **Mutation checks: the tests catch both changes.**
+  - Replacing `policy.notags_all` with the vacuous `policy.matches_all_keys` fails the parity suite immediately.
+  - Turning the empty age into `{'days': 0}` fails 4 cases.
+  - Both changes were reverted.
+- **Safety (`CLEANUP_SAFETY.md`) is unchanged.**
+  - `plan()` makes no mutating call. `terminate_instances` and `stop_instances` run only from `apply()` / `apply_region()`, never in a dry run.
+  - No age gate was weakened. The missing age validation (SAF-006 / SAF-011) is main behaviour, already recorded as the first AWS-3 pending row, and the factory follows the other AWS Cleaner factories.
+  - Only connectivity errors are caught at the region level, as on main.
+- **Architecture and typing are fine.**
+  - `@register("aws", "vm")` is used and there is no import-time cloud call.
+  - boto3 sits behind the `vm_api.py` Protocols.
+  - Both ratchet lines were removed and nothing was added.
+  - `crc/aws/README.md` changes only the AWS-3 parts (module list, symbols, the VMs bullet, extension rule 3), and ARCH-002 passes.
+  - No file outside the lane was touched (`crc.py`, `crc/core/**`, shared docs).
+
+### BLOCKING (fixed)
+
+None.
+
+### NIT (left)
+
+- **`now` is read once per region instead of once per instance.** `VM._perform_operation` reads the clock once per region (`crc/aws/vm.py:192-194`), while main calls `datetime.datetime.now()` once per instance (main `:231`). During a long region listing the cutoff is slightly earlier than on main. That is the fail-closed direction (an instance can only look younger) and is not visible in tests that use a frozen clock. The coding summary does not mention it.
+- **No test for a malformed tag partway through a region in the tag scan.** `find_instances_with_tag` is not tested with a malformed tag (missing `Key`) in the middle of a region's pages, which is the partial-result path above. The behaviour matches main by inspection.
+- **`VmCleaner._clients` keeps state between runs** (`crc/aws/vm_cleaner.py:135`, `:166`). Reusing one cleaner instance keeps the previous run's clients. This is harmless, because the registry builds a new cleaner per context.
+
+### New bugs
+
+- One `NEW` row was added to `docs/refactor/bugs/pending/AWS-3.md`. `find_instances_with_tag` takes its regions from the static `get_available_regions` list, swallows every per-region error as a warning, and a malformed tag cuts a region's results short (main `crc/aws/vm.py:117-123`, `:124-129`, `:136-140`, `:156-161`; cosmetic, low).
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`:
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed |
+| `mypy` | Success: no issues found in 106 source files |
+| `lint-imports` | Contracts: 5 kept, 0 broken |
+| `pytest -q` | 4692 passed |
+
+Test count: 4692 (4317 before the rung, +375; round 2 added no tests).
+
+ROUND 2 VERDICT: APPROVE
