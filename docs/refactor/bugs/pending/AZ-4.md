@@ -1,0 +1,18 @@
+# AZ-4 pending bugs and quirks
+
+Rows found in rung AZ-4 (`crc/azu/vm.py`, now the `crc/azu/vm/` package). Same columns as
+`docs/refactor/BUGS.md`, ID `NEW`; locations are `main` file:line (`git show main:<path>`).
+Already registered and also preserved by this rung: BUG-002, BUG-003, BUG-004, BUG-010, BUG-028.
+
+| ID | Title | Location on main | Exists on main | Effect | Risk | Found in | Status |
+|----|-------|------------------|----------------|--------|------|----------|--------|
+| NEW | Azure VM `instance_state` is a substring test of the instance view display status (`"run"` matches `VM running`), an empty string matches every VM and an empty list matches none; `crc.py` maps an empty list to the default but a direct `delete([])` does nothing | `crc/azu/vm.py:149`, `:255-260`; `crc.py:108-111` | yes | deletes what it should keep | medium | AZ-4 | open |
+| NEW | Azure VM per-VM `except Exception` wraps the status read, the delete and the power-off: any failure (delete LRO timeout, `begin_power_off` error, bad status) is only logged at ERROR and the run still succeeds, with the VM missing from `get_deleted` / `get_stopped` | `crc/azu/vm.py:146-157` | yes | keeps what it should delete | medium | AZ-4 | open |
+| NEW | Azure VM is recorded in `instance_names_to_delete` before its NIC is deleted, and the NIC helper never raises: after 24 failed attempts (23 sleeps of 15 s, about 6 minutes per VM) the VM counts as deleted while its NIC is only logged as failed and is missing from `get_deleted_nic` | `crc/azu/vm.py:273-283`; `crc/azu/vm_delete_helpers.py:53-90` | yes | keeps what it should delete | medium | AZ-4 | open |
+| NEW | Azure VM delete only removes the NIC named `<vm>-NIC`; any other NIC, the OS and data disks and public IPs of the VM are left to the other cleaners (a NIC with another name is never removed here) | `crc/azu/vm.py:276-282`; `crc/azu/vm_delete_helpers.py:42`, `:48` | yes | keeps what it should delete | low | AZ-4 | open |
+| NEW | Azure VM stop does not wait for the power-off operation and logs "Stopping" and records the VM as stopped right after the call returns, so a power-off that fails later is never seen | `crc/azu/vm.py:293-297` | yes | cosmetic | low | AZ-4 | open |
+| NEW | Azure VM age check reads `vm.time_created.tzinfo` outside the per-VM `try`: a VM without `time_created` (`AttributeError`) or with a naive one (`TypeError` in `is_old`), or a malformed `MAX_AGE` (`SyntaxError`), aborts the whole run after earlier VMs were already deleted | `crc/azu/vm.py:139-145` | yes | run fails | low | AZ-4 | open |
+| NEW | Azure VM listing is lazy and consumed while deleting: a paging error mid-listing aborts the run after earlier VMs were already deleted or stopped, with no summary line | `crc/azu/vm.py:134-135`, `:160-195` | yes | run fails | low | AZ-4 | open |
+| NEW | Azure VM dry run still builds the network client (`get_network_client()` is evaluated as an argument) although it never calls the network API | `crc/azu/vm.py:278-283` | yes | cosmetic | low | AZ-4 | open |
+| NEW | Azure VM custom age tag `{'days': 1e999}` (infinite) passes `get_retention_age` and makes `is_old` raise `OverflowError`, aborting the run (a variant of BUG-016) | `crc/azu/vm.py:141-145`; `crc/service.py:268-274` | yes | run fails | low | AZ-4 | open |
+| NEW | `VM.delete_count`, `nic_delete_count` and `stopped_count` log the count at INFO and the name lists accumulate across `delete()` / `stop()` calls on one object, so a second call lists and logs the first call's VMs again | `crc/azu/vm.py:73-81`, `:92-98`, `:109-115`, `:160-195` | yes | cosmetic | low | AZ-4 | open |
