@@ -52,6 +52,19 @@ def test_connectivity_error_falls_back_to_static_list(
     ]
 
 
+def test_static_fallback_ignores_partition_of_default_region(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = MagicMock()
+    client.describe_regions.side_effect = EndpointConnectionError(endpoint_url="https://x")
+    session = MagicMock()
+    session.get_available_regions.return_value = ["us-east-1"]
+    monkeypatch.setattr(boto3, "client", MagicMock(return_value=client))
+    monkeypatch.setattr(boto3.session, "Session", MagicMock(return_value=session))
+    assert get_all_regions("ec2", "us-gov-west-1") == ["us-east-1"]
+    assert session.mock_calls == [call.get_available_regions("ec2")]
+
+
 def test_auth_error_propagates_without_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     client = MagicMock()
     client.describe_regions.side_effect = ClientError(

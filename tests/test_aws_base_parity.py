@@ -128,6 +128,16 @@ CASES: list[Case] = [
         describe_error=conn_errors()["closed"],
     ),
     Case("static-is-tuple-like", static=("a", "b"), describe_error=conn_errors()["endpoint"]),
+    Case(
+        "fallback-govcloud-default-region",
+        default_region="us-gov-west-1",
+        describe_error=conn_errors()["endpoint"],
+    ),
+    Case(
+        "fallback-china-default-region",
+        default_region="cn-north-1",
+        describe_error=conn_errors()["read-timeout"],
+    ),
 ]
 for _name, _factory in conn_errors().items():
     CASES.append(Case(f"fallback-describe-{_name}", describe_error=_factory))
