@@ -88,10 +88,12 @@ Related: `docs/refactor/FILTER_VARIANTS.md` (how each module filters, section 7 
 | BUG-057 | AWS KMS scheduling is not atomic and has no per-key error handling: a `schedule_key_deletion` error aborts the run after earlier keys were scheduled, but `kms_keys_to_delete.extend` runs only after the loop, so those keys are missing from `get_deleted`, Slack and InfluxDB and no summary line is logged | `crc/aws/kms.py:188-196` | yes | cosmetic | low | R4c | open |
 | BUG-058 | AWS KMS logs the warning `Exception tags and not present` for every key when `exception_tags` is empty or `None` (the message is also garbled), flooding the log of a normal run | `crc/aws/kms.py:84-86`, called `:147` | yes | cosmetic | low | R4c | open |
 | BUG-059 | AWS KMS cleanup is hard-coded to `us-west-2` (`get_all_regions` is imported and never called), so KMS keys in every other region are ignored | `crc/aws/kms.py:10`, `:21`, `:113` | yes | keeps what it should delete | low | R4c | open |
+| BUG-060 | AWS KMS key policy match compares `Principal.AWS` to `kms_user` with `==` only: a statement listing several principals (`"AWS": [arn1, arn2]`) never equals the user ARN, so a key shared with the Jenkins user is never selected; a `"Principal": "*"` statement raises `TypeError`, which the bare `except:` turns into `KEY SKIPPED` | `crc/aws/kms.py:174-176`, `:181-183` | yes | keeps what it should delete | low | R4c (round 2) | open |
+| BUG-061 | AWS KMS per-key bare `except:` also catches `KeyboardInterrupt` (and `SystemExit`): an operator's Ctrl-C during the key loop is logged as `KEY SKIPPED`, the loop goes on, and in a real run the keys already selected are still scheduled for deletion | `crc/aws/kms.py:181-183`, schedule `:187-192` | yes | deletes what it should keep | low | R4c (round 2) | open |
 
 ## Counts
 
-59 rows: critical 2, high 7, medium 12, low 38. All open.
+61 rows: critical 2, high 7, medium 12, low 40. All open.
 
 ## Notes
 

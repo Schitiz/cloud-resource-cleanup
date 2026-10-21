@@ -83,3 +83,69 @@ Compared `crc/aws/kms.py` against `git show main:crc/aws/kms.py`:
 Test count: 2403 before R4c (`088ee7c`), 2697 on `7617400`, 2703 after review additions (+6).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 088ee7c..HEAD` (`7617400` plus round 1 `710bf75`) against `git show main:crc/aws/kms.py`,
+`AGENTS.md`, `ARCHITECTURE.md`, `docs/refactor/BUGS.md` and `REVIEW_CHECKLIST.md`.
+
+### Round 1 fixes assessment
+
+- `_has_all_pairs` (`crc/aws/kms.py:108-119`): correct. It now builds `response_set` then `filter_set`
+  in the order of `main:crc/aws/kms.py:134-142`, so an unhashable tag value or a non-iterable filter
+  value raises inside the per-key `try` exactly as on `main`. The pair check
+  `{k: v}.get(wanted_key) == wanted` over the set equals `filter_set.issubset(response_set)` for every
+  hashable value (an empty `filter_set` gives `True` in both). Verified by reverting to the lazy
+  list form: exactly the 6 new tests fail (`filter-non-iterable-second-key-after-mismatch-skips-with-warning`
+  and `tag-unhashable-value-skips` in `test_matches_main`, `test_cleaner_protocol_matches_main`,
+  `test_quirk_is_preserved`); restored.
+- Round 1 test changes are additions only (2 `CASES`, 2 `QUIRKS`, one extra `client` region assertion);
+  no existing assertion was removed or relaxed. `BUGS.md` counts (59 rows: 2/7/12/38) were correct.
+
+### Independent review
+
+- Oracle `tests/legacy/aws_kms.txt` is byte-identical to `git show main:crc/aws/kms.py`.
+- Parity: SDK call order and arguments, `_should_skip` key-before-value evaluation
+  (`{tag["Key"]: tag["Value"]}` matches `main:crc/aws/kms.py:90-91`), fail-open custom age via
+  `core_age._find_tag_value` (same `.get("Key")` lookup as `main:crc/service.py:302`),
+  `retention_age or age`, clock call after the description test, the `KeyError('KeyId')` escape from the
+  `except` block, accumulation over repeated `delete()` calls and the dry-run/real summary lines all
+  match `main`. The harness compares ordered calls, logs (DEBUG), stdout, errors and `get_deleted`
+  for both entry points, so the tests assert outcomes and are not vacuous.
+- Safety (`CLEANUP_SAFETY.md` SAF-001, SAF-004, SAF-006 to SAF-010): connectivity errors skip the region,
+  other list errors propagate, no age gate changed, `MAX_AGE` still applied through `core_age.is_old`
+  (case `max-age-shortens-threshold`). `plan()` makes no mutating call; `schedule_key_deletion` is
+  only in `KmsCleaner.schedule` (`crc/aws/kms.py:192-198`), reached from `apply()` and `Kms.delete()`.
+- Architecture: `crc/aws/kms.py` removed from both ratchet lists, nothing added; decorator
+  registration; injected client factory and clock; typed Protocols at the SDK edge; README symbol
+  lists in sync (ARCH-002 green). `crc.py` unchanged.
+
+### BLOCKING (fixed)
+
+None.
+
+### NIT (left)
+
+- `KmsCleaner.apply()` returns `Result(succeeded=ids)` in a dry run although nothing was scheduled
+  (`crc/aws/kms.py:152-156`); only reachable by calling `apply()` directly, since
+  `crc/core/engine.py:100` skips `apply()` in a dry run. Same root as round 1's double-log nit.
+- `BUG-060` and `BUG-061` were already pinned by parity cases (`policy-list-principal-never-equals`,
+  `policy-string-principal-skips`, `policy-keyboard-interrupt-is-swallowed` in
+  `tests/test_aws_kms_parity.py`) but not recorded; now added to `docs/refactor/BUGS.md` (61 rows:
+  critical 2, high 7, medium 12, low 40) and referenced from `crc/aws/README.md`.
+
+### New bugs recorded (verified with `git show main:crc/aws/kms.py`)
+
+| ID | `main` location | Effect | Risk | Rung |
+|----|-----------------|--------|------|------|
+| `BUG-060` | `crc/aws/kms.py:174-176`, `:181-183` | `Principal.AWS` as a list never equals `kms_user`; `"Principal": "*"` raises `TypeError` and the key is skipped (keeps what it should delete) | low | R4c (round 2) |
+| `BUG-061` | `crc/aws/kms.py:181-183`, `:187-192` | bare `except:` swallows `KeyboardInterrupt`; the run goes on and schedules the keys already selected (deletes what it should keep) | low | R4c (round 2) |
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check` (Python 3.12):
+`ruff check .` passed, `mypy` no issues, `lint-imports` 5 kept / 0 broken, `pytest -q` 2703 passed.
+
+Test count: 2703 (unchanged by round 2; 2403 before R4c).
+
+ROUND 2 VERDICT: APPROVE
