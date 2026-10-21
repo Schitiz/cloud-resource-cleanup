@@ -103,3 +103,78 @@ Scope reviewed: `git diff 2762dc3..HEAD` (`crc/azu/disk.py`, `crc/azu/README.md`
 Test count: 3715 before AZ-3 (`2762dc3`), 3919 now (+204).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 2762dc3..HEAD` (both commits, including round 1's fixes), re-read against
+`git show main:crc/azu/disk.py`, `git show main:crc/service.py`, `crc/core/policy.py`,
+`crc/core/age.py`, `CLEANUP_SAFETY.md` and `REVIEW_CHECKLIST.md`.
+
+### Round 1 fixes assessment
+
+1. Pending-row risk change (subscription-wide `list()` vs `begin_delete(self.base.resource_group, ...)`
+   to `critical` / `deletes what it should keep`): correct and consistent with `BUG-111`
+   (`main:crc/azu/disk.py:78`, `:129-131` verified). Adding `:21-51` to the age row and the new
+   `count` / accumulation row: correct (`main:crc/azu/disk.py:44`, `:61-69`, `:134`).
+2. `Disk.__init__` annotations relaxed to `TagSpec | None` / `AgeSpec | None` / `str | None`
+   (`crc/azu/disk.py:226-235`): annotation only, no runtime change; matches what `crc.py` passes.
+3. `test_cleaner_protocol_matches_main` now compares the "Deleted disk" and summary log groups on
+   `error_phase == "apply"` (`tests/test_azure_disk_parity.py:456-458`): strengthens the test, no
+   assertion removed.
+
+No round 1 fix changed behaviour or weakened a test.
+
+### Independent review
+
+- Parity, re-derived by hand: `filter_tags_any_key` / `exception_tags_any` / `notags_all` on
+  `dict(disk.tags) if disk.tags else {}` give the same truth values and the same exceptions as
+  `main:crc/azu/disk.py:83-109` for `None`, `{}` and populated tags (the `{}`-tags path short-circuits
+  on `key in tags` before `tags[key] in values`, as main's `disk.tags and ...` does). `effective_age(r, age or {})`
+  vs `retention_age or self.age`: `is_old({})` and `is_old(None)` both return True with the same
+  debug log. `core_age.get_retention_age(disk.tags or {}, key or "")` logs and returns as
+  `Service.get_retention_age` does for `None` tags / key. State test, log lines, summary lines and
+  SDK argument order match.
+- Safety: `plan()` makes only `disks.list`; `begin_delete` only in `delete_disk` (from `apply()` and
+  `Disk.delete()`), never in a dry run. No age gate weakened, custom age tag still fails open as on
+  main (`BUG-004`), no new per-resource isolation. Ratchet only shrinks; no SDK mypy override.
+- Tests: parity cases compare calls, errors, deleted list, count, every log record and stdout with
+  the frozen oracle; quirk checks assert the quirk on both oracle and new code; no skip/xfail;
+  interleaving test pins the exact call sequence. Not vacuous.
+
+### BLOCKING (fixed)
+
+None.
+
+### NIT
+
+- Fixed (docs only): `crc/azu/README.md` said the adapter reads the clock "once per disk as main
+  does"; main reads `datetime.datetime.now()` only for disks that pass the tag filters
+  (`main:crc/azu/disk.py:112`, `:121`), the adapter calls `self.clock()` for every listed disk
+  (`crc/azu/disk.py:292`). Not observable (the default clock has no side effects); wording corrected.
+  The Coding summary line "read once per disk as main does" has the same imprecision (left).
+- Left: `AzureDiskCleaner.apply()` in a dry run logs the summary a second time (round 1 NIT; the
+  engine never calls `apply()` in a dry run).
+- Left: `_is_old_enough` types `retention_age` as `Any` (`crc/azu/disk.py:187`); acceptable since
+  `core_age.get_retention_age` returns `Any` (the parsed literal).
+
+### New bugs
+
+- One row added to `docs/refactor/bugs/pending/AZ-3.md`: a custom age tag that parses to a truthy
+  non-dict (`True`, a float, a string) reaches `is_old` unchecked (`main:crc/service.py:300-318`,
+  `:214-220`, `:237-262`); verified by running main's `Service` (`True` means 1 day, `1.5` raises
+  `TypeError`).
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`:
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed |
+| `mypy` | Success: no issues found in 100 source files |
+| `lint-imports` | Contracts: 5 kept, 0 broken |
+| `pytest -q` | 3919 passed |
+
+Test count: 3919 (3715 at `2762dc3`, +204).
+
+ROUND 2 VERDICT: APPROVE
