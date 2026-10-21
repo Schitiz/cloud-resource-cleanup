@@ -33,6 +33,7 @@ are; `BUGS.md` already contains all of them.
 | OCI-3 | done, reviewed: VERDICT: APPROVE; ROUND 2 VERDICT: APPROVE | Lane rung merged into `refactor/python-agentic`. Details: `docs/refactor/reviews/OCI-3.md`. New bugs: BUG-255, BUG-256, BUG-257, BUG-258, BUG-259, BUG-260, BUG-261, BUG-262, BUG-263, BUG-264, BUG-265, BUG-266, BUG-267, BUG-268, BUG-269, BUG-270, BUG-271. |
 | AWS-5 | done, reviewed: VERDICT: APPROVE; ROUND 2 VERDICT: APPROVE | Lane rung merged into `refactor/python-agentic`. Details: `docs/refactor/reviews/AWS-5.md`. New bugs: BUG-272, BUG-273, BUG-274, BUG-275, BUG-276, BUG-277, BUG-278, BUG-279, BUG-280, BUG-281. |
 | AWS-4 | done, reviewed: VERDICT: APPROVE; ROUND 2 VERDICT: APPROVE | Lane rung merged into `refactor/python-agentic`. Details: `docs/refactor/reviews/AWS-4.md`. New bugs: BUG-282, BUG-283, BUG-284, BUG-285, BUG-286, BUG-287, BUG-288, BUG-289, BUG-290, BUG-291, BUG-292, BUG-293, BUG-294, BUG-295, BUG-296. |
+| PL-AWS | done, reviewed: VERDICT: APPROVE; ROUND 2 VERDICT: APPROVE | Lane rung merged into `refactor/python-agentic`. Details: `docs/refactor/reviews/PL-AWS.md`. New bugs: BUG-302, BUG-303, BUG-304, BUG-305, BUG-306, BUG-307. |
 | PL-GCP | done, reviewed: VERDICT: APPROVE; ROUND 2 VERDICT: APPROVE | Lane rung merged into `refactor/python-agentic`. Details: `docs/refactor/reviews/PL-GCP.md`. New bugs: BUG-297, BUG-298, BUG-299, BUG-300, BUG-301. |
 
 Open issues (R0a):
