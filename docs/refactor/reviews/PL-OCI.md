@@ -84,7 +84,7 @@ Scope: `git diff ef1f718..HEAD` plus round 1's changes, against `git show main:c
 ### NIT (left)
 
 - `tests/test_oci_base_parity.py:287-290`: the compiled oracle imports the refactored `crc.oci.connectivity`, not main's copy, so base parity does not cover connectivity on its own. `tests/test_oci_connectivity_parity.py` covers that, so it is acceptable.
-- `crc/oci/_base.py:56-57`: `else:` became `elif key_file:`. This is equivalent because of the earlier `KeyError` guard, and the env cases cover it. Now that the module is legacy again the narrowing isn't needed, but it does no harm.
+- `crc/oci/_base.py:57-58`: `else:` became `elif key_file:`. This is equivalent because of the earlier `KeyError` guard, and the env cases cover it. Now that the module is legacy again the narrowing isn't needed, but it does no harm.
 - Round 1's note on the 47/3 test split in the coding summary still applies: the total of 50 is right.
 
 ### Other checks
