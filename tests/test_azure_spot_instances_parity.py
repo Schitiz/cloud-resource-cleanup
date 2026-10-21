@@ -64,6 +64,10 @@ class Case:
 
 
 OS_A = slot("os-a")
+OS_A_NO_RG = types.SimpleNamespace(
+    delete_option="Detach",
+    managed_disk=types.SimpleNamespace(id="/disks/os-a"),
+)
 DATA_A = slot("data-a")
 BOTH: dict[str, Any] = {
     "os_disk": OS_A,
@@ -247,6 +251,16 @@ CASES = [
     Case(
         "disk-delete-404-rg-from-id",
         [vm("s1", os_disk=OS_A)],
+        script={("disk_begin", f"{RG}/os-a"): [http_error(404)]},
+    ),
+    Case(
+        "disk-delete-not-found-rg-fallback",
+        [vm("s1", os_disk=OS_A_NO_RG)],
+        script={("disk_begin", f"{RG}/os-a"): [not_found()]},
+    ),
+    Case(
+        "disk-delete-404-rg-fallback",
+        [vm("s1", os_disk=OS_A_NO_RG)],
         script={("disk_begin", f"{RG}/os-a"): [http_error(404)]},
     ),
     Case(
@@ -483,6 +497,7 @@ def test_cleaner_protocol_matches_main(
     assert _only(new.calls, *READS) == _only(old.calls, *READS)
     if case.fails_in_plan:
         assert _only(new.calls, *MUTATING) == []
+        assert new.logs == old.logs
         return
     assert _only(new.calls, *MUTATING) == _only(old.calls, *MUTATING)
     assert (new.deleted, new.nics, new.disks) == (old.deleted, old.nics, old.disks)
@@ -492,3 +507,34 @@ def test_cleaner_protocol_matches_main(
     else:
         assert collections.Counter(new.logs) == collections.Counter(old.logs)
         assert new.logs[-3:] == old.logs[-3:]
+
+
+def test_repeated_delete_accumulates_lists_as_main(
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    case = Case("repeat", [vm("s1", os_disk=OS_A)])
+
+    def run_twice(build: Callable[[Case], Any]) -> Outcome:
+        azure = _setup(case, monkeypatch, caplog, capsys)
+        cleaner = build(case)
+        cleaner.delete()
+        cleaner.delete()
+        return Outcome(
+            azure.calls,
+            list(cleaner.get_deleted),
+            list(cleaner.get_deleted_nic),
+            list(cleaner.get_deleted_disks),
+            _records(caplog),
+            capsys.readouterr().out,
+            None,
+        )
+
+    old = run_twice(_legacy)
+    new = run_twice(_new)
+    assert new == old
+    assert new.deleted == ["s1", "s1"]
+    assert new.nics == ["s1-NIC", "s1-NIC"]
+    assert new.disks == [f"{RG}/os-a", f"{RG}/os-a"]

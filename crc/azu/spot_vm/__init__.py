@@ -17,6 +17,7 @@ from crc.azu.spot_vm.cleaner import (
     STOPPED_POWER_STATES,
     AzureSpotVmCleaner,
     SpotVmConfig,
+    TagSpec,
     build_spot_vm_cleaner,
     log_summary,
 )
@@ -39,6 +40,7 @@ from crc.azu.spot_vm.disks import (
 )
 from crc.azu.spot_vm.removal import RemovalOps, Removed, Remover
 from crc.azu.vm_delete_helpers import begin_delete_vm_and_wait, delete_vm_primary_nic
+from crc.core import age as core_age
 from crc.service import Service
 
 __all__ = [
@@ -94,11 +96,11 @@ class SpotVM(Service):
         self,
         resource_group: str,
         dry_run: bool,
-        filter_tags: dict[str, list[str]],
-        exception_tags: dict[str, list[str]],
-        age: dict[str, int],
-        custom_age_tag_key: str,
-        notags: dict[str, list[str]],
+        filter_tags: TagSpec | None,
+        exception_tags: TagSpec | None,
+        age: core_age.AgeSpec | int,
+        custom_age_tag_key: str | None,
+        notags: TagSpec | None,
         clock: Callable[[], datetime.datetime] = datetime.datetime.now,
     ) -> None:
         super().__init__()
