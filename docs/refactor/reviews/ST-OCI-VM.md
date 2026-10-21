@@ -49,3 +49,62 @@ Scope reviewed: `git diff -M d109ee5..HEAD` (`crc/oci/vm/__init__.py`, `crc/oci/
 Test count: 42213 passed vs 42213 on base `d109ee5` (+0, unchanged).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff -M d109ee5..HEAD` (the rung commit `da2f982` and round 1's `c86c290`).
+
+### Round 1 fixes assessment
+
+Round 1 made no code or test change; it only added its review section. There was nothing to check
+for changed behaviour or weakened tests. Its claims hold: `crc/oci/vm_api.py -> crc/oci/vm/client.py`
+is a 100% rename, and a line multiset comparison of `d109ee5:crc/oci/vm.py` with
+`cleaner.py` + `adapter.py`, ignoring import and comment lines, differs only in the module docstrings.
+
+### Independent review
+
+- **Parity with main.** The moved `VM._perform_operation` matches main's loop: regions, then a
+  per-region `CONNECTIVITY_ERRORS` skip, then the state, exception, filter and age checks, then
+  terminate or `STOP` per instance with logged, swallowed errors and the summary. Compare
+  `git show main:crc/oci/vm.py` lines 123-170 with `crc/oci/vm/adapter.py` (`_perform_operation`)
+  and `crc/oci/vm/cleaner.py`. No logic moved between modules except by the cut.
+- **Hidden breakage from the move.** No `monkeypatch.setattr("crc.oci.vm....")` or `mock.patch`
+  string targets the old modules, so no patch silently became vacuous. No logger depends on
+  `__name__` (only root `logging.*` calls), so log records are unchanged. Registration
+  (`@register("oci", "vm")` in `cleaner.py`) still runs on `import crc.oci.vm` through
+  `__init__.py`. `pyproject.toml`, `legacy_baseline.txt` and `safety_lock.json` do not name the moved files.
+- **CLEANUP_SAFETY.md.** No safety test touched; SAF-LOCK and ARCH-001..005 pass. `plan()` is still read-only.
+- **Tests.** The only test edit is the import line in `tests/test_oci_vm.py`. No assertion changed.
+- **Docs.** I checked the `BUG-158`..`BUG-171` citations used by the new READMEs against main
+  (`:21`, `:43-46`, `:79`, `:101-103`, `:133-170`); they match.
+
+### Findings
+
+- **BLOCKING (fixed):** `crc/oci/README.md`, "Known bugs" bullet of Safety Invariants. It still pointed
+  VM quirks to `docs/refactor/bugs/pending/OCI-2.md`, a file that does not exist (it was already
+  missing at `d109ee5`). That contradicted the rewritten OCI VM bullet two lines below. I changed only
+  the VM clause, so it now points to `pending/ST-OCI-VM.md`. The disk clause (`OCI-1.md`, also
+  missing) belongs to another module's section and is left as is.
+- **NIT (left):** `crc/oci/vm/adapter.py` imports the private `_log_summary` from `cleaner.py`. This
+  is acceptable within one subpackage, though a public name would be cleaner in a later rung.
+- **NIT (left):** Extension Rule 2 of `crc/oci/README.md` says "SDK calls behind a Protocol in a
+  `*_api.py` module", but the VM Protocols now live in `vm/client.py`. That section is shared, so I
+  left it for the docs owner.
+- **New quirk (recorded, not fixed):** `terminate_instance(instance.id)` keeps data volumes created
+  at launch, because the SDK default `preserve_data_volumes_created_at_launch` is true (main
+  `crc/oci/vm.py:156`). It is recorded in `docs/refactor/bugs/pending/ST-OCI-VM.md`.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`:
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed |
+| `mypy` | Success: no issues found in 198 source files |
+| `lint-imports` | Contracts: 5 kept, 0 broken (130 files, 709 dependencies) |
+| `pytest -q` | 42213 passed in 165.85s |
+
+Test count: 42213, the same as round 1 and the base. After the README edit, `pytest -q tests/archtest` passes: 92 passed.
+
+ROUND 2 VERDICT: APPROVE

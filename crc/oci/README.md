@@ -38,7 +38,7 @@ no __all__.
 
 - Authoritative text: `CLEANUP_SAFETY.md`. Applicable IDs: SAF-006 to SAF-013 (age gates, shared by all clouds), SAF-037, SAF-040, SAF-041, SAF-043, SAF-044, SAF-045, SAF-046.
 - Filtering per module: `docs/refactor/FILTER_VARIANTS.md` sections 5 (OCI), 6 and 7.
-- Known bugs and quirks (do not fix outside a behaviour-fix rung): `docs/refactor/BUGS.md` rows `BUG-004`; new OCI disk quirks are queued in `docs/refactor/bugs/pending/OCI-1.md`, VM quirks in `docs/refactor/bugs/pending/OCI-2.md`.
+- Known bugs and quirks (do not fix outside a behaviour-fix rung): `docs/refactor/BUGS.md` rows `BUG-004`; new OCI disk quirks are queued in `docs/refactor/bugs/pending/OCI-1.md`, VM quirks in `docs/refactor/bugs/pending/ST-OCI-VM.md`.
 - OCI disk (SAF-006 to SAF-013): `plan()` only lists and decides (ARCH-005); `apply()` is the only caller of `delete_volume` / `delete_boot_volume`; only `AVAILABLE` volumes that are not `ATTACHED` / `ATTACHING` are candidates; an empty age matches every volume (SAF-006) and `MAX_AGE` can shorten the age (SAF-010); the age of a volume with a custom age tag fails open to `--age` (SAF-009, BUG-004). A failed delete is logged and skipped, never raised, as on main.
 - OCI VM (SAF-006 to SAF-013): see the Safety Invariants of `crc/oci/vm/README.md`. `plan()` only lists and decides (ARCH-005); `apply()` is the only caller of `terminate_instance` / `stop_instance`. VM quirks are queued in `docs/refactor/BUGS.md` (BUG-158 to BUG-171) and `docs/refactor/bugs/pending/ST-OCI-VM.md`.
 - OCI Spot VMs skip OKE and instance pool members (SAF-045); `--resource spot_instances` needs an explicit `--cloud oci` (SAF-037).
