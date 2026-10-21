@@ -325,10 +325,15 @@ Related: `docs/refactor/FILTER_VARIANTS.md` (how each module filters, section 7 
 | BUG-294 | `name_regex` and `exception_regex` search the `Name` tag, or the volume id when `Name` is absent or empty, never other tags | `crc/aws/disk.py:386`, `:223-233` | yes | cosmetic | low | AWS-4 | open |
 | BUG-295 | `filter_tags` values are sent to EC2 as `tag:<key>` filters (wildcards `*` and `?` only) and then re-checked on the client with `fnmatch.fnmatchcase`, which also treats `[...]` as a character class: a value containing `[` (for example `team[1]`) never matches either side (EC2 returns only the literal `team[1]`, which `fnmatchcase` rejects), so those volumes are silently kept | `crc/aws/disk.py:213-220`, `:273-280`, `:295` | yes | keeps what it should delete | low | AWS-4 | open |
 | BUG-296 | `disks_to_delete` is created in `__init__` and never reset in `delete()`, so calling `delete()` twice on one `Disk` instance accumulates results across calls (`BUG-080` shape), and reading `count` logs `count of items in disks_to_delete: <n>` at INFO on every access (`BUG-081` shape) | `crc/aws/disk.py:89`, `:130-133`, `:282`, `:641`, `:647` | yes | cosmetic | low | AWS-4 | open |
+| BUG-297 | `get_gcp_regions` iterates the SDK pager inside a list comprehension: an error while fetching a later page discards the regions already read and raises, so the caller gets no partial list (`BUG-067` shape, mid-iteration) | `crc/gcp/_base.py:12` | yes | run fails | low | PL-GCP | open |
+| BUG-298 | `project_id` is passed to `RegionsClient().list(project=...)` without validation: `None` or an empty string reaches the SDK and fails there (or lists nothing useful) instead of failing before any cloud call | `crc/gcp/_base.py:6-9` | yes | run fails | low | PL-GCP | open |
+| BUG-299 | Region names are returned as the SDK yields them: no filtering, sorting or deduplication, and a region object without a string `name` is passed through (or raises `AttributeError`) | `crc/gcp/_base.py:12` | yes | cosmetic | low | PL-GCP | open |
+| BUG-300 | A new `RegionsClient` (new credential lookup) is built on every `get_gcp_regions` call, and the client is never closed | `crc/gcp/_base.py:7` | yes | cosmetic | low | PL-GCP | open |
+| BUG-301 | No-op self-assignment `project_id = project_id` and a stray comment: dead code with no effect (dropped in the refactor, no behaviour change) | `crc/gcp/_base.py:8`, `:11` | yes | cosmetic | low | PL-GCP | open |
 
 ## Counts
 
-296 rows: critical 5, high 24, medium 61, low 206. All open.
+301 rows: critical 5, high 24, medium 61, low 211. All open.
 
 ## Notes
 
