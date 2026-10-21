@@ -204,8 +204,8 @@ class NIC(Service):
         self,
         resource_group: str,
         dry_run: bool,
-        name_regex: list[str],
-        exception_regex: list[str],
+        name_regex: Sequence[str] | None,
+        exception_regex: Sequence[str] | None,
     ) -> None:
         """
         Initializes the object with filter and exception tags to be used when searching for NICs.
