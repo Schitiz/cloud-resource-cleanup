@@ -845,6 +845,7 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
         lambda o: o.error is None and o.deleted == ["old-a", "old-b"],
     ),
     ("duplicate-names", lambda o: o.deleted == ["dup", "dup"]),
+    ("same-name-two-zones", lambda o: o.deleted == ["dup", "dup"]),
     ("disk-without-users-attribute", lambda o: o.error is not None and "users" in o.error[1]),
     ("disk-without-labels-attribute", lambda o: o.error is not None and "labels" in o.error[1]),
     ("young-disk-without-name", lambda o: o.error is None and o.deleted == []),
