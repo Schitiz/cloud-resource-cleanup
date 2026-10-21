@@ -10,6 +10,9 @@ from typing import Any
 
 import pytest
 
+from crc.cli import context as cli_context
+from crc.cli import dispatch as cli_dispatch
+from crc.cli import main as cli_main
 from crc.core.cleaner import Operation
 from crc.core.selection import (
     CLOUDS,
@@ -97,9 +100,9 @@ def run_crc_main(
     )
     args.update(cloud=cloud, resource=resource, operation_type=operation, dry_run=True)
     args.update(options)
-    monkeypatch.setattr(crc_cli, "get_argparser", lambda: args)
-    monkeypatch.setattr(crc_cli, "CRC", FakeCRC)
-    monkeypatch.setattr(crc_cli, "Snapshot", FakeSnapshot)
+    monkeypatch.setattr(cli_main, "get_argparser", lambda: args)
+    monkeypatch.setattr(cli_context, "CRC", FakeCRC)
+    monkeypatch.setattr(cli_dispatch, "Snapshot", FakeSnapshot)
     crc_cli.main()
     return calls
 

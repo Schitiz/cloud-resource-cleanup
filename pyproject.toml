@@ -22,7 +22,6 @@ testpaths = ["tests"]
 target-version = "py311"
 line-length = 100
 extend-exclude = [
-    "crc.py",
     "crc/azu/_base.py",
     "crc/oci/_base.py",
     "tests/test_aws_disk.py",
