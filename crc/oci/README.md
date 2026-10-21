@@ -4,7 +4,7 @@
 
 OCI cleaners (oci SDK). They delete or stop leftover instances and volumes across regions.
 
-**Partly refactored.** `disk.py` (rung OCI-1) is a `Cleaner` registered as `oci` / `disk` (no behaviour change); `vm.py` (rung OCI-2) is a `Cleaner` registered as `oci` / `vm` (no behaviour change); `spot_vm.py` is legacy, not yet refactored, and the same as on `main`. Any change must follow `ARCHITECTURE.md` and the refactor rung for this package in `docs/refactor/PLAN.md` (Rung R4+), with `make check` green.
+**Partly refactored.** `disk.py` (rung OCI-1) is a `Cleaner` registered as `oci` / `disk` (no behaviour change); `vm.py` (rung OCI-2) is a `Cleaner` registered as `oci` / `vm` (no behaviour change); `spot_vm/` (rung OCI-3) is a subpackage with a `Cleaner` registered as `oci` / `spot_instances` (no behaviour change; see its README). Any change must follow `ARCHITECTURE.md` and the refactor rung for this package in `docs/refactor/PLAN.md` (Rung R4+), with `make check` green.
 
 Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.md`):
 
@@ -12,14 +12,14 @@ Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.
 - `connectivity.py`: `log_skipped_region`
 - `disk.py`: `DiskCleaner` (registered as `oci` / `disk`) and the `Disk` adapter: deletes available block and boot volumes not attached (`delete_volume`, `delete_boot_volume`); freeform tag any-key filter
 - `disk_api.py`: the typed Protocols of the OCI calls the disk cleaner uses and their SDK implementation
-- `spot_vm.py`: `SpotVM`: terminates preemptible instances and deletes leftover volumes; skips OKE and instance pool members
+- `spot_vm/`: the Spot VM cleaner subpackage (`SpotVmCleaner`, the `SpotVM` adapter, the SDK Protocols and the leftover volume handling); terminates preemptible instances and deletes leftover volumes; skips OKE and instance pool members
 - `vm.py`: `VmCleaner` (registered as `oci` / `vm`) and the `VM` adapter: terminates (`terminate_instance`) or stops (`instance_action` with `STOP`) `RUNNING` instances; freeform tag all-keys filter
 - `vm_api.py`: the typed Protocols of the OCI calls the VM cleaner uses and their SDK implementation
 
 ## Public API
 
 disk.py and disk_api.py are refactored, so the names below are synced with this README by
-ARCH-002. vm.py and vm_api.py are refactored too. The other modules (Base, log_skipped_region, SpotVM) are legacy; SpotVM has delete(). The package __init__.py holds only a copyright comment and declares
+ARCH-002. vm.py and vm_api.py are refactored too. The other modules (Base, log_skipped_region) are legacy. The spot_vm subpackage has its own README and symbol list. The package __init__.py holds only a copyright comment and declares
 no __all__.
 
 - `SdkVolume`: Protocol of the attributes read from an OCI volume or boot volume.
@@ -55,8 +55,8 @@ no __all__.
 
 ## Extension Rules
 
-1. Do not edit the legacy module (`spot_vm.py`) to add features or fix bugs in a refactor
-   rung; behaviour fixes are separate rungs (`docs/refactor/PLAN.md`).
+1. Do not edit the modules to add features or fix bugs in a refactor rung; behaviour fixes are
+   separate rungs (`docs/refactor/PLAN.md`).
 2. New resources go in a new module with the `Cleaner` contract (`ARCHITECTURE.md`, "Add a resource
    cleaner"), not as another legacy class. Follow `disk.py` and `vm.py`: pure policy from `crc.core.policy`,
    age from `crc.core.age`, SDK calls behind a Protocol in a `*_api.py` module, injected through the
