@@ -12,15 +12,15 @@ Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.
 - `disk.py`: `Disk`: deletes unattached managed disks (`begin_delete`); any-key tag filter
 - `ip.py`: `AzureIpCleaner` (registered as `azure`/`ip`) and the legacy adapter `IP`: deletes IPs without an IP configuration (`begin_delete`); any-key tag filter
 - `nic.py`: `AzureNicCleaner` (registered as `azure`/`nic`) and the legacy adapter `NIC`: deletes NICs not attached to a VM (`begin_delete(...).result()`, three attempts); plain substring name filters
-- `spot_vm.py`: `SpotVM`: deletes stopped or deallocated Spot VMs and their leftover disks and NICs
+- `spot_vm/`: `AzureSpotVmCleaner` (registered as `azure`/`spot_instances`) and the legacy adapter `SpotVM`: deletes stopped or deallocated Spot VMs and their leftover disks and NICs (subpackage with its own README, rung AZ-5)
 - `vm.py`: `VM`: deletes (via `vm_delete_helpers`) or stops (`begin_power_off`) VMs by status
 - `vm_delete_helpers.py`: `begin_delete_vm_and_wait`, `delete_vm_primary_nic`: delete helpers, no filtering
 
 ## Public API
 
 The ip and nic modules are refactored, so the names below are synced with this README by ARCH-002.
-The other modules (Base, Disk, SpotVM, VM, begin_delete_vm_and_wait, delete_vm_primary_nic) are
-legacy: each of Disk, SpotVM and VM has delete(), VM also stop(). The package init holds only a
+The other modules (Base, Disk, VM, begin_delete_vm_and_wait, delete_vm_primary_nic) are
+legacy: each of Disk and VM has delete(), VM also stop(). The package init holds only a
 copyright comment and declares no export list.
 
 - `PublicIpOperations`: Protocol of the two public IP calls used, list_all and begin_delete; tests pass fakes.
@@ -42,7 +42,7 @@ copyright comment and declares no export list.
 - Known bugs and quirks (do not fix outside a behaviour-fix rung): `docs/refactor/BUGS.md` rows `BUG-002`, `BUG-003`, `BUG-004`, `BUG-010`, `BUG-013`, `BUG-019`.
 - Azure IPs (AZ-1): `plan()` only calls `list_all`; `begin_delete` is called from `apply()` (and `IP.delete()`) only and never in a dry run. There is no age gate (SAF-011 is not met: an empty `filter_tags` selects every unattached IP) and `list_all` is subscription-wide while the delete uses the configured resource group; untagged IPs raise `TypeError` when `exception_tags` or `notags` is set (BUG-013). Nothing is isolated per IP: every error propagates and a later error leaves earlier IPs deleted. Quirks in `docs/refactor/bugs/pending/AZ-1.md`.
 - Azure NICs (AZ-2): `plan()` only calls `list_all` (twice, as main does); `begin_delete(...).result()` is called from `apply()` (and `NIC.delete()`) only and never in a dry run. An empty `name_regex` logs a warning and returns before any call. Selection is any unattached NIC (`virtual_machine` falsy) whose name contains a `name_regex` entry and no `exception_regex` entry (plain substrings, not regexes). There is no tag filter and no age gate (SAF-011 is not met), `list_all` is subscription-wide while the delete uses the configured resource group, and a failed delete is retried up to three times, logged and swallowed (the NIC is then missing from `get_deleted` and the run still succeeds). Quirks in `docs/refactor/bugs/pending/AZ-2.md`.
-- `SpotVM.delete` re-raises when the list call fails (SAF-005); Spot VMs without tags are skipped (SAF-042).
+- Azure Spot VMs (AZ-5): see `crc/azu/spot_vm/README.md`; `plan()` is read-only, `SpotVM.delete` re-raises when the list call fails (SAF-005), Spot VMs without tags are skipped (SAF-042).
 - Do not call real cloud APIs in tests; mock every SDK client.
 
 ## Extension Rules
