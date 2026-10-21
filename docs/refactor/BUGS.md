@@ -380,10 +380,11 @@ Related: `docs/refactor/FILTER_VARIANTS.md` (how each module filters, section 7 
 | BUG-349 | The scan Slack message is sent with the run's `--operation_type` (`stop` reports "vm" scan hits as a stopped operation that never ran) and always as resource `vm` | `crc.py:1509` | yes | cosmetic | low | CLI-3 | open |
 | BUG-350 | `scan_tag` is read from `args` twice (the first read is dead) and the `# Handle read-only scanning` comment is mis-indented | `crc.py:1348`, `:1427-1428` | yes | cosmetic | low | CLI-3 | open |
 | BUG-351 | `find_instances_with_tag` is annotated `List[Dict[str, str]]` but each record holds a `tags` dict, a `datetime` `launch_time` and possibly `None` `id` / `instance_type`; `state` is upper-cased (`RUNNING`) although the inline comment says `'running'`, `'stopped'`; and the name falls back to `tags.get("Name")`, the last `Name` value, when the first `Name` tag is empty, so an instance with duplicated `Name` tags gets a different name here than in the delete/stop path (`_get_instance_name`, first value) | `crc/aws/vm.py:110`, `:136-141`, `:290-292` | yes | cosmetic | low | ST-AWS-VM (round 2) | open |
+| BUG-352 | `terminate_instance(instance.id)` passes no flags, so the SDK defaults apply: the boot volume is deleted (`preserve_boot_volume` defaults to false) but data volumes created at launch are kept (`preserve_data_volumes_created_at_launch` defaults to true). Those volumes become `AVAILABLE` and keep billing; only the `oci` / `disk` cleaner can remove them later, and only if they match its tag filter and age. The refactor keeps the call unchanged (`OciComputeApi.terminate_instance` in `crc/oci/vm/client.py`) | `crc/oci/vm.py:156` | yes | keeps what it should delete | low | ST-OCI-VM (round 2) | open |
 
 ## Counts
 
-351 rows: critical 5, high 25, medium 61, low 260. All open.
+352 rows: critical 5, high 25, medium 61, low 261. All open.
 
 ## Notes
 

@@ -36,6 +36,7 @@ are; `BUGS.md` already contains all of them.
 | CLI-1 | done, reviewed: VERDICT: APPROVE; ROUND 2 VERDICT: APPROVE | Lane rung merged into `refactor/python-agentic`. Details: `docs/refactor/reviews/CLI-1.md`. New bugs: BUG-333, BUG-334, BUG-335, BUG-336, BUG-337, BUG-338, BUG-339. |
 | CLI-2 | done, reviewed: VERDICT: APPROVE; ROUND 2 VERDICT: APPROVE | Lane rung merged into `refactor/python-agentic`. Details: `docs/refactor/reviews/CLI-2.md`. New bugs: BUG-340, BUG-341, BUG-342, BUG-343. |
 | CLI-3 | done, reviewed: VERDICT: APPROVE; ROUND 2 VERDICT: APPROVE | Lane rung merged into `refactor/python-agentic`. Details: `docs/refactor/reviews/CLI-3.md`. New bugs: BUG-344, BUG-345, BUG-346, BUG-347, BUG-348, BUG-349, BUG-350. |
+| ST-OCI-VM | done, reviewed: VERDICT: APPROVE; ROUND 2 VERDICT: APPROVE | Lane rung merged into `refactor/python-agentic`. Details: `docs/refactor/reviews/ST-OCI-VM.md`. New bugs: BUG-352. |
 | ST-AWS-VM | done, reviewed: VERDICT: APPROVE; ROUND 2 VERDICT: APPROVE | Lane rung merged into `refactor/python-agentic`. Details: `docs/refactor/reviews/ST-AWS-VM.md`. New bugs: BUG-351. |
 | ST-AWS-VPC | done, reviewed: VERDICT: APPROVE; ROUND 2 VERDICT: APPROVE | Lane rung merged into `refactor/python-agentic`. Details: `docs/refactor/reviews/ST-AWS-VPC.md`. New bugs: none. |
 | PL-CORE | done, reviewed: VERDICT: APPROVE; ROUND 2 VERDICT: APPROVE | Lane rung merged into `refactor/python-agentic`. Details: `docs/refactor/reviews/PL-CORE.md`. New bugs: BUG-327, BUG-328, BUG-329, BUG-330, BUG-331, BUG-332. |
