@@ -305,6 +305,29 @@ def test_ping_failure_modes_are_the_documented_quirks(
     assert error == ("RuntimeError", "cannot open")
 
 
+@pytest.mark.parametrize(
+    ("operated", "expected"),
+    [
+        ({"alice": ["v-1"], "bob": None}, ("TypeError", "object of type 'NoneType' has no len()")),
+        ({"alice": ["v-1"], "bob": 3}, ("TypeError", "object of type 'int' has no len()")),
+        (["v-1"], ("AttributeError", "'list' object has no attribute 'keys'")),
+    ],
+)
+def test_ping_on_slack_bad_input_matches_legacy(
+    legacy: ModuleType, current: ModuleType, operated: Any, expected: tuple[str, str]
+) -> None:
+    """Groups are fetched, then every value is measured, before any owner is pinged."""
+    calls, _, out, error = assert_same(
+        legacy,
+        current,
+        lambda crc: crc.ping_on_slack("Disk", "Deleted", operated),
+        lookup_setup("U1", GROUPS, False, False),
+    )
+    assert error == expected
+    assert [c[0] for c in calls] == ["usergroups_list"]
+    assert out == ""
+
+
 def test_slack_and_user_lookups_match_legacy(legacy: ModuleType, current: ModuleType) -> None:
     for setup in (lookup_setup("U1", GROUPS, False, False), lookup_setup(None, None, False, False)):
         assert_same(legacy, current, lambda crc: crc.slack_lookup_user_by_email("a@b.c"), setup)

@@ -254,6 +254,11 @@ class CRC:
         :return: Message to be sent to the Slack channel
         :rtype: str
         """
+        # Groups first, then len() of every value: keeps the old call order and error text
+        # for a non-dict operated_list or a value without len() (BUG-033).
+        user_groups = self.get_user_groups_list()
+        for key in operated_list.keys():
+            len(operated_list[key])
         report = Report(
             self.cloud,
             _OPERATIONS[operation_type],
@@ -262,7 +267,7 @@ class CRC:
             by_owner=operated_list,
         )
         self._slack_notifier().ping_owners(
-            report, resource, self.slack_lookup_user_by_email, self.get_user_groups_list
+            report, resource, self.slack_lookup_user_by_email, lambda: user_groups
         )
 
     def get_msg(self, resource: str, operation_type: str, operated_list: list) -> str:
