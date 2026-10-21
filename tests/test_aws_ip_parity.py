@@ -244,6 +244,16 @@ CASES = [
         {"us-west-2": [eip("1.1.1.1", ENV, None)]},
         filter_tags={"zzz": []},
     ),
+    Case(
+        "missing-allocation-id-then-tag-without-key",
+        {"us-west-2": [eip("1.1.1.1", [*ENV, {"Value": "v"}], None)]},
+        filter_tags={"env": []},
+    ),
+    Case(
+        "missing-allocation-id-then-tag-without-value",
+        {"us-west-2": [eip("1.1.1.1", [*ENV, {"Key": "owner"}], None)]},
+        filter_tags={"env": [], "owner": ["qa"]},
+    ),
     Case("missing-public-ip", {"us-west-2": [{"AllocationId": "a", "Tags": ENV}]}),
     Case("tag-without-key-no-filter", {"us-west-2": [eip("1.1.1.1", [{"Value": "v"}])]}),
     Case(
@@ -522,6 +532,14 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
     ),
     ("tags-none-with-filter-raises", lambda o: o.error is not None and o.error[0] == "TypeError"),
     ("missing-allocation-id", lambda o: o.error == ("KeyError", "'AllocationId'")),
+    (
+        "missing-allocation-id-then-tag-without-key",
+        lambda o: o.error == ("KeyError", "'AllocationId'"),
+    ),
+    (
+        "missing-allocation-id-then-tag-without-value",
+        lambda o: o.error == ("KeyError", "'AllocationId'"),
+    ),
     ("filter-case-sensitive", lambda o: o.deleted == []),
 ]
 

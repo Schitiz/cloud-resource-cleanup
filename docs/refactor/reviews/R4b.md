@@ -82,3 +82,75 @@ Compared `crc/aws/elastic_ips.py` against `git show main:crc/aws/elastic_ips.py`
 Test count: 2201 before R4b (`7f98d3a`), 2383 on `2d1dd05`, 2397 after review additions (+14).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 7f98d3a..ed11b07` (R4b commit plus round 1 fixes), against
+`git show main:crc/aws/elastic_ips.py`, `crc/core/policy.py`, `AGENTS.md`, `ARCHITECTURE.md`,
+`docs/refactor/BUGS.md`, `CLEANUP_SAFETY.md` and `REVIEW_CHECKLIST.md`.
+
+### Round 1 fixes assessment
+
+- `_pair` lazy `Value` read (`crc/aws/elastic_ips.py`, `_pair`): correct. It reads `tag["Value"]`
+  exactly when `main` does (`main:crc/aws/elastic_ips.py:95-98`, `:135-137`: the spec is set, the key
+  is in the spec, and its value list is truthy), and `policy.matches_any_key` on the single-key
+  pair gives the same `in` test as `main`, including substring matching when a spec value is a string.
+  No behaviour change in other paths.
+- `elif` to `else` in `test_cleaner_protocol_matches_main`: makes the check stricter, nothing weakened.
+  The new `test_apply_skips_region_on_connectivity_error` asserts an outcome (`succeeded == ("2.2.2.2",)`).
+- `BUG-053` moved into the `medium` group: correct, counts line matches (medium 11).
+- Oracle `tests/legacy/aws_elastic_ips.txt` re-checked with `cmp` against `git show main:crc/aws/elastic_ips.py`: identical.
+
+### BLOCKING (fixed)
+
+1. **Error order differed from `main` for an address that matches the filter, has no `AllocationId`,
+   and has a malformed later tag.** `main` stores the address at the first matching tag
+   (`main:crc/aws/elastic_ips.py:139`, reading `AllocationId`, then `PublicIp`) and still reads every
+   later tag (`:132-138`). The refactor read all tags first and `AllocationId` afterwards, so it raised
+   `KeyError('Key')` or `KeyError('Value')` where `main` raises `KeyError('AllocationId')`. Fix:
+   `ElasticIpCleaner._select_on_filter` (`crc/aws/elastic_ips.py`) replaces `_matches_filter` and
+   records the address at each matching tag, the same way `main` does. Added cases
+   `missing-allocation-id-then-tag-without-key` and `missing-allocation-id-then-tag-without-value`
+   to `CASES` and `QUIRKS` in `tests/test_aws_ip_parity.py`. All 6 new parametrised checks fail on the
+   pre-fix code and pass with the fix. Other shapes probed against the oracle gave the same results:
+   string specs, `Value: None` with a string spec, `Tags: None` or a string, and a missing `PublicIp`.
+
+### NIT (left)
+
+- Round 1's NIT stands: `ElasticIpCleaner.apply()` called with `dry_run=True` logs the dry-run summary
+  a second time. `crc.core.engine.run` does not call `apply` in a dry run.
+- `ElasticIpCleaner.should_skip` is public only so the adapter can keep `_should_skip_instance`.
+  That is acceptable, but it is not listed in the `crc/aws/README.md` Public API (ARCH-002 checks
+  only classes and functions at module level).
+
+### New bugs
+
+- `BUG-054` (low, run fails): an unassociated, tagged address without `PublicIp` (for example a
+  Wavelength carrier IP) that passes the filter raises `KeyError('PublicIp')` at
+  `main:crc/aws/elastic_ips.py:130` / `:139` and aborts the run. The refactor preserves this and
+  `missing-public-ip` pins it. `BUGS.md` now has 54 rows (low 34); `crc/aws/README.md` cites
+  `BUG-051` to `BUG-054`.
+
+### Checklist
+
+Safety: no age gate exists on `main` (BUG-053) and none was added or weakened. `describe_regions`
+auth errors still propagate (SAF-004, `describe-regions-client-error-propagates`). Connectivity
+errors fall back or skip as on `main` (SAF-001). No safety test was changed. Architecture: `plan()`
+only calls `describe_addresses`, and `release_address` is only in `apply_region`. Registration uses
+the decorator. The module left both ratchet lists and nothing was added to them. `crc.py`,
+`requirements.txt` and the guardrail files are untouched. No new dependency.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check` (Python 3.12):
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed |
+| `mypy` | Success: no issues found in 81 source files |
+| `lint-imports` | Contracts: 5 kept, 0 broken |
+| `pytest -q` | 2403 passed |
+
+Test count: 2397 after round 1, 2403 after round 2 (+6).
+
+ROUND 2 VERDICT: APPROVE

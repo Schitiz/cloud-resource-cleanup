@@ -153,11 +153,8 @@ class ElasticIpCleaner:
             if self._should_skip(tags):
                 skipped.append(Skipped(id=eip.get("PublicIp", ""), reason="matches exception_tags"))
                 continue
-            if not self._matches_filter(tags):
+            if not self._select_on_filter(eip, tags, selected):
                 skipped.append(Skipped(id=eip.get("PublicIp", ""), reason="no filter_tags match"))
-                continue
-            allocation_id = eip["AllocationId"]
-            selected[eip["PublicIp"]] = allocation_id
         candidates = tuple(
             Candidate(id=ip, name=ip, region=region, extra={_ALLOCATION_ID: allocation_id})
             for ip, allocation_id in selected.items()
@@ -191,12 +188,18 @@ class ElasticIpCleaner:
                 raise TypeError("'bool' object is not iterable")
         return False
 
-    def _matches_filter(self, tags: Sequence[Mapping[str, Any]]) -> bool:
+    def _select_on_filter(
+        self, eip: Mapping[str, Any], tags: Sequence[Mapping[str, Any]], selected: dict[str, str]
+    ) -> bool:
+        # main stores the address at each matching tag and still reads the later tags, so a
+        # missing AllocationId raises before a malformed later tag does.
         if not self._filter_tags:
+            selected[eip["PublicIp"]] = eip["AllocationId"]
             return True
         matched = False
         for tag in tags:
             if policy.filter_tags_any_key(_pair(tag, self._filter_tags), self._filter_tags):
+                selected[eip["PublicIp"]] = eip["AllocationId"]
                 matched = True
         return matched
 

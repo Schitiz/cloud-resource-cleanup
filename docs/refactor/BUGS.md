@@ -82,10 +82,11 @@ Related: `docs/refactor/FILTER_VARIANTS.md` (how each module filters, section 7 
 | BUG-050 | Deleted key pairs are recorded by bare name without region (`deleted_keypairs.append(keypair_to_delete)`), so the same name deleted in two regions appears twice in the Slack and InfluxDB report with no way to tell the regions apart | `crc/aws/keypairs.py:142`, `crc.py:446` | yes | cosmetic | low | R4a (round 2) | open |
 | BUG-051 | AWS Elastic IP cleanup is not atomic across regions: it lists and releases region by region, a non-connectivity error (`ClientError`, `KeyError` on a missing `AllocationId`, `TypeError` from `notags`) aborts the run after earlier regions were already released, and no summary line is logged | `crc/aws/elastic_ips.py:119-147`, `:152-160` | yes | cosmetic | low | R4b | open |
 | BUG-052 | A connectivity error while releasing addresses of a region loses the record of the ones already released: `deleted_ips.extend` runs only after the release loop, so those IPs are gone but missing from `get_deleted`, Slack and InfluxDB | `crc/aws/elastic_ips.py:141-147`, `:148-150` | yes | cosmetic | low | R4b | open |
+| BUG-054 | An unassociated, tagged Elastic IP without `PublicIp` (a Wavelength carrier IP is described with `CarrierIp` instead) that passes the filter raises `KeyError('PublicIp')`; nothing catches it, so the run stops in that region, later regions are never cleaned and no summary is logged (BUG-051 shape) | `crc/aws/elastic_ips.py:130`, `:139` | yes | run fails | low | R4b (round 2) | open |
 
 ## Counts
 
-53 rows: critical 2, high 7, medium 11, low 33. All open.
+54 rows: critical 2, high 7, medium 11, low 34. All open.
 
 ## Notes
 
