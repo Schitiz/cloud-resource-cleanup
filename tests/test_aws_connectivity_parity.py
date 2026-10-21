@@ -19,6 +19,7 @@ from botocore.exceptions import (
     NoCredentialsError,
     ProxyConnectionError,
     ReadTimeoutError,
+    SSLError,
 )
 from botocore.exceptions import (
     ConnectionError as BotoConnectionError,
@@ -34,6 +35,7 @@ EXCEPTIONS: dict[str, Callable[[], BaseException]] = {
     "read-timeout": lambda: ReadTimeoutError(endpoint_url="https://ec2.example"),
     "closed": lambda: ConnectionClosedError(endpoint_url="https://ec2.example"),
     "proxy": lambda: ProxyConnectionError(proxy_url="http://proxy", error="refused"),
+    "ssl": lambda: SSLError(endpoint_url="https://ec2.example", error="bad cert"),
     "boto-connection": lambda: BotoConnectionError(error="down"),
     "client-error": lambda: ClientError(
         {"Error": {"Code": "AuthFailure", "Message": "denied"}}, "DescribeRegions"
@@ -112,7 +114,7 @@ def test_log_skipped_region_matches_main(
 
 def test_connectivity_split_is_not_vacuous() -> None:
     connectivity = {n for n, f in EXCEPTIONS.items() if isinstance(f(), new.CONNECTIVITY_ERRORS)}
-    assert {"endpoint", "connect-timeout", "read-timeout", "closed", "proxy"} <= connectivity
+    assert {"endpoint", "connect-timeout", "read-timeout", "closed", "proxy", "ssl"} <= connectivity
     assert "client-error" not in connectivity
     assert "no-credentials" not in connectivity
     assert "builtin-connection" not in connectivity

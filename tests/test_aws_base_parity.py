@@ -24,6 +24,7 @@ from botocore.exceptions import (
     NoCredentialsError,
     ProxyConnectionError,
     ReadTimeoutError,
+    SSLError,
 )
 
 from crc.aws import _base as new_base
@@ -48,6 +49,7 @@ def conn_errors() -> dict[str, Callable[[], Exception]]:
         "read-timeout": lambda: ReadTimeoutError(endpoint_url="https://ec2.example"),
         "closed": lambda: ConnectionClosedError(endpoint_url="https://ec2.example"),
         "proxy": lambda: ProxyConnectionError(proxy_url="http://proxy", error="refused"),
+        "ssl": lambda: SSLError(endpoint_url="https://ec2.example", error="bad cert"),
     }
 
 
@@ -92,6 +94,11 @@ CASES: list[Case] = [
     Case("auth-error-propagates", describe_error=auth_error),
     Case("no-credentials-propagates", describe_error=lambda: NoCredentialsError()),
     Case("value-error-propagates", describe_error=lambda: ValueError("boom")),
+    Case(
+        "no-describe-regions-method",
+        service="s3",
+        describe_error=lambda: AttributeError("'S3' object has no attribute 'describe_regions'"),
+    ),
     Case("keyboard-interrupt-propagates", describe_error=lambda: KeyboardInterrupt()),
     Case("auth-error-in-client-creation", client_error=auth_error),
     Case("static-empty", static=[], describe_error=conn_errors()["endpoint"]),
@@ -199,12 +206,14 @@ def _run(
         except BaseException as exc:
             error = (type(exc).__name__, str(exc))
     logs = [(r.levelno, r.msg, r.args, r.getMessage()) for r in caplog.records]
+    captured = capsys.readouterr()
     return {
         "calls": calls,
         "result": result,
         "result_type": type(result).__name__,
         "logs": logs,
-        "stdout": capsys.readouterr().out,
+        "stdout": captured.out,
+        "stderr": captured.err,
         "error": error,
     }
 
@@ -238,7 +247,9 @@ def test_cases_cover_both_paths_and_errors(
     fallbacks = {name for name, out in outcomes.items() if ("Session",) in out["calls"]}
     assert "auth-error-propagates" in errors
     assert "no-credentials-propagates" in errors
+    assert "no-describe-regions-method" in errors
     assert "fallback-describe-endpoint" in fallbacks
+    assert "fallback-describe-ssl" in fallbacks
     assert "fallback-client-creation-read-timeout" in fallbacks
     assert "auth-error-propagates" not in fallbacks
     assert len(fallbacks) >= len(conn_errors()) * 3
