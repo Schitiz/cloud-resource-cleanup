@@ -103,6 +103,7 @@ CASES = [
     Case("filter-case-sensitive", [vm("a", {"env": "CI"}), vm("b", {"env": "ci"})]),
     Case("filter-key-case-sensitive", [vm("a", {"ENV": "ci"})]),
     Case("filter-empty-tag-value", [vm("a", {"env": ""})], {"env": ["ci"]}),
+    Case("filter-string-spec-is-substring-test", [vm("a", {"env": "c"})], {"env": "ci"}),
     Case("filter-no-match", [vm("a", {"x": "1"}), vm("b", {"y": "2"})]),
     Case("untagged-none", [vm("a", None), vm("b")]),
     Case("untagged-empty-dict", [vm("a", {}), vm("b")]),
@@ -579,6 +580,7 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
     ("filter-none-selects-every-tagged", lambda o: o.deleted == ["a"]),
     ("filter-one-key-missing", lambda o: o.deleted == []),
     ("filter-empty-values-means-present", lambda o: o.deleted == ["a"]),
+    ("filter-string-spec-is-substring-test", lambda o: o.deleted == ["a"]),
     ("filter-case-sensitive", lambda o: o.deleted == ["b"]),
     ("exception-any-key", lambda o: o.deleted == ["b"]),
     ("exception-empty-values-key-present", lambda o: o.deleted == []),
@@ -736,6 +738,33 @@ def test_repeated_delete_accumulates_like_main(
         )
     assert results[0] == results[1]
     assert results[1][1] == ["vm-a", "vm-b", "vm-a", "vm-b"]
+
+
+def test_stop_then_empty_delete_shares_name_lists_like_main(
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    case = _find("stop")
+    results = []
+    for build in (_legacy, _new):
+        azure = _setup(case, monkeypatch, caplog, capsys)
+        service = build(case)
+        service.stop()
+        service.delete(["deallocated"])
+        results.append(
+            (
+                azure.calls,
+                service.get_deleted,
+                service.get_stopped,
+                [(r.levelno, r.getMessage()) for r in caplog.records],
+            )
+        )
+    assert results[0] == results[1]
+    assert results[1][1] == []
+    assert results[1][2] == ["vm-a", "vm-b"]
+    assert not any("No Azure instances to delete." in m for _, m in results[1][3])
 
 
 def test_registered_factory_builds_cleaner(monkeypatch: pytest.MonkeyPatch) -> None:
