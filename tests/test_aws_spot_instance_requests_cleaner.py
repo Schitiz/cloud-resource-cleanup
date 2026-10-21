@@ -8,6 +8,7 @@ from crc.aws.spot_instance_requests import SpotInstanceRequests, SpotRequestClea
 from crc.aws.spot_instance_requests.model import Waiter
 from crc.core import registry
 from crc.core.cleaner import Operation, Plan, RunContext
+from crc.core.report import DISK, SPOT_INSTANCE_REQUEST, VM, Report
 from tests.test_aws_spot_instance_requests_parity import (
     NOW,
     Case,
@@ -64,7 +65,7 @@ def test_plan_lists_candidates_and_regions(monkeypatch: pytest.MonkeyPatch) -> N
     plan = cleaner.plan(ctx)
     assert [c.id for c in plan.candidates] == ["sir-1"]
     assert plan.candidates[0].region == "us-west-2"
-    assert plan.related["Regions"] == ("us-west-2",)
+    assert plan.related == {}
 
 
 def test_apply_runs_in_safety_order(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -77,27 +78,31 @@ def test_apply_runs_in_safety_order(monkeypatch: pytest.MonkeyPatch) -> None:
         "terminate_instances",
         "delete_volume",
     ]
-    assert result.succeeded == ("sir-1",)
-    assert result.related["Instance"] == ("i-1",)
-    assert result.related["Volume"] == ("vol-1",)
+    assert result.succeeded == ("sir-1", "i-1")
+    assert result.related == {DISK: ("vol-1",)}
+    report = Report.from_result("aws", SPOT_INSTANCE_REQUEST, result, Operation.DELETE, False)
+    assert report.influx_payload() == {VM: ["sir-1", "i-1"], DISK: ["vol-1"]}
 
 
 def test_dry_run_plan_reports_and_apply_does_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
     case = Case("x", one(std()), dry_run=True)
     aws, cleaner, ctx = _setup(case, monkeypatch, True)
     plan = cleaner.plan(ctx)
-    assert [c.id for c in plan.candidates] == ["sir-1"]
-    assert plan.related["Instance"] == ("i-1",)
+    assert [c.id for c in plan.candidates] == ["sir-1", "i-1"]
+    assert plan.related == {DISK: ("vol-1",)}
+    report = Report.from_plan("aws", SPOT_INSTANCE_REQUEST, plan, Operation.DELETE, True)
+    assert report.influx_payload() == {VM: ["sir-1", "i-1"], DISK: ["vol-1"]}
     calls = len(aws.calls)
     result = cleaner.apply(plan, ctx)
     assert len(aws.calls) == calls
-    assert result.succeeded == ("sir-1",)
+    assert result.succeeded == ("sir-1", "i-1")
+    assert result.related == {DISK: ("vol-1",)}
 
 
 def test_apply_sweeps_orphan_volumes(monkeypatch: pytest.MonkeyPatch) -> None:
     aws, cleaner, ctx = _setup(Case("x", one(swept())), monkeypatch, False)
     result = cleaner.apply(cleaner.plan(ctx), ctx)
-    assert result.related["Volume"] == ("vol-s",)
+    assert result.related[DISK] == ("vol-s",)
     assert "delete_volume" in _methods(aws)
 
 
@@ -136,4 +141,5 @@ def test_adapter_keeps_public_attributes() -> None:
     assert adapter.get_deleted == []
     assert adapter.volumes_to_delete == []
     assert adapter.age == {"days": 1}
+    assert "prod" in adapter.SENSITIVE_YB_TASK
     assert isinstance(adapter.cleaner(), SpotRequestCleaner)

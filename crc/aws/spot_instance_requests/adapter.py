@@ -24,6 +24,7 @@ from crc.aws.spot_instance_requests.model import RequestMatch, SpotSettings, Spo
 from crc.aws.spot_instance_requests.preview import preview_request, preview_sweep
 from crc.aws.spot_instance_requests.requests import build_filter, filtered_requests
 from crc.aws.spot_instance_requests.rules import scope_tags_for_volume
+from crc.core import policy
 from crc.service import Service
 
 
@@ -43,6 +44,7 @@ class SpotInstanceRequests(Service):
     LEFTOVER_SCOPE_PREFIX = model.LEFTOVER_SCOPE_PREFIX
     VOLUME_AVAILABLE_WAIT_SEC = model.VOLUME_AVAILABLE_WAIT_SEC
     VOLUME_POLL_INTERVAL_SEC = model.VOLUME_POLL_INTERVAL_SEC
+    SENSITIVE_YB_TASK = policy.SENSITIVE_YB_TASK
 
     def __init__(
         self,

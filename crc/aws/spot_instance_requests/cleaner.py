@@ -48,11 +48,9 @@ from crc.core.cleaner import (
     RunContext,
 )
 from crc.core.registry import register
+from crc.core.report import DISK
 
 Clock = Callable[[], datetime.datetime]
-REGIONS = "Regions"
-INSTANCE = "Instance"
-VOLUME = "Volume"
 _UTC_CLOCK = partial(datetime.datetime.now, datetime.UTC)
 
 
@@ -167,6 +165,7 @@ class SpotRequestCleaner:
         self.settings = settings
         self.runtime = runtime or SpotRuntime()
         self._clients: dict[str, SpotClient] = {}
+        self._regions: list[str] | None = None
 
     def supports(self, operation: Operation) -> bool:
         return operation is Operation.DELETE
@@ -174,6 +173,8 @@ class SpotRequestCleaner:
     def plan(self, context: RunContext) -> Plan:
         """List regions and requests and filter. Makes no mutating call. In a dry run it also
         records the requests, instances and volumes a real run would act on."""
+        self._clients = {}
+        self._regions = None
         spot_filter = build_filter(self.settings)
         try:
             regions = list(self.runtime.list_regions())
@@ -197,17 +198,15 @@ class SpotRequestCleaner:
                     candidates.extend(_candidate(m, region) for m in matches)
             except CONNECTIVITY_ERRORS as e:
                 log_skipped_region(region, SKIP_CONTEXT, e)
+        self._regions = planned
         if context.dry_run:
             log_summary(state, dry_run=True)
-            candidates = [Candidate(id=rid) for rid in state.spot_requests_to_delete]
-        return Plan(
-            candidates=tuple(candidates),
-            related={
-                REGIONS: tuple(planned),
-                INSTANCE: tuple(state.instance_ids_to_delete),
-                VOLUME: tuple(state.volumes_to_delete),
-            },
-        )
+            deleted = state.spot_requests_to_delete + state.instance_ids_to_delete
+            return Plan(
+                candidates=tuple(Candidate(id=rid) for rid in deleted),
+                related={DISK: tuple(state.volumes_to_delete)},
+            )
+        return Plan(candidates=tuple(candidates))
 
     def _preview_region(
         self,
@@ -230,12 +229,12 @@ class SpotRequestCleaner:
         if context.dry_run:
             return Result(
                 succeeded=tuple(c.id for c in plan.candidates),
-                related={k: v for k, v in plan.related.items() if k != REGIONS},
+                related=dict(plan.related),
             )
-        if REGIONS not in plan.related:
+        if self._regions is None and not plan.candidates:
             return Result()
         state = SpotState()
-        by_region: dict[str, list[Candidate]] = {r: [] for r in plan.related[REGIONS]}
+        by_region: dict[str, list[Candidate]] = {r: [] for r in (self._regions or ())}
         for candidate in plan.candidates:
             by_region.setdefault(candidate.region, []).append(candidate)
         for region, items in by_region.items():
@@ -247,12 +246,10 @@ class SpotRequestCleaner:
             env = CleanupEnv(self.settings, state, self.runtime.waiter, region)
             self.apply_region(env, client, [_match(c) for c in items], context.now)
         log_summary(state, dry_run=False)
+        deleted = state.spot_requests_to_delete + state.instance_ids_to_delete
         return Result(
-            succeeded=tuple(state.spot_requests_to_delete),
-            related={
-                INSTANCE: tuple(state.instance_ids_to_delete),
-                VOLUME: tuple(state.volumes_to_delete),
-            },
+            succeeded=tuple(deleted),
+            related={DISK: tuple(state.volumes_to_delete)},
         )
 
     def apply_region(

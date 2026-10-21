@@ -25,6 +25,7 @@ from crc.aws.spot_instance_requests import SpotInstanceRequests, SpotRuntime
 from crc.aws.spot_instance_requests.model import Waiter
 from crc.core import registry
 from crc.core.cleaner import Operation, RunContext
+from crc.core.report import DISK
 
 ORACLE = Path(__file__).parent / "legacy" / "aws_spot_instance_requests.txt"
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=datetime.UTC)
@@ -816,12 +817,12 @@ def _run_cleaner(case: Case, mp: pytest.MonkeyPatch, caplog: pytest.LogCaptureFi
         )
         plan = cleaner.plan(ctx)
         if case.dry_run:
-            deleted = [c.id for c in plan.candidates] + list(plan.related.get("Instance", ()))
-            volumes = list(plan.related.get("Volume", ()))
+            deleted = [c.id for c in plan.candidates]
+            volumes = list(plan.related.get(DISK, ()))
         else:
             result = cleaner.apply(plan, ctx)
-            deleted = list(result.succeeded) + list(result.related.get("Instance", ()))
-            volumes = list(result.related.get("Volume", ()))
+            deleted = list(result.succeeded)
+            volumes = list(result.related.get(DISK, ()))
     except Exception as e:
         error = (type(e).__name__, str(e))
     return Outcome(aws.calls, deleted, volumes, _logs(caplog), error)
