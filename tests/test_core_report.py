@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 
+from crc.cli import vm_ops
 from crc.core.cleaner import Candidate, Failure, Operation, Plan, Result
 from crc.core.report import (
     DISK,
@@ -182,9 +183,9 @@ def test_spot_vm_notification_and_disk_message(
         get_deleted_disks=disks,
         get_deleted_volumes=disks,
     )
-    monkeypatch.setattr(crc_cli, "AZU_SpotVM", lambda *_a, **_kw: fake_spot)
-    monkeypatch.setattr(crc_cli, "GCP_SpotVM", lambda *_a, **_kw: fake_spot)
-    monkeypatch.setattr(crc_cli, "OCI_SpotVM", lambda *_a, **_kw: fake_spot)
+    monkeypatch.setattr(vm_ops, "AZU_SpotVM", lambda *_a, **_kw: fake_spot)
+    monkeypatch.setattr(vm_ops, "GCP_SpotVM", lambda *_a, **_kw: fake_spot)
+    monkeypatch.setattr(vm_ops, "OCI_SpotVM", lambda *_a, **_kw: fake_spot)
     instance.delete_spot_instances({}, {}, {"days": 1}, "retention_age")
     related = (
         {NIC: ("nic-1",), DISK: tuple(disks)}

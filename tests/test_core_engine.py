@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from crc.cli import resource_ops, vm_ops
 from crc.core.cleaner import Candidate, Operation, Plan, Result, RunContext
 from crc.core.engine import KIND_LABELS, RunOutcome, run
 from crc.core.registry import Registry, UnknownCleanerError
@@ -271,7 +272,7 @@ def test_notifier_order_and_influx_fail_open_match_crc_py(
                 crc_events.append(tag)
             raise OSError("influx down")
 
-    monkeypatch.setattr(crc_cli, attr, FakeResource)
+    monkeypatch.setattr(vm_ops if hasattr(vm_ops, attr) else resource_ops, attr, FakeResource)
     crc_obj = crc_cli.CRC(
         cloud,
         False,
