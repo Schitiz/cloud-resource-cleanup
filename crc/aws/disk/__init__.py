@@ -72,6 +72,7 @@ class Disk(Service):
     CW_MAX_LOOKBACK = CW_MAX_LOOKBACK
     CW_BATCH_SIZE = CW_BATCH_SIZE
     EBS_METRICS = EBS_METRICS
+    SENSITIVE_YB_TASK = policy.SENSITIVE_YB_TASK
 
     def __init__(  # noqa: PLR0913, PLR0917 - the nine parameters are the public signature
         self,

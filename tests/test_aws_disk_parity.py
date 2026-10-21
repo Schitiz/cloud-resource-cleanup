@@ -392,6 +392,7 @@ CASES = [
             vol("c", tag_list=[tag("YB-TASK", "vpn")]),
             vol("d", tag_list=[tag("yb_task", "dev"), tag("YB-task", "prod")]),
             vol("e", tag_list=[tag("yb_task", ""), tag("yb-task", "prod")]),
+            vol("f", tag_list=[tag("yb_task", "prod"), tag("yb_task", "dev")]),
         ),
     ),
     case("yb-task-non-string", one(vol("a", tag_list=[tag("yb_task", 5)]))),
@@ -987,9 +988,8 @@ def test_cleaner_protocol_matches_main(
         assert new.deleted == old.deleted
         assert new.count == old.count
     if not _interleaves(case) or old.error is not None:
-        if old.error is None or not case.regions:
-            assert new.calls == old.calls
-            assert new.logs == old.logs
+        assert new.calls == old.calls
+        assert new.logs == old.logs
         return
     assert [c for c in new.calls if not _is_delete_call(c)] == [
         c for c in old.calls if not _is_delete_call(c)
@@ -1017,8 +1017,13 @@ def test_cleaner_error_path_never_deletes_after_listing_error(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     new = _run_cleaner(case, monkeypatch, caplog, capsys)
-    if new.error is not None:
+    if new.error is not None or case.dry_run:
         assert not any(_is_delete_call(c) for c in new.calls)
+    else:
+        reads = [c for c in new.calls if not _is_delete_call(c)]
+        deletes = [c for c in new.calls if _is_delete_call(c)]
+        assert new.calls == reads + deletes
+        assert len(deletes) >= len(new.deleted)
 
 
 def _flatten(outcome: Outcome) -> str:
@@ -1074,7 +1079,11 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
         "yb-task-sensitive-tokens",
         lambda o: o.deleted == ["us-west-2/v5 yb_task=productive", "us-west-2/v6 yb_task=vpnx"],
     ),
-    ("yb-task-key-variants", lambda o: o.deleted == ["us-west-2/d yb_task=dev", "us-west-2/e"]),
+    (
+        "yb-task-key-variants",
+        lambda o: o.deleted
+        == ["us-west-2/d yb_task=dev", "us-west-2/e", "us-west-2/f yb_task=dev"],
+    ),
     ("yb-task-non-string", lambda o: o.error is None and o.deleted == []),
     ("kubernetes-skipped", lambda o: o.deleted == ["us-west-2/e"]),
     ("kubernetes-allowed-with-filter", lambda o: len(o.deleted) == 1),
@@ -1230,3 +1239,77 @@ def test_factory_requires_an_age_gate() -> None:
     ctx = RunContext(dry_run=True, operation=Operation.DELETE, options={}, now=NOW)
     with pytest.raises(ValueError, match="requires an age gate"):
         registry.get("aws", "disk")(ctx)
+
+
+def test_second_delete_accumulates_and_count_logs_like_main(
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    selected = case("two-calls", one(vol("a")))
+    for builder in (_legacy, _new):
+        _prepare(selected, monkeypatch, caplog, capsys)
+        disk = builder(selected)
+        disk.delete()
+        disk.delete()
+        assert disk.get_deleted == [
+            "us-west-2/a yb_task=itest",
+            "us-west-2/a yb_task=itest",
+        ]
+        caplog.clear()
+        assert disk.count == TWO
+        assert _logs(caplog) == [("root", logging.INFO, "count of items in disks_to_delete: 2")]
+
+
+def test_adapter_private_helpers_match_main(
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    selected = case(
+        "helpers",
+        one(vol("idle"), vol("busy"), busy=["busy"]),
+        opts={
+            "filter_tags": {"yb_task": ["itest*"], "yb_owner": []},
+            "exception_tags": {"keep": ["1"]},
+            "notags": {"skip": ["yes"]},
+            "name_regex": ["^foo"],
+            "exception_regex": ["never"],
+            "detach_age": {"days": 3},
+        },
+    )
+    _prepare(selected, monkeypatch, caplog, capsys)
+    old = _legacy(selected)
+    new = _new(selected)
+    assert new.SENSITIVE_YB_TASK == old.SENSITIVE_YB_TASK
+    assert new.AGE_KEYS == old.AGE_KEYS
+    assert new._normalize_age({"days": "2", "hours": 4}, "age") == old._normalize_age(
+        {"days": "2", "hours": 4}, "age"
+    )
+    assert new._age_to_timedelta(5) == old._age_to_timedelta(5)
+    assert new._volume_filters() == old._volume_filters()
+    for sample in (
+        {"yb_task": "itest", "yb_owner": "qa"},
+        {"yb_task": "prod", "yb_owner": "qa"},
+        {"yb_task": "itest", "yb_owner": "qa", "keep": "1"},
+    ):
+        caplog.clear()
+        old_match = old._matches_filter_tags(sample)
+        old_skip = old._should_skip(sample, "foo", "vol-1")
+        old_logs = _logs(caplog)
+        caplog.clear()
+        assert new._matches_filter_tags(sample) == old_match
+        assert new._should_skip(sample, "foo", "vol-1") == old_skip
+        assert _logs(caplog) == old_logs
+    candidate_vol = vol(
+        "idle", tag_list=[tag("yb_task", "itest"), tag("yb_owner", "qa"), tag("Name", "foo")]
+    )
+    assert new._is_candidate(candidate_vol) == old._is_candidate(candidate_vol)
+    vols = [vol("idle"), vol("busy")]
+    assert new._drop_recently_attached("us-west-2", vols) == old._drop_recently_attached(
+        "us-west-2", vols
+    )
+
+
