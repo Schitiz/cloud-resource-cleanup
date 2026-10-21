@@ -9,3 +9,45 @@
 - **Bugs.** `docs/refactor/bugs/pending/ST-OCI-DISK.md`: no new bugs (module already covered by `BUG-004`, `BUG-096` to `BUG-110`).
 - **Tests.** Before: 42213 passed. After: 42213 passed (same; no test added or removed).
 - **Not changed (lane rules).** `pyproject.toml` and `tests/archtest/legacy_baseline.txt` (which still lists `crc/oci/disk.py`; the entry is now a nonexistent path and may be dropped by the integrator), `docs/refactor/STATUS.md`, `FILTER_VARIANTS.md` (the `oci/disk.py` row now means `crc/oci/disk/cleaner.py`), `crc/README.md`, `tests/README.md`.
+
+## Round 1 (Argon)
+
+Scope reviewed: `git diff -M d109ee5..HEAD` (`crc/oci/README.md`, `crc/oci/disk/README.md`, `crc/oci/disk/__init__.py`, `crc/oci/disk/adapter.py`, `crc/oci/disk/api.py`, `crc/oci/disk/cleaner.py`, `crc/oci/vm.py`, `docs/refactor/bugs/pending/ST-OCI-DISK.md`, `docs/refactor/reviews/ST-OCI-DISK.md`, `tests/test_oci_disk.py`) against `AGENTS.md` and `.cursor/skills/crc-python-refactor/REVIEW_CHECKLIST.md`.
+
+### Verification
+
+1. **Pure move (`git diff -M d109ee5..HEAD`)**:
+   - `crc/oci/disk_api.py` -> `crc/oci/disk/api.py` (`R098`, 180 lines): byte-identical except for line 3 in the module docstring. Zero logic changes.
+   - `crc/oci/disk.py` -> `crc/oci/disk/cleaner.py` (`R072`, 294 lines) and `crc/oci/disk/adapter.py` (122 lines): diffing `d109ee5:crc/oci/disk.py[:class Disk]` against `crc/oci/disk/cleaner.py` shows only the module docstring update, `from crc.oci.disk_api import (` -> `from crc.oci.disk.api import (`, and removal of `from crc.service import Service` (moved to `adapter.py`); diffing `d109ee5:crc/oci/disk.py[class Disk:]` against `crc/oci/disk/adapter.py[class Disk:]` has 0 lines of diff. Zero logic changes.
+   - `crc/oci/disk/__init__.py` (8 lines): re-exports `Disk`, `DiskCleaner`, `DiskRuntime`, `DiskSettings`, `build_disk_cleaner` in `__all__`; importing `crc.oci.disk` imports `crc.oci.disk.cleaner` so `@register("oci", "disk")` runs at import time as before.
+2. **Import paths, safety locks, and test edits**:
+   - Every `crc.oci.disk` import site (`crc.py:52`, `crc/cli/resource_ops.py:21`, `tests/legacy/crc_main.txt:30`, `tests/test_oci_disk.py:15`, `tests/test_oci_disk_parity.py:22`) resolves unchanged via `crc/oci/disk/__init__.py`.
+   - Every `crc.oci.disk_api` import site (`crc/oci/disk/cleaner.py:32`, `crc/oci/vm.py:32`, `tests/test_oci_disk.py:16`) was updated to `crc.oci.disk.api`.
+   - All five hash-locked safety test files (`tests/test_aws_disk.py`, `tests/test_aws_spot_instance_requests.py`, `tests/test_azu_spot_vm.py`, `tests/test_gcp_spot_vm.py`, `tests/test_oci_spot_vm.py`) and `tests/legacy/**` are untouched.
+   - `tests/test_oci_disk.py` has only the 1-line import change at line 16; `tests/test_oci_disk_parity.py` is untouched; no assertions or monkeypatch targets changed.
+3. **Subpackage README and ARCH-002**:
+   - `crc/oci/disk/README.md` has all four `ARCH-002` sections (`## Purpose`, `## Public API`, `## Safety Invariants` citing `SAF-006` to `SAF-013`, `## Extension Rules`) and its `## Public API` symbol list matches `__all__` and all 11 public top-level definitions across `api.py`, `cleaner.py`, `adapter.py`, and `__init__.py` (`ARCH-002` passes).
+   - `crc/oci/README.md` updates only the OCI disk lines and moves the 11 disk symbols out of `crc/oci`'s `## Public API` without rewriting other modules' sections.
+4. **Forbidden files and lane rules**:
+   - `docs/refactor/BUGS.md`, `docs/refactor/STATUS.md`, `docs/refactor/FILTER_VARIANTS.md`, `crc/README.md`, `tests/README.md`, `tests/legacy/**`, `crc.py`, `crc/cli/**`, `crc/core/**`, `pyproject.toml`, and all `.github/CODEOWNERS` guardrail files are untouched.
+
+### Findings
+
+- **BLOCKING (fixed)**: None.
+- **NIT (left)**: `crc/oci/vm.py:32` had its 1-line import updated (`from crc.oci.disk_api import RegionLister, regions_of` -> `from crc.oci.disk.api import RegionLister, regions_of`) because `crc/oci/disk_api.py` moved to `crc/oci/disk/api.py`. When merging with parallel lane `refactor/lane-oci-vm` (which splits `crc/oci/vm.py` into `crc/oci/vm/cleaner.py` and `crc/oci/vm/adapter.py`), the integrator will need to apply that same `crc.oci.disk_api` -> `crc.oci.disk.api` import update in both `crc/oci/vm/cleaner.py` and `crc/oci/vm/adapter.py`.
+- **NIT (left)**: `crc/oci/disk/__init__.py` re-exports the 5 `disk.py` symbols (`Disk`, `DiskCleaner`, `DiskRuntime`, `DiskSettings`, `build_disk_cleaner`) while the `api.py` symbols (`SdkVolume`, `SdkAttachment`, `VolumeApi`, `OciVolumeApi`, `ApiFactory`, `RegionLister`, `api_for`, `regions_of`) are imported from `crc.oci.disk.api`; `ARCH-002` and all callers are satisfied.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`:
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed! |
+| `mypy` (`crc`, `tests`) | Success: no issues found in 198 source files |
+| `lint-imports` | Contracts: 5 kept, 0 broken (130 files, 705 dependencies) |
+| `pytest -q` | 42213 passed in 164.23s |
+
+Test count: 42213 passed vs 42213 on base `d109ee5` (+0, unchanged).
+
+VERDICT: APPROVE
