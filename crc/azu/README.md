@@ -34,7 +34,7 @@ copyright comment and declares no export list.
 - Authoritative text: `CLEANUP_SAFETY.md`. Applicable IDs: SAF-006 to SAF-013 (age gates, shared by all clouds), SAF-005, SAF-038, SAF-041, SAF-042, SAF-044.
 - Filtering per module: `docs/refactor/FILTER_VARIANTS.md` sections 3 (Azure), 6 and 7.
 - Known bugs and quirks (do not fix outside a behaviour-fix rung): `docs/refactor/BUGS.md` rows `BUG-002`, `BUG-003`, `BUG-004`, `BUG-010`, `BUG-013`, `BUG-019`.
-- Azure IPs (AZ-1): `plan()` only calls `list_all`; `begin_delete` is called from `apply()` (and `IP.delete()`) only and never in a dry run. There is no age gate (SAF-006 is not met: an empty `filter_tags` selects every unattached IP) and `list_all` is subscription-wide while the delete uses the configured resource group; untagged IPs raise `TypeError` when `exception_tags` or `notags` is set (BUG-013). Nothing is isolated per IP: every error propagates and a later error leaves earlier IPs deleted. Quirks in `docs/refactor/bugs/pending/AZ-1.md`.
+- Azure IPs (AZ-1): `plan()` only calls `list_all`; `begin_delete` is called from `apply()` (and `IP.delete()`) only and never in a dry run. There is no age gate (SAF-011 is not met: an empty `filter_tags` selects every unattached IP) and `list_all` is subscription-wide while the delete uses the configured resource group; untagged IPs raise `TypeError` when `exception_tags` or `notags` is set (BUG-013). Nothing is isolated per IP: every error propagates and a later error leaves earlier IPs deleted. Quirks in `docs/refactor/bugs/pending/AZ-1.md`.
 - `SpotVM.delete` re-raises when the list call fails (SAF-005); Spot VMs without tags are skipped (SAF-042).
 - Do not call real cloud APIs in tests; mock every SDK client.
 

@@ -29,7 +29,7 @@ pytest).
 - The module lists no regions, so there is no region fallback or auth-error case to cover.
 - Ratchet: `crc/azu/ip.py` removed from ruff `extend-exclude` and the mypy override `crc.azu.ip`.
   No per-SDK mypy override was needed.
-- Open issues: new bugs and quirks in `docs/refactor/bugs/pending/AZ-1.md` (8 rows, ID `NEW`).
+- Open issues: new bugs and quirks in `docs/refactor/bugs/pending/AZ-1.md` (9 rows, ID `NEW`; one added in round 2).
   Existing BUG-013 is kept as is.
 - ARCH-002 requires a README in every directory with files, so `docs/refactor/bugs/README.md` and `docs/refactor/bugs/pending/README.md` were added; other lanes adding the same paths will conflict on merge (keep either copy).
 - Needed changes outside this lane (not made): `crc/README.md` and `tests/README.md` /
@@ -103,3 +103,94 @@ Scope reviewed: `git diff 9b5c85a..HEAD` (`crc/azu/ip.py`, `crc/azu/README.md`, 
 Test count: 2703 before AZ-1 (`9b5c85a`), 2840 before review, 2861 after review additions (+21).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 9b5c85a..HEAD` (both commits, including round 1's fixes), checked against
+`git show main:crc/azu/ip.py`, `git show main:crc.py`, `CLEANUP_SAFETY.md`, `crc/core/policy.py`
+and the review checklist.
+
+### Round 1 fixes assessment
+
+1. **`decide()` tag parity: correct.** `crc/azu/ip.py:117-136` now passes the raw `ip.tags` to
+   `policy.filter_tags_any_key` / `policy.should_skip_by_tags`, and both reduce to
+   `policy._key_matches` (`crc/core/policy.py:89-90`), the same `key in tags and (not value or
+   tags[key] in value)` expression as `main:crc/azu/ip.py:65`, `:71`, `:76`. `should_skip_by_tags`
+   with one empty spec adds only `any(())` / `bool({}) and ...` (both `False`, no evaluation), so
+   the generator short-circuiting is the same. All three matches are still computed before the
+   decision (main `:62-78`), and `ip.ip_configuration` is read only when filter passes and
+   neither skip matches (main `:80-85`). `normalize_tags` runs only after the IP is selected and
+   only fills `Candidate.tags`. The `self._x or {}` defaults change only falsy specs (`None`/`{}`),
+   which main also treats as "no spec". No behaviour change; the 7 added cases do fail on the
+   pre-fix code.
+2. **Tightened `test_cleaner_protocol_matches_main`: correct and not vacuous.**
+   `old.logs[:-1]` drops exactly the `count` log that `_run` produces and `_run_cleaner` does
+   not, so the assertion is an exact equality. Checked by hand for `delete-error-mid-run`
+   (two `Deleted` lines in both) and `list-all-error` (no lines in either).
+3. **Pending-bug citations: correct.** All 8 round 1 rows re-checked against
+   `git show main:crc/azu/ip.py`; every line range matches.
+
+No test was weakened, skipped or deleted. Existing tests are unchanged
+(`git diff 9b5c85a..HEAD --stat` touches only new test files).
+
+### Independent review
+
+- Legacy path parity: `IP.delete()` (`crc/azu/ip.py:210-222`) makes the same factory calls as
+  main (one `get_network_client()` to list, one per delete, `:107`, `:111`), interleaves lazy
+  paging with deletes, and evaluates `ip.name` after `get_network_client()` on the delete path.
+  `Base` caches the client, so the extra lookup is not observable. `crc.py` still calls
+  `AZU_IP(resource_group, dry_run, filter_tags, exception_tags, notags)` positionally
+  (`crc.py:204-210`, same as `main:crc.py:190-196`). Constructor, attributes and log text are unchanged.
+- Safety: `plan()` makes no mutating call; `begin_delete` runs only from `delete_candidate`
+  (via `apply()` and `IP.delete()`) and never in a dry run. No new exception handling, so no
+  errors are swallowed. No age gate is added or weakened (none exists on main). The registry
+  factory builds `Base` only when it is called, so there is no import-time cloud call.
+- Tests: the parity suite compares ordered SDK calls (including `yield` events), errors, the
+  deleted list, `count`, log records (name, level, text) and stdout against the byte-identical
+  oracle. Quirk checks also run against the oracle, so a broken oracle cannot pass them by accident.
+- Architecture and typing: Protocols for the SDK edge, `Any` only for SDK items, injected factory,
+  decorator registration. Only `crc/azu/ip.py` / `crc.azu.ip` were removed from the ratchet, and
+  nothing was added. The README symbol list is synced (ARCH-002 passes).
+
+### BLOCKING (fixed)
+
+1. **Wrong safety ID for the missing age gate** (`docs/refactor/bugs/pending/AZ-1.md:12`,
+   `crc/azu/README.md:37`). Both said SAF-006, but `CLEANUP_SAFETY.md:46-47` (SAF-006) only states
+   that `Service.is_old({})` returns True. The rule that a destructive module needs an age gate in
+   `__init__` is SAF-011 (`CLEANUP_SAFETY.md:63`). Both now cite SAF-011. Doc-only change.
+
+### NIT (left)
+
+- `crc/azu/ip.py:90`: `Skipped(id=getattr(ip, "name", ""))` handles a missing `name`, but
+  `decide()` at `:136` reads `ip.name` directly. The IP is already skipped at that point, so the
+  difference is harmless.
+- `tests/test_azure_ip_parity.py:383`: the `missing-ip-configuration-attribute` quirk check only
+  asserts `o.error is not None`. The parity test pins the exact `AttributeError`, so nothing is lost.
+- `tests/test_azure_ip_parity.py:421-431`: membership checks (`in azure.calls`). The exact call
+  sequence is already pinned by `test_matches_main`.
+- Pending row 1 (subscription-wide list, resource-group delete) could also say that when the
+  same-named IP in the configured group is attached, Azure rejects the delete and the run aborts
+  (row 6 shape). Not verified against live Azure; left to the integrator.
+- Round 1's NIT (`apply()` called directly in a dry run logs the summary twice) stands:
+  `crc/core/engine.py:99-100` never calls `apply()` in a dry run.
+
+### New bugs
+
+One quirk added to `docs/refactor/bugs/pending/AZ-1.md`: the `count` property logs on every
+read (`main:crc/azu/ip.py:46-53`, log at `:52`), and `crc.py` on main never reads it. The new
+code keeps this, and the parity log comparison pins it.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check` (after the fix):
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed |
+| `mypy` (`crc`, `tests`) | Success: no issues found in 86 source files |
+| `lint-imports` | Contracts: 5 kept, 0 broken |
+| `pytest -q` | 2861 passed |
+
+Test count: 2703 at `9b5c85a`, 2861 now (+158). Unchanged by round 2, which changed docs only.
+
+ROUND 2 VERDICT: APPROVE
