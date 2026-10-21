@@ -1,428 +1,209 @@
 # Copyright (c) Yugabyte, Inc.
 
+"""Legacy `VM` adapter of the AWS EC2 VM cleaner (`crc.aws.vm_cleaner.VmCleaner`).
+
+`VM` keeps the constructor, attributes and methods `crc.py` uses and runs the cleaner region by
+region in the exact call order of the original implementation.
+"""
+
 import datetime
 import logging
-from typing import Dict, List, Tuple
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from functools import partial
+from typing import Any, ClassVar
 
 import boto3
 
-from crc.aws._base import get_all_regions
-from crc.aws.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
+from crc.aws import vm_scan
+from crc.aws.connectivity import CONNECTIVITY_ERRORS
+from crc.aws.vm_api import VmClient, VmScanClient, VmSession
+from crc.aws.vm_cleaner import (
+    DEFAULT_REGION,
+    DEFAULT_STATE,
+    SERVICE_NAME,
+    ClientFactory,
+    Filters,
+    RegionLister,
+    VmCleaner,
+    VmSettings,
+    all_regions,
+    boto3_client,
+    build_vm_cleaner,
+    dry_run_names,
+    log_summary,
+    skip_region,
+)
+from crc.core.cleaner import Candidate, Operation
 from crc.service import Service
+
+__all__ = ["VM", "VmRuntime", "build_vm_cleaner"]
+
+Clock = Callable[[], datetime.datetime]
+
+
+def _boto3_scan_client(region: str) -> VmScanClient:
+    client: VmScanClient = boto3.client(SERVICE_NAME, region_name=region)
+    return client
+
+
+def _boto3_session() -> VmSession:
+    session: VmSession = boto3.session.Session()
+    return session
+
+
+_UTC_CLOCK: Clock = partial(datetime.datetime.now, datetime.UTC)
+
+
+@dataclass(frozen=True, slots=True)
+class VmRuntime:
+    """Injected collaborators of `VM`: SDK client factories, region lister and the clock that
+    supplies `now` (the cleaner itself never reads the clock)."""
+
+    client_factory: ClientFactory = boto3_client
+    list_regions: RegionLister = all_regions
+    clock: Clock = _UTC_CLOCK
+    scan_client_factory: vm_scan.ScanClientFactory = _boto3_scan_client
+    session_factory: vm_scan.SessionFactory = _boto3_session
 
 
 class VM(Service):
-    """
-    The VM class provides an interface for managing AWS EC2 instances.
-    It inherits from the Service class and uses boto3 to interact with the AWS EC2 service.
-    By default, boto3 will clean up any attached resources (NICs, disks, etc.) when a VM is deleted.
-    The class allows for filtering and excluding instances based on specified tags, as well as an age threshold for instances.
-    The class also has properties for the number of instances that will be deleted and stopped.
+    """Legacy entry point used by `crc.py`: terminates (`delete()`) or stops (`stop()`) running
+    instances that match the filters. In dry run it only lists them.
+
+    Attributes: `instance_names_to_delete`, `instance_names_to_stop`, `dry_run`,
+    `filter_tags`, `exception_tags`, `age`, `custom_age_tag_key`, `notags` and `runtime` (the
+    injected `VmRuntime`; tests replace it with fakes).
     """
 
-    service_name = "ec2"
-    """
-    The service_name variable specifies the AWS service that this class will interact with.
-    """
-
-    default_region_name = "us-west-2"
-    """
-    The default_region_name variable specifies the default region to be used when interacting with the AWS service.
-    """
-
-    default_instance_state = ["running"]
-    """
-    The default_instance_state variable specifies the default state of instances when querying for instances.
-    """
+    service_name = SERVICE_NAME
+    default_region_name = DEFAULT_REGION
+    default_instance_state: ClassVar[list[str]] = DEFAULT_STATE
 
     def __init__(
         self,
         dry_run: bool,
-        filter_tags: Dict[str, List[str]],
-        exception_tags: Dict[str, List[str]],
-        age: Dict[str, int],
+        filter_tags: dict[str, list[str]],
+        exception_tags: dict[str, list[str]],
+        age: dict[str, int],
         custom_age_tag_key: str,
-        notags: Dict[str, List[str]],
+        notags: dict[str, list[str]],
     ) -> None:
-        """
-        Initializes the object with filter and exception tags to be used when searching for instances, as well as an age threshold for instances.
-
-        :param dry_run: A boolean variable that indicates whether the class should operate in dry_run mode or not.
-        In dry_run mode, the class will only list the Resources that match the specified filter and exception tags,
-        but will not perform any operations on them.
-        :param filter_tags: dictionary containing key-value pairs as filter tags
-        :type filter_tags: Dict[str, List[str]]
-        :param exception_tags: dictionary containing key-value pairs as exception tags
-        :type exception_tags: Dict[str, List[str]]
-        :param age: dictionary containing key-value pairs as age threshold, the key is either "days" or "hours" or both and value is the number of days or hours.
-        :type age: Dict[str, int]
-        :param custom_age_tag_key: Tag name to overwrite the age condition.
-        :type custom_age_tag_key: str
-        :param notags: dictionary containing key-value pairs as filter tags to exclude instances which do not have these tags
-        :type notags: Dict[str, List[str]]
-        """
         super().__init__()
-        self.instance_names_to_delete = []
-        self.instance_names_to_stop = []
+        self.instance_names_to_delete: list[str] = []
+        self.instance_names_to_stop: list[str] = []
         self.dry_run = dry_run
         self.filter_tags = filter_tags
         self.exception_tags = exception_tags
         self.age = age
         self.custom_age_tag_key = custom_age_tag_key
         self.notags = notags
+        self.runtime = VmRuntime()
 
     @property
-    def get_deleted(self):
-        """
-        This is a property decorator that returns the list of items in the instance_names_to_delete list.
-        It's a read-only property, which means it can be accessed like a variable, but cannot be set like a variable.
-        """
+    def get_deleted(self) -> list[str]:
+        """Names of the instances deleted (listed in a dry run)."""
         return self.instance_names_to_delete
 
     @property
-    def delete_count(self):
-        """
-        This is a property decorator that returns the count of items in the instance_names_to_delete list.
-        It's a read-only property, which means it can be accessed like a variable, but cannot be set like a variable.
-        """
+    def delete_count(self) -> int:
+        """Number of instances deleted (listed in a dry run)."""
         count = len(self.instance_names_to_delete)
         logging.info(f"count of items in instance_names_to_delete: {count}")
         return count
 
     @property
-    def get_stopped(self):
-        """
-        This is a property decorator that returns the list of items in the instance_names_to_stop list.
-        It's a read-only property, which means it can be accessed like a variable, but cannot be set like a variable.
-        """
+    def get_stopped(self) -> list[str]:
+        """Names of the instances stopped (their ids in a dry run)."""
         return self.instance_names_to_stop
 
     @property
-    def stopped_count(self):
-        """
-        This is a property decorator that returns the count of items in the instance_names_to_stop list.
-        It's a read-only property, which means it can be accessed like a variable, but cannot be set like a variable.
-        """
+    def stopped_count(self) -> int:
+        """Number of instances stopped (listed in a dry run)."""
         count = len(self.instance_names_to_stop)
         logging.info(f"count of items in instance_names_to_stop: {count}")
         return count
-    
-    def find_instances_with_tag(self, tag_key: str, tag_value: str) -> List[Dict[str, str]]:
-        """
-        Find instances that have a tag key with the provided value across ALL AWS regions.
-        Returns a list of dicts with keys: cloud, region, id, name, tags.
-        Read-only — does not modify instances.
-        """
-        results: List[Dict[str, str]] = []
-        try:
-            session = boto3.session.Session()
-            regions = session.get_available_regions(self.service_name)
-            if not regions:
-                regions = get_all_regions(self.service_name, self.default_region_name)
-        except Exception:
-            regions = get_all_regions(self.service_name, self.default_region_name)
-        for region in regions:
-            try:
-                client = boto3.client(self.service_name, region_name=region)
-            except Exception as e:
-                logging.warning(f"[aws:{region}] failed to create client: {e}")
-                continue
-            filters = [{"Name": f"tag:{tag_key}", "Values": [tag_value]}]
-            try:
-                paginator = client.get_paginator("describe_instances")
-                for page in paginator.paginate(Filters=filters):
-                    for reservation in page.get("Reservations", []):
-                        for inst in reservation.get("Instances", []):
-                            tags_list = inst.get("Tags", []) or []
-                            tags = {t.get("Key"): t.get("Value") for t in tags_list}
-                            name = self._get_instance_name(tags_list) or tags.get("Name") or ""
-                            instance_id = inst.get("InstanceId")
-                            state = inst.get("State", {}).get("Name", "").upper()  # e.g. 'running', 'stopped'
-                            launch_time = inst.get("LaunchTime")  # boto3 returns datetime with tzinfo
-                            instance_type = inst.get("InstanceType")
 
-                            results.append(
-                                {
-                                    "cloud": "aws",
-                                    "region": region,
-                                    "id": instance_id,
-                                    "name": name,
-                                    "tags": tags,
-                                    "state": state,
-                                    "launch_time": launch_time,
-                                    "instance_type": instance_type
-                                }
-                            )
-            except CONNECTIVITY_ERRORS as e:
-                log_skipped_region(region, "describe_instances (scan tag)", e)
-            except client.exceptions.ClientError as ce:
-                logging.warning(f"[aws:{region}] ClientError while describing instances: {ce}")
-            except Exception as e:
-                logging.warning(f"[aws:{region}] error while describing instances: {e}")
-        return results
+    def find_instances_with_tag(self, tag_key: str, tag_value: str) -> list[dict[str, Any]]:
+        """Instances with the tag across all regions (read-only)."""
+        runtime = self.runtime
+        return vm_scan.find_instances_with_tag(
+            tag_key,
+            tag_value,
+            runtime.session_factory,
+            runtime.scan_client_factory,
+            runtime.list_regions,
+        )
 
+    def _cleaner(self, instance_state: Any = None) -> VmCleaner:
+        settings = VmSettings(
+            filter_tags=self.filter_tags,
+            exception_tags=self.exception_tags,
+            notags=self.notags,
+            age=self.age,
+            custom_age_tag_key=self.custom_age_tag_key,
+            instance_state=instance_state,
+        )
+        return VmCleaner(self.runtime.client_factory, self.runtime.list_regions, settings)
 
-    def _get_filter(self, instance_state: List[str]) -> List[Dict[str, List[str]]]:
-        """
-        Creates a filter to be used when searching for instances, based on the provided instance state and the filter tags provided during initialization.
-
-        :param instance_state: list of strings representing the state of instances.
-        :type instance_state: List[str]
-        :return: list of filters.
-        :rtype: List[Dict[str, List[str]]]
-        """
-        filters = [
-            {
-                "Name": "instance-state-name",
-                "Values": instance_state,
-            }
-        ]
-        if self.filter_tags:
-            for key, value in self.filter_tags.items():
-                filters.append({"Name": f"tag:{key}", "Values": value})
-
-        logging.info(f"Filters created: {filters}")
-        return filters
+    def _get_filter(self, instance_state: list[str]) -> Filters:
+        return self._cleaner(instance_state).build_filters()
 
     def _get_filtered_instances(
-        self, ec2: boto3.client, instance_details: dict
-    ) -> Tuple[List[str], List[str]]:
-        """
-        Retrieves a list of instances that match the filter and age threshold,
-        checks for exception tags, and also checks for instances that do not have the specified notags.
-        """
-        instance_ids = []
-        instance_names = []
-        for reservation in instance_details["Reservations"]:
-            for i in reservation["Instances"]:
-                try:
-                    instance_name = None
-                    if "Tags" not in i:
-                        continue
-                    tags = i["Tags"]
-                    if self._should_skip_instance(tags):
-                        continue
-                    instance_name = self._get_instance_name(tags)
-                    if not instance_name:
-                        logging.error(
-                            f"{instance_name} instance doesn't have Name Tag. Skipping it"
-                        )
-                        continue
-                    instance_id = i["InstanceId"]
-                    network_interface_id = i["NetworkInterfaces"][0][
-                        "NetworkInterfaceId"
-                    ]
-                    network_interface_details = ec2.describe_network_interfaces(
-                        NetworkInterfaceIds=[network_interface_id]
-                    )
-                    network_interface_attached_time = network_interface_details[
-                        "NetworkInterfaces"
-                    ][0]["Attachment"]["AttachTime"]
+        self, ec2: VmClient, instance_details: Mapping[str, Any]
+    ) -> tuple[list[str], list[str]]:
+        found, _ = self._cleaner().filter_instances(ec2, instance_details, "", self.runtime.clock())
+        return [c.id for c in found], [c.name for c in found]
 
-                    logging.info(tags)
-                    retention_age = self.get_retention_age(
-                        tags, self.custom_age_tag_key
-                    )
-                    if retention_age:
-                        logging.info(f"Updating age for instance_id: {instance_id}")
+    def _should_skip_instance(self, tags: Sequence[Mapping[str, str]]) -> bool:
+        return self._cleaner().should_skip(tags)
 
-                    if self.is_old(
-                        retention_age or self.age,
-                        datetime.datetime.now().astimezone(
-                            network_interface_attached_time.tzinfo
-                        ),
-                        network_interface_attached_time,
-                    ):
-                        instance_ids.append(instance_id)
-                        instance_names.append(instance_name)
-                        logging.info(
-                            f"Instance {instance_name} with ID {instance_id} added to list of instances to be cleaned up."
-                        )
-                except Exception as e:
-                    logging.error(
-                        f"Error occurred while processing {instance_name} instance: {e}"
-                    )
-        return instance_ids, instance_names
+    def _get_instance_name(self, tags: Sequence[Mapping[str, str]]) -> str | None:
+        return vm_scan.instance_name(tags)
 
-    def _should_skip_instance(self, tags: List[Dict[str, str]]) -> bool:
-        """
-        Check if the instance should be skipped based on the exception tags and instances that do not have the specified notags.
-        :param tags: List of tags associated with the instance
-        :type tags: List[Dict[str,str]]
-        :return: True if the instance should be skipped, False otherwise
-        :rtype: bool
-        """
-        if not self.exception_tags and not self.notags:
-            logging.warning("Tags and notags not present")
-            return False
-
-        in_no_tags = False
-        all_tags = {}
-
-        for tag in tags:
-            k = tag["Key"]
-            v = tag["Value"]
-
-            if self.exception_tags:
-                if k in self.exception_tags.keys() and (
-                    not self.exception_tags[k] or v in self.exception_tags[k]
-                ):
-                    return True
-
-            all_tags[k] = v
-
-        if self.notags:
-            in_no_tags = all(
-                key in all_tags and (not value or all_tags[key] in value)
-                for key, value in self.notags.items()
-            )
-
-        return in_no_tags
-
-    def _get_instance_name(self, tags: List[Dict[str, str]]) -> str:
-        """
-        Retrieves the instance name from its tags
-        :param tags: List of tags associated with the instance
-        :type tags: List[Dict[str,str]]
-        :return: the instance name if found, None otherwise
-        :rtype: str
-        """
-        for tag in tags:
-            if tag["Key"] == "Name":
-                return tag["Value"]
-        return None
+    def _record(
+        self,
+        cleaner: VmCleaner,
+        client: VmClient,
+        found: Sequence[Candidate],
+        operation: Operation,
+    ) -> None:
+        if self.dry_run:
+            names = dry_run_names(operation, found)
+        else:
+            names, _ = cleaner.apply_region(client, found, operation)
+        target = (
+            self.instance_names_to_delete
+            if operation is Operation.DELETE
+            else self.instance_names_to_stop
+        )
+        target.extend(names)
 
     def _perform_operation(
-        self,
-        operation_type: str,
-        instance_state: List[str] = default_instance_state,
+        self, operation_type: str, instance_state: list[str] = default_instance_state
     ) -> None:
-        """
-        Perform the specified operation (delete or stop) on instances that match the specified filter labels and do not match exception and notags labels, and are older than the specified age.
-        It checks if the filter_tags attribute of the class is empty, if so, it returns True because there are no tags set to filter the VMs, so any vm should be considered.
-
-        :param operation_type: The type of operation to perform (delete or stop)
-        :type operation_type: str
-        :param instance_state: List of valid statuses of instances to perform the operation on.
-        :type instance_state: List[str]
-        """
-        # Renaming filter to instance_filter for better understanding
-        instance_filter = self._get_filter(instance_state)
-        for region in get_all_regions(self.service_name, self.default_region_name):
+        operation = Operation(operation_type)
+        runtime = self.runtime
+        cleaner = self._cleaner(instance_state)
+        filters = cleaner.build_filters()
+        for region in runtime.list_regions():
             try:
-                client = boto3.client(self.service_name, region_name=region)
-                describe_instances_response = client.describe_instances(
-                    Filters=instance_filter
+                client = runtime.client_factory(region)
+                found, _ = cleaner.filter_instances(
+                    client, client.describe_instances(Filters=filters), region, runtime.clock()
                 )
-
-                (
-                    instances_to_operate,
-                    instance_names_to_operate,
-                ) = self._get_filtered_instances(client, describe_instances_response)
-
-                if instances_to_operate:
-                    try:
-                        finalized_instances = []
-                        if operation_type == "delete":
-                            if not self.dry_run:
-                                for ind, ins in enumerate(instances_to_operate):
-                                    try:
-                                        client.terminate_instances(InstanceIds=[ins])
-                                        finalized_instances.append(
-                                            instance_names_to_operate[ind]
-                                        )
-                                    except Exception as e:
-                                        logging.error(
-                                            f"Error occured while {operation_type} instance {ins}: {e}"
-                                        )
-                                for i in range(len(finalized_instances)):
-                                    logging.info(
-                                        f"Instance: {finalized_instances[i]} deleted."
-                                    )
-                                self.instance_names_to_delete.extend(finalized_instances)
-                            else:
-                                self.instance_names_to_delete.extend(
-                                    instance_names_to_operate
-                                )
-                        elif operation_type == "stop":
-                            if not self.dry_run:
-                                for ind, ins in enumerate(instances_to_operate):
-                                    try:
-                                        client.stop_instances(InstanceIds=[ins])
-                                        finalized_instances.append(
-                                            instance_names_to_operate[ind]
-                                        )
-                                    except Exception as e:
-                                        logging.error(
-                                            f"Error occurred while {operation_type} instance {ins}: {e}"
-                                        )
-                                for i in range(len(finalized_instances)):
-                                    logging.info(
-                                        f"Instance {finalized_instances[i]} stopped."
-                                    )
-                                self.instance_names_to_stop.extend(finalized_instances)
-                            else:
-                                self.instance_names_to_stop.extend(instances_to_operate)
-                    except Exception as e:
-                        logging.error(
-                            f"Error occurred while {operation_type} instances: {e}"
-                        )
+                if found:
+                    self._record(cleaner, client, found, operation)
             except CONNECTIVITY_ERRORS as e:
-                log_skipped_region(region, f"ec2 vm {operation_type}", e)
-                continue
+                skip_region(region, operation, e)
+        log_summary(
+            operation, self.dry_run, self.instance_names_to_delete, self.instance_names_to_stop
+        )
 
-        # Using more descriptive if conditions
-        if not self.instance_names_to_delete and not self.instance_names_to_stop:
-            logging.warning(f"No AWS instances to {operation_type}.")
-
-        if operation_type == "delete":
-            if not self.dry_run:
-                logging.warning(
-                    f"number of AWS instances deleted: {len(self.instance_names_to_delete)}"
-                )
-                logging.warning(
-                    f"List of AWS instances deleted: {self.instance_names_to_delete}"
-                )
-            else:
-                logging.warning(
-                    f"List of AWS instances (Total: {len(self.instance_names_to_delete)}) which will be deleted: {self.instance_names_to_delete}"
-                )
-
-        if operation_type == "stop":
-            if not self.dry_run:
-                logging.warning(
-                    f"number of AWS instances stopped: {len(self.instance_names_to_stop)}"
-                )
-                logging.warning(
-                    f"List of AWS instances stopped: {self.instance_names_to_stop}"
-                )
-            else:
-                logging.warning(
-                    f"List of AWS instances (Total: {len(self.instance_names_to_stop)}) which will be stopped: {self.instance_names_to_stop}"
-                )
-
-    def delete(
-        self,
-        instance_state: List[str] = default_instance_state,
-    ) -> None:
-        """
-        Deletes instances that match the filter and age threshold, and also checks for exception tags.
-        It checks if the filter_tags and notags attribute of the class is empty,
-        if so, it returns True because there are no tags set to filter the VMs, so any vm should be considered.
-        The method will list the instances that match the specified filter and exception tags but will not perform
-        any operations on them if dry_run mode is enabled.
-
-        :param instance_state: list of strings representing the state of instances.
-        :type instance_state: List[str]
-        """
+    def delete(self, instance_state: list[str] = default_instance_state) -> None:
+        """Terminate the matching instances (only list them in a dry run)."""
         self._perform_operation("delete", instance_state)
 
-    def stop(self):
-        """
-        Stop VMs that match the specified filter labels and are older than the specified age, and also checks for notags.
-        It checks if the filter_tags and notags attribute of the class is empty,
-        if so, it returns True because there are no tags set to filter the VMs, so any vm should be considered.
-        The method will list the instances that match the specified filter and notags
-        but will not perform any operations on them if dry_run mode is enabled.
-        """
+    def stop(self) -> None:
+        """Stop the matching instances (only list them in a dry run)."""
         self._perform_operation("stop", self.default_instance_state)
