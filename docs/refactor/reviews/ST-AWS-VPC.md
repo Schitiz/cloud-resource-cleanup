@@ -53,3 +53,39 @@ None.
 Test count: 42213 before ST-AWS-VPC (`d109ee5`), 42213 after (+0, unchanged).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff -M d109ee5..HEAD` (round 1 commit `5070d08` included), checked against `AGENTS.md`, `ARCHITECTURE.md`, `docs/refactor/BUGS.md` and `.cursor/skills/crc-python-refactor/REVIEW_CHECKLIST.md`.
+
+### Round 1 fixes assessment
+
+Round 1 made no code or test change (review file only), so no fix can have changed behaviour or weakened a test. Its verification is correct: `crc/aws/vpc/cleaner.py` differs from `crc/aws/vpc.py` at `d109ee5` only in the `client` import (line 21), `crc/aws/vpc/client.py` is a 100% rename, and `crc/aws/vpc/__init__.py` re-exports all 18 public names, so `@register("aws", "vpc")` still runs on `import crc.aws.vpc` (asserted by `tests/test_aws_vpc_parity.py:1049-1052`).
+
+### Independent checks
+
+- Behaviour parity: logging goes through the root `logging.*` functions (no `getLogger(__name__)`, no `__file__` / `__module__` use), so the move changes no logger name or log line. No packaging config (`pyproject.toml` has no setuptools package list) needs the new subpackage.
+- monkeypatch targets: the VPC tests patch only `boto3.*` and `crc.service.init_logging`; no string target names `crc.aws.vpc.*`.
+- Ratchet: `tests/archtest/legacy_baseline.txt:14` still lists `crc/aws/vpc.py`; `tests/archtest/ratchet.py` only requires ruff `extend-exclude` to be a subset of the baseline, so the stale entry is harmless. The new files are not excluded from ruff or mypy.
+- Safety: no safety test touched; `plan()` / `apply()` split and the VPC rows of `CLEANUP_SAFETY.md` are unchanged because the code is unchanged.
+- Citations: `git show main:crc/aws/vpc.py` confirms `BUG-083` (`:86-92`) and `BUG-012` (`:94`, `:160`) cite the right lines.
+
+### BLOCKING (fixed)
+
+- `docs/refactor/bugs/pending/ST-AWS-VPC.md` pointed to `docs/refactor/bugs/pending/AWS-1.md`, which was merged into `BUGS.md` and deleted in `5f82f96`. Now it cites `BUGS.md` only.
+
+### NIT (left / fixed in passing)
+
+- Fixed: the VPC quirk lines in `crc/aws/vpc/README.md` (Safety Invariants) and `crc/aws/README.md` (VPC bullet) said "the AWS-1 entries"; they now name `BUG-083` to `BUG-095` (AWS-1).
+- Left: the coding summary's open issue says `crc/README.md` mentions `vpc.py` / `vpc_api.py`; it does not. `docs/refactor/FILTER_VARIANTS.md:39`, `:58`, `:195` cite `vpc.py` with `main` line numbers, which stay valid as `main` citations; updating them is optional integration work.
+- Left (as round 1): `crc.aws.vpc_api` has no shim and the private helpers (`_boto3_client`, `_all_regions`, the type aliases) are on `crc.aws.vpc.cleaner`, not on `crc.aws.vpc`; nothing imports them.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`: `ruff check .` all checks passed; `mypy` no issues in 197 source files; `lint-imports` 5 kept, 0 broken; `pytest -q` 42213 passed. After the README edits `pytest tests/archtest tests/test_aws_vpc.py tests/test_aws_vpc_parity.py` passed (394).
+
+Test count: 42213 (unchanged from `d109ee5`).
+
+New bugs: none (`docs/refactor/bugs/pending/ST-AWS-VPC.md`).
+
+ROUND 2 VERDICT: APPROVE
