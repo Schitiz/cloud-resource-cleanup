@@ -484,7 +484,7 @@ def failure_cases() -> list[Case]:
 
 def scan_cases() -> list[Case]:
     cases = []
-    tags = ["k=v", "novalue", "k=", "=v", "a=b=c", "=", " "]
+    tags = ["k=v", "novalue", "k=", "=v", "a=b=c", "=", " ", ""]
     hit_modes = [*HITS, *HIT_ERRORS]
     channels: list[tuple[str, list[str], dict[str, str | None]]] = [
         ("noslack", [], {}),
