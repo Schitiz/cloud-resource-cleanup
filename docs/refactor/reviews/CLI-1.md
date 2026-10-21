@@ -11,3 +11,28 @@ Rung CLI-1: argument parsing and input validation moved from `crc.py` into the n
   - Not edited (outside the lane): `tests/legacy/README.md` should list `crc_main.txt` (exact `git show main:crc.py`, run by `tests/test_cli_args_parity.py`) and `tests/README.md` should list `test_cli_args_parity.py`.
   - The environment ran Python 3.12 (3.11 not installed); `make check` was run with it.
 - **Core changes needed.** None.
+
+## Round 1 (Argon)
+
+Reviewed `git diff d1918f3..HEAD` against the CLI-1 task and `REVIEW_CHECKLIST.md`.
+
+### Findings
+
+- **BLOCKING (fixed):** `docs/refactor/bugs/pending/CLI-1.md:13-14` had slight off-by-one/two line references against `git show main:crc.py` (`validate_influxdb_inputs` call site in `main()` is `:1415-1416`, not `:1413-1414`; `--resource` `choices` list is `:1011-1023` and `help` is `:1025-1030`). Corrected in `docs/refactor/bugs/pending/CLI-1.md`.
+- **NIT (left):** `docs/refactor/reviews/CLI-1.md:10` says "5 quirks recorded" in the coding summary while listing all 6 rows present in `docs/refactor/bugs/pending/CLI-1.md`.
+- **NIT (left):** `tests/test_cli_args_parity.py:52-55` loads `tests/legacy/crc_main.txt` via `ModuleType("legacy_crc_main")` + `exec(compile(...))` rather than `importlib.util.spec_from_file_location` with a `SourceFileLoader` (since `.txt` is not in default source suffixes); functionally identical and `test_crc_py_reexports_the_same_functions` (`tests/test_cli_args_parity.py:513-535`) also loads `crc.py` via `spec_from_file_location`.
+
+### Verification
+
+1. **CLI contract & behaviour parity (`crc/cli/args.py`, `crc/cli/validate.py`, `crc.py`):** Every flag, short/long option, `choices`, `default`, `metavar`, `help` string, `type=ast.literal_eval` / `type=int` / `type=str`, flag registration order, and validator (`is_valid_type`, `is_valid_list`, `is_valid_dict`, `are_values_of_dict_lists`, `_validate_influxdb_input`, `validate_influxdb_inputs`) match `git show main:crc.py`. `crc.py` imports all seven functions into module globals so `main()` and path-loading callers see identical objects.
+2. **Oracle & non-vacuity (`tests/legacy/crc_main.txt`, `tests/test_cli_args_parity.py`):** `cmp -s <(git show main:crc.py) tests/legacy/crc_main.txt` is byte-identical. Confirmed non-vacuity by mutating `kms_pending_window` default `7 -> 8` in `crc/cli/args.py:234` and `"should be" -> "must be"` in `crc/cli/validate.py:14`, observing 2861 test failures in `tests/test_cli_args_parity.py`, then reverting.
+3. **Existing tests:** None of the four path-loading tests (`tests/test_core_report.py`, `tests/test_core_engine.py`, `tests/test_core_selection.py`, `tests/test_notify_parity.py`) or any other existing test was modified.
+4. **Architecture, typing, sizes, guardrails:** `crc/cli/args.py` (290 lines), `crc/cli/validate.py` (78 lines), `crc/cli/__init__.py` (19 lines) are mypy-strict and ruff clean; `crc/cli/README.md` has all four `ARCH-002` sections and synced `Public API`; `pyproject.toml` and all `.github/CODEOWNERS` files are untouched.
+5. **Bug register (`docs/refactor/bugs/pending/CLI-1.md`):** All 6 rows verified against `git show main:crc.py`.
+6. **Gates (`make check`):**
+   - `ruff check .`: passed
+   - `mypy`: passed (`Success: no issues found in 75 source files`)
+   - `lint-imports`: passed (`7 contracts kept, 0 broken`)
+   - `pytest -q`: `12561 passed` (up from 8516, +4045)
+
+VERDICT: APPROVE
