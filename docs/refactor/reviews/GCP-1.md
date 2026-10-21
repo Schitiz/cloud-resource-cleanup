@@ -15,7 +15,7 @@ Rung GCP-1: `crc/gcp/ip.py` refactored into a `Cleaner` (lane `refactor/lane-gcp
   The module has no age gate, so there is no clock and no `context.now` use.
 - **Parity.** `tests/legacy/gcp_ip.txt` is the byte-identical `git show main:crc/gcp/ip.py`.
   `tests/test_gcp_ip_parity.py` runs the oracle and the adapter against the same fake
-  `compute_v1` clients over 58 cases (dry run, filters, inverted exception, status, API, region
+  `compute_v1` clients over 59 cases (dry run, filters, inverted exception, status, API, region
   listing, iteration and delete errors, empty results, malformed addresses) comparing SDK calls
   in order, results, count, logs, stdout and errors; the same table runs through the registered
   Cleaner (plan then apply) and the logged summary lines match. Region listing has no
@@ -28,7 +28,7 @@ Rung GCP-1: `crc/gcp/ip.py` refactored into a `Cleaner` (lane `refactor/lane-gcp
 - **Gates.** `ruff check .`, `mypy` (strict, no new override: google-cloud-compute is typed),
   `lint-imports`, `pytest -q`. `crc/gcp/ip.py` and `crc.gcp.ip` are removed from both ratchet
   lists in `pyproject.toml`.
-- **Open issues.** New quirks are in `docs/refactor/bugs/pending/GCP-1.md` (11 rows, none fixed).
+- **Open issues.** New quirks are in `docs/refactor/bugs/pending/GCP-1.md` (12 rows, none fixed).
   ARCH-002 requires a README with the four sections in every directory, so
   `docs/refactor/bugs/README.md` and `docs/refactor/bugs/pending/README.md` were added; other
   lanes may add the same files (merge conflicts on those two READMEs are trivial).
@@ -108,3 +108,80 @@ None.
 Test count: 2703 before GCP-1 (`9b5c85a`), 2876 on `792d82d`, 2879 after Round 1 additions (+3).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 9b5c85a..HEAD` (coding commit `792d82d` and round 1 commit `ac72809`), checked
+against `git show main:crc/gcp/ip.py`, `git show main:crc/gcp/_base.py`, `git show main:crc.py`,
+`crc/core/policy.py`, `crc/core/cleaner.py`, `crc/core/engine.py` and `REVIEW_CHECKLIST.md`.
+
+### Round 1 fixes assessment
+
+- Round 1 made no code change to `crc/gcp/ip.py`. It added the parity case
+  `non-string-exception-evaluated-when-filter-misses` (`tests/test_gcp_ip_parity.py:114-120`,
+  quirk check `:413-416`) and two pending rows. The case is correct and not vacuous: changing
+  `crc/gcp/ip.py:149` to `excluded = matches_filter and self._excluded(name)` (short-circuit,
+  which main does not do) fails 3 tests; reverted. No existing assertion was weakened or removed.
+- Both round 1 pending rows (multi-region non-atomicity, bare-name reporting) are correct; their
+  citations `crc/gcp/ip.py:70-107`, `:96`, `:107`, `:109-115` and `crc.py:422`, `:780-783` match
+  `git show main:...`.
+
+### Independent review
+
+- **Parity.** `state_in(status, (state,))` is `status in (state,)`, the negation of main's
+  `status != default_state` for strings; `filter_substring_matches(x or (), name)` and
+  `gcp_ip_exception_excludes(x or (), name)` (`crc/core/policy.py:195-204`) give the same truth
+  values as main `crc/gcp/ip.py:87-93`, both evaluated unconditionally. Call order in
+  `IP.delete()` (`crc/gcp/ip.py:241-248`) is main's per region: list, log, filter, delete, then
+  `deleted_ips.extend` after the region. `default_state`, `dry_run`, `project_id` and the filters
+  are read at `delete()` time as on main. Summary log lines are identical. `Candidate` / `Skipped`
+  do no validation, so malformed names behave as on main.
+- **Oracle.** `tests/legacy/gcp_ip.txt` is identical to `git show main:crc/gcp/ip.py` (empty diff).
+  A second mutation (stop after the first region in `IP.delete()`) fails 12 parity tests.
+- **Safety / architecture.** `plan()` only lists; `delete_address` is reachable only from
+  `apply_region()` and never with `dry_run=True`. No age gate exists on main, none is added; no
+  error is swallowed; no retry added. SDK types stay behind `GcpIpClient` / `AddressView`.
+  Registration via `@register("gcp", "ip")`, discovered on import as for the AWS cleaners.
+  Ratchet: only `crc/gcp/ip.py` / `crc.gcp.ip` removed, nothing added, no mypy override. No
+  lane-forbidden file touched. `crc/gcp/README.md` sections and symbol list are accurate.
+- **Pending rows.** All 11 earlier rows re-verified against main line numbers; none duplicates a
+  `BUGS.md` row (only `BUG-001` concerns GCP IP).
+
+### BLOCKING (fixed)
+
+None.
+
+### Fixed (docs only)
+
+- Coding summary said "58 cases"; the table has 59 since round 1 (`tests/test_gcp_ip_parity.py`
+  `CASES`). Updated, and the open-issues row count updated to 12.
+
+### NIT (left)
+
+- `IP.__init__` uses `client or ComputeIpClient()` (`crc/gcp/ip.py:218`); `if client is None`
+  would not replace an injected client that happens to be falsy. Test-only seam, no CLI effect.
+- `plan_region` reads `address.status` a second time for `Candidate.state`
+  (`crc/gcp/ip.py:152`); main reads it once. Harmless for proto-plus `Address` objects.
+- `IP.get_deleted` is typed `list[str]` (`crc/gcp/ip.py:221`) but, as on main, a non-string
+  address name (malformed input, parity case `non-string-name-no-filter`) is returned as is.
+
+### New pending bug
+
+- `docs/refactor/bugs/pending/GCP-1.md`: every address is logged in full at INFO before any
+  filter (`logging.info(address)`, main `crc/gcp/ip.py:78-79`), cosmetic, low.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`:
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed |
+| `mypy` | Success: no issues found in 85 source files |
+| `lint-imports` | Contracts: 5 kept, 0 broken |
+| `pytest -q` | 2879 passed |
+
+Test count: 2879 (154 in `tests/test_gcp_ip_parity.py`, 22 in `tests/test_gcp_ip.py`; 2703 before
+the rung).
+
+ROUND 2 VERDICT: APPROVE
