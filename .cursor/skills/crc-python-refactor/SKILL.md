@@ -21,7 +21,7 @@ Forbidden: `async`/`await`, `pydantic`, `httpx`, `tenacity`, `@singleton`,
   `field(default_factory=...)` for resource descriptors, policies and plans.
   Never pass raw SDK response dicts or models across module boundaries.
 - 1.3 Type registration decorators with `Callable`, `TypeVar` and
-  `functools.wraps`, e.g. `@register_cleaner(cloud="aws", resource="disk")`. No
+  `functools.wraps`, e.g. `@register("aws", "disk")` from `crc.core.registry`. No
   singletons, no hidden mutable state beyond the registry, no import-time cloud
   calls.
 - 1.4 Inject SDK clients, policy objects and loggers through constructors or
