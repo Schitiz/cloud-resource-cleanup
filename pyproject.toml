@@ -39,7 +39,6 @@ extend-exclude = [
     "crc/azu/vm_delete_helpers.py",
     "crc/gcp/__init__.py",
     "crc/gcp/_base.py",
-    "crc/gcp/disk.py",
     "crc/gcp/spot_vm.py",
     "crc/gcp/vm.py",
     "crc/oci/__init__.py",
@@ -97,7 +96,6 @@ module = [
     "crc.azu.vm_delete_helpers",
     "crc.gcp",
     "crc.gcp._base",
-    "crc.gcp.disk",
     "crc.gcp.spot_vm",
     "crc.gcp.vm",
     "crc.oci",
@@ -123,6 +121,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["oci", "oci.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["googleapiclient", "googleapiclient.*"]
 ignore_missing_imports = true
 
 [tool.importlinter]
