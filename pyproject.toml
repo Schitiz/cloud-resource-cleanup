@@ -24,9 +24,6 @@ line-length = 100
 extend-exclude = [
     "crc.py",
     "crc/__init__.py",
-    "crc/aws/__init__.py",
-    "crc/aws/_base.py",
-    "crc/aws/connectivity.py",
     "crc/azu/__init__.py",
     "crc/azu/_base.py",
     "crc/azu/vm_delete_helpers.py",
@@ -68,9 +65,6 @@ exclude = ['^crc\.py$']
 [[tool.mypy.overrides]]
 module = [
     "crc",
-    "crc.aws",
-    "crc.aws._base",
-    "crc.aws.connectivity",
     "crc.azu",
     "crc.azu._base",
     "crc.azu.vm_delete_helpers",
