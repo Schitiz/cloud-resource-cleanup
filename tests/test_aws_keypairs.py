@@ -125,6 +125,14 @@ def test_apply_in_dry_run_deletes_nothing() -> None:
     assert mutating(aws.calls) == []
 
 
+def test_apply_skips_region_on_connectivity_error() -> None:
+    aws = Aws({"r1": [], "r2": []})
+    aws.errors["r1"] = EndpointConnectionError(endpoint_url="https://ec2.example")
+    plan = Plan(candidates=(Candidate(id="a", region="r1"), Candidate(id="b", region="r2")))
+    result = cleaner(aws).apply(plan, context())
+    assert result.succeeded == ("b",)
+
+
 def test_supports_only_delete() -> None:
     aws = Aws({})
     assert cleaner(aws).supports(Operation.DELETE)
@@ -141,6 +149,8 @@ def test_registered_factory_builds_cleaner_from_context() -> None:
     )
     built = build_keypair_cleaner(ctx)
     assert (built.cloud, built.kind) == ("aws", "keypair")
+    omitted_age = build_keypair_cleaner(context(dry_run=True))
+    assert (omitted_age.cloud, omitted_age.kind) == ("aws", "keypair")
 
 
 @pytest.mark.parametrize("dry_run", [True, False])

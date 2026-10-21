@@ -69,6 +69,17 @@ def _skip_region(region: str, error: BaseException) -> None:
     log_skipped_region(region, _SKIP_CONTEXT, error)
 
 
+def _log_summary(deleted: Sequence[str], *, dry_run: bool) -> None:
+    items = list(deleted)
+    if not dry_run:
+        logging.warning(f"number of AWS keypairs deleted: {len(items)}")
+        logging.warning(f"List of AWS keypairs deleted: {items}")
+    else:
+        logging.warning(
+            f"List of AWS keypairs (Total: {len(items)}) which will be deleted: {items}"
+        )
+
+
 class KeyPairCleaner:
     """Deletes key pairs whose name matches `name_regex`, not `exception_regex`, and that
     are older than `age`. Applies to every region the injected lister returns."""
@@ -80,9 +91,9 @@ class KeyPairCleaner:
         self,
         client_factory: ClientFactory,
         list_regions: RegionLister,
-        name_regex: Sequence[str],
-        exception_regex: Sequence[str],
-        age: dict[str, int],
+        name_regex: Sequence[str] | None,
+        exception_regex: Sequence[str] | None,
+        age: core_age.AgeSpec | int | None,
     ) -> None:
         self._client_factory = client_factory
         self._list_regions = list_regions
@@ -109,6 +120,8 @@ class KeyPairCleaner:
                 continue
             candidates.extend(region_plan.candidates)
             skipped.extend(region_plan.skipped)
+        if context.dry_run:
+            _log_summary([c.id for c in candidates], dry_run=True)
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
 
     def apply(self, plan: Plan, context: RunContext) -> Result:
@@ -123,6 +136,7 @@ class KeyPairCleaner:
                 self.apply_region(client, items, deleted, dry_run=context.dry_run)
             except CONNECTIVITY_ERRORS as e:
                 _skip_region(region, e)
+        _log_summary(deleted, dry_run=context.dry_run)
         return Result(succeeded=tuple(deleted))
 
     def plan_region(self, client: KeyPairClient, region: str, now: datetime.datetime) -> Plan:
@@ -163,10 +177,10 @@ class KeyPairCleaner:
     def _skip_reason(
         self, name: str, now: datetime.datetime, created: datetime.datetime
     ) -> str | None:
-        matches_name = policy.name_regex_search_matches(self._name_regex, name)
+        matches_name = policy.name_regex_search_matches(self._name_regex or (), name)
         matches_exception = policy.exception_regex_search_matches(self._exception_patterns, name)
         if matches_name and not matches_exception:
-            if core_age.is_old(self._age, now, created):
+            if core_age.is_old(self._age or {}, now, created):
                 return None
             logging.info(f"Keypair {name} is not old enough to be deleted.")
             return "not older than age"
@@ -185,7 +199,7 @@ def build_keypair_cleaner(context: RunContext) -> Cleaner:
         list_regions=_all_regions,
         name_regex=list(options.get("name_regex") or ()),
         exception_regex=list(options.get("exception_regex") or ()),
-        age=options["age"],
+        age=options.get("age"),
     )
 
 
@@ -203,9 +217,9 @@ class KeyPairs(Service):
     def __init__(
         self,
         dry_run: bool,
-        name_regex: list[str],
-        exception_regex: list[str],
-        age: dict[str, int],
+        name_regex: list[str] | None,
+        exception_regex: list[str] | None,
+        age: core_age.AgeSpec | int | None,
         runtime: KeyPairRuntime | None = None,
     ) -> None:
         super().__init__()
@@ -247,14 +261,4 @@ class KeyPairs(Service):
                 )
             except CONNECTIVITY_ERRORS as e:
                 _skip_region(region, e)
-        self._log_summary()
-
-    def _log_summary(self) -> None:
-        if not self.dry_run:
-            logging.warning(f"number of AWS keypairs deleted: {len(self.deleted_keypairs)}")
-            logging.warning(f"List of AWS keypairs deleted: {self.deleted_keypairs}")
-        else:
-            logging.warning(
-                f"List of AWS keypairs (Total: {len(self.deleted_keypairs)}) "
-                f"which will be deleted: {self.deleted_keypairs}"
-            )
+        _log_summary(self.deleted_keypairs, dry_run=self.dry_run)

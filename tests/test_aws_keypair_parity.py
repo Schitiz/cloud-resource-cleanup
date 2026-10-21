@@ -15,7 +15,8 @@ from typing import Any
 import pytest
 from botocore.exceptions import ClientError, ConnectTimeoutError, EndpointConnectionError
 
-from crc.aws.keypairs import KeyPairRuntime, KeyPairs
+from crc.aws.keypairs import KeyPairRuntime, KeyPairs, build_keypair_cleaner
+from crc.core.cleaner import Operation, RunContext
 
 ORACLE = Path(__file__).parent / "legacy" / "aws_keypairs.txt"
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)
@@ -54,6 +55,7 @@ class Case:
     dry_run: bool = False
     delete_errors: Mapping[tuple[str, str], Exception] = field(default_factory=dict)
     max_age: str | None = None
+    regions_error: Exception | None = None
 
 
 def _many(prefix: str, count: int) -> list[dict[str, Any]]:
@@ -163,6 +165,16 @@ CASES = [
     Case("same-name-two-regions", {"us-west-2": [kp("a")], "eu-west-1": [kp("a")]}),
     Case("many-keys-set-order", {"us-west-2": _many("key-", 25), "eu-west-1": _many("kk-", 9)}),
     Case("many-keys-dry-run", {"us-west-2": _many("key-", 25)}, dry_run=True),
+    Case(
+        "describe-regions-client-error-propagates",
+        {"us-west-2": [kp("a")]},
+        regions_error=client_error("DescribeRegions"),
+    ),
+    Case(
+        "describe-regions-connection-error-falls-back",
+        {"us-west-2": [kp("a")]},
+        regions_error=conn_error(),
+    ),
 ]
 
 
@@ -173,6 +185,8 @@ class FakeEc2:
 
     def describe_regions(self) -> dict[str, Any]:
         self.aws.calls.append(("describe_regions", self.region))
+        if self.aws.case.regions_error is not None:
+            raise self.aws.case.regions_error
         return {"Regions": [{"RegionName": r} for r in self.aws.case.regions]}
 
     def describe_key_pairs(self) -> Any:
@@ -199,6 +213,12 @@ class FakeAws:
         self.calls.append(("client", service, region_name))
         assert region_name is not None
         return FakeEc2(self, region_name)
+
+    def session(self) -> Any:
+        self.calls.append(("session",))
+        return types.SimpleNamespace(
+            get_available_regions=lambda service: list(self.case.regions)
+        )
 
 
 @dataclass
@@ -238,6 +258,7 @@ def _run(
 ) -> Outcome:
     aws = FakeAws(case)
     monkeypatch.setattr("boto3.client", aws.client)
+    monkeypatch.setattr("boto3.session.Session", aws.session)
     monkeypatch.setattr("crc.service.init_logging", lambda *args, **kwargs: None)
     if case.max_age is None:
         monkeypatch.delenv("MAX_AGE", raising=False)
@@ -304,9 +325,83 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
         lambda o: o.error is not None and o.deleted == ["a"],
     ),
     ("describe-connection-error-skips-region", lambda o: o.deleted == ["c"]),
+    ("describe-regions-client-error-propagates", lambda o: o.error is not None and o.deleted == []),
+    ("describe-regions-connection-error-falls-back", lambda o: o.deleted == ["a"]),
     ("exception-checked-when-name-misses", lambda o: o.deleted == []),
     ("duplicate-names-in-region", lambda o: sorted(o.deleted or []) == ["a", "b"]),
 ]
+
+
+def _run_cleaner(
+    case: Case,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> Outcome:
+    aws = FakeAws(case)
+    monkeypatch.setattr("boto3.client", aws.client)
+    monkeypatch.setattr("boto3.session.Session", aws.session)
+    if case.max_age is None:
+        monkeypatch.delenv("MAX_AGE", raising=False)
+    else:
+        monkeypatch.setenv("MAX_AGE", case.max_age)
+    caplog.clear()
+    capsys.readouterr()
+    ctx = RunContext(
+        dry_run=case.dry_run,
+        operation=Operation.DELETE,
+        options={
+            "name_regex": case.name_regex,
+            "exception_regex": case.exception_regex,
+            "age": case.age,
+        },
+        now=NOW,
+    )
+    cleaner = build_keypair_cleaner(ctx)
+    error: tuple[str, str] | None = None
+    deleted: list[str] = []
+    try:
+        plan = cleaner.plan(ctx)
+        if case.dry_run:
+            deleted = [c.id for c in plan.candidates]
+        else:
+            deleted = list(cleaner.apply(plan, ctx).succeeded)
+    except Exception as e:
+        error = (type(e).__name__, str(e))
+    logs = [(r.name, r.levelno, r.getMessage()) for r in caplog.records]
+    return Outcome(aws.calls, deleted, len(deleted), logs, capsys.readouterr().out, error)
+
+
+_INTERLEAVED_ERROR_CASES = frozenset(
+    {
+        "describe-client-error-propagates",
+        "invalid-regex-after-earlier-region-deleted",
+    }
+)
+
+
+@pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
+def test_cleaner_protocol_matches_main(
+    case: Case,
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    old = _run(_legacy, case, monkeypatch, caplog, capsys)
+    new = _run_cleaner(case, monkeypatch, caplog, capsys)
+    assert new.error == old.error
+    assert new.stdout == old.stdout
+    if case.id in _INTERLEAVED_ERROR_CASES:
+        assert [c for c in new.calls if c[0] == "delete_key_pair"] == []
+        return
+    if new.error is None:
+        assert new.deleted == old.deleted
+    if len(case.regions) <= 1 and new.error is None:
+        assert new.logs == old.logs[:-1]
+        assert [c for c in new.calls if c[0] != "client"] == [
+            c for c in old.calls if c[0] != "client"
+        ]
 
 
 @pytest.mark.parametrize(("case_id", "check"), QUIRKS, ids=[q[0] for q in QUIRKS])
