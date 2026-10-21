@@ -51,3 +51,41 @@ Reviewed `git diff 4f9877f..HEAD` against the CLI-3 task, the CLI contract and `
    - `pytest -q`: `42213 passed` (up from 24498, +17715)
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Reviewed `git diff 4f9877f..HEAD` (14 files) against `AGENTS.md`, `ARCHITECTURE.md`, `CLEANUP_SAFETY.md`, `REVIEW_CHECKLIST.md`, the CLI contract and `git show main:crc.py` (`:1318-1651`).
+
+### Round 1 fixes
+
+- `crc/cli/README.md` Extension Rule 3: correct. `args.py`, `validate.py`, `constants.py` and `inputs.py` import no SDK, cloud package or notifier; `clients.py` (slack_sdk, influxdb_client), `scan.py` (`crc.notifications`), `dispatch.py` (`crc.aws.snapshot`), `notify.py`, `vm_ops.py` and `resource_ops.py` hold them. Docs only, no behaviour or test change.
+- Coding summary line numbers in `tests/test_core_selection.py`: correct (imports at 13-15, retargeted `monkeypatch.setattr` at 103-105). The diff of that file is exactly those 6 lines; no assertion, case table or expected value changed. The retargets are where each name is now looked up: `get_argparser` in `crc.cli.main`, `CRC` in `crc.cli.context.make_crc`, `Snapshot` in `crc.cli.dispatch._snapshot`. `from crc.cli import main as cli_main` yields the module because `crc/cli/__init__.py` does not bind `main`.
+
+### Independent review
+
+- Parity: compared `crc/cli/{main,inputs,clients,context,scan,dispatch}.py` line by line with `main:crc.py:1318-1651`. Flag reads, token errors (`OSError` is `EnvironmentError`), the four flag-combination errors and texts, `aws_disk_opt_in`, the `all` expansion, the 8 type checks, client construction order (Slack, Influx field check, Influx), `MAX_AGE` set before the scan, scan validation / `split("=", 1)` / forced `dry_run` (via `dataclasses.replace` on the frozen `RunContext`, so every scan `CRC(...)` and `notify_cleanup` gets `True` as on main), hit normalisation, console URLs, Slack `#` prefix and fallback print, both `sys.exit(0)`, the dispatch `if/elif` chain as a `HANDLERS` table (unknown resource is a no-op on both sides), the AWS EBS breaker, the three spot warnings, the `Snapshot` branch and the `MAX_AGE` reset all match.
+- `CLEANUP_SAFETY.md`: the `aws` + `disk` opt-in breaker still raises before any disk call (`crc/cli/dispatch.py:21-24`); the scan path still only calls `scan_instances_with_tag` and exits; `--max_age` / `MAX_AGE` handling unchanged.
+- Non-vacuity, two extra mutations of my own (both failed `tests/test_cli_main_parity.py` at the first case, both reverted): `set_max_age` moved after the scan branch in `crc/cli/main.py`, and the breaker condition in `crc/cli/dispatch.py:23` replaced by `False`.
+- Oracle: `cmp <(git show main:crc.py) tests/legacy/crc_main.txt` is byte-identical; the parity test loads it as `crc_main_oracle_parity`, not `crc`.
+- Path-loading tests: `tests/test_core_report.py`, `tests/test_core_engine.py`, `tests/test_notify_parity.py` unchanged by this rung; every name they read from `crc.py` (`CRC`, `VMS`, `DISKS`, `NICS`, `CLOUDS`, `RESOURCES`, `main`) is re-exported (`crc.py:56-101`).
+- Architecture and typing: import-linter 5 kept; ARCH-002 README sections present and in sync; every file under 400 lines; `crc.py` off the ruff exclude, nothing added to any exclude list; mypy strict clean on `crc.cli`.
+
+### Findings
+
+- **BLOCKING:** none.
+- **NIT (fixed, docs only):** `docs/refactor/bugs/pending/CLI-3.md` row 4 cited `crc.py:1410` for `if slack_channel:`; on main that line is `:1412` (`:1410` is `is_valid_dict("influxdb", influxdb)`). Corrected. The other six rows' citations verified with `git show main:crc.py`.
+- **NIT (left):** `crc/cli/dispatch.py:157` looks the resource up with `HANDLERS.get(resource)`, which needs a hashable value, where main compared with `==`. Unreachable through `python crc.py` (argparse `choices` gives a `str`); only a hand-built args dict could tell them apart.
+- **NIT (left):** `crc.py` no longer exposes the module attributes `os`, `sys`, `logging` (main also had `argparse`, `ast`, `SYNCHRONOUS`, `Dict`, `List`, `Union`). No test and no contract name uses them; noted for anyone who patched e.g. `crc.os.environ` on the script module.
+- **NIT (left):** `Options` / `Targets` / `RunContext` fields are `Any` (raw flag values, unvalidated on main); already listed under Open issues in the coding summary.
+- No new bug or quirk beyond the 7 rows already in `docs/refactor/bugs/pending/CLI-3.md` and `BUGS.md` (`BUG-035`-`BUG-038`, `BUG-343` cover the neighbouring scan and validation behaviour).
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt`, then `make check` on Python 3.12:
+
+- `ruff check .`: All checks passed!
+- `mypy`: Success: no issues found in 196 source files
+- `lint-imports`: Contracts: 5 kept, 0 broken
+- `pytest -q`: 42213 passed (matches the coding summary)
+
+ROUND 2 VERDICT: APPROVE
