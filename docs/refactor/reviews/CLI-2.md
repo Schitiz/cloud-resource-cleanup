@@ -11,3 +11,41 @@ Rung CLI-2: the `CRC` class and the `_section` helper moved from `crc.py` into `
   - Adapter parameters of `crc.cli` are typed `Any` where the adapters declare narrower types than the unvalidated CLI values (`age` as `int` in the GCP adapters, `None` where `str` is declared); the calls are as on `main` (`BUG-197` shape).
   - Not edited (outside the lane): `tests/legacy/README.md` and `tests/README.md` should list `crc_main.txt` / `test_cli_crc_parity.py` (also noted in CLI-1).
 - **Core changes needed.** None (the `ping_on_slack` unknown-operation difference would need a change in `crc/notify/slack.py` in a later rung).
+
+## Round 1 (Argon)
+
+Reviewed `git diff fe63352..HEAD` against the CLI-2 task, the CLI contract and `REVIEW_CHECKLIST.md`.
+
+### Findings
+
+- **NIT (left):** `crc/cli/__init__.py` does not re-export `CRC`, `CRCBase`, `NotifyMixin`, `VmOps` or `ResourceOps` in `__all__` (though `crc/cli/README.md` documents them under `## Public API` and `crc.py` imports `CRC` from `crc.cli.runner`). `ARCH-002` checks the union of `__all__` and public top-level definitions across `crc/cli/*.py` and passes.
+- **NIT (left):** `crc/cli/notify.py:78-89` delegates `ping_on_slack` to `SlackNotifier.ping_owners` via `OPERATIONS[operation_type]`, which raises `KeyError` on an unknown `operation_type` string instead of formatting it like `main:crc.py:248-251` (`get_msg` in `crc/cli/notify.py:91-115` was restored to the exact `main` f-strings so it accepts arbitrary strings). Unreachable from the CLI (the only caller passes `DELETED`), introduced in R3 when `crc/notify` was wired into `crc.py`, and recorded in `docs/refactor/bugs/pending/CLI-2.md:8`.
+- **NIT (left):** `tests/legacy/README.md` and `tests/README.md` do not yet list `crc_main.txt` and `test_cli_crc_parity.py` (outside this lane's editable files, noted under Open issues).
+
+### Verification
+
+1. **CLI contract & behaviour parity (`crc.py`, `crc/cli/base.py`, `crc/cli/constants.py`, `crc/cli/notify.py`, `crc/cli/vm_ops.py`, `crc/cli/resource_ops.py`, `crc/cli/runner.py`):**
+   - `CRC` class name, 9-parameter `__init__` signature and defaults, attribute names (`cloud`, `dry_run`, `project_id`, `notags`, `slack_client`, `influxdb_client`, `slack_channel`, `resource_group`, and conditional `influxdb_bucket` / `resource_suffix`), and every public/private method from `main:crc.py` are preserved.
+   - Adapter construction arguments (positional vs keyword for `GCP_Disk`), method calls (`delete()`, `delete(instance_state)`, `stop()`, `find_instances_with_tag`), Slack notification order (including Azure VM NIC follow-up and Spot VM leftover disk messages), InfluxDB write order, and `delete_disks` reporting before re-raising `delete_error` match `git show main:crc.py`.
+   - `crc.py` retains `main()`, `if __name__ == "__main__": main()`, and re-exports `CRC`, `_section` (in `crc.cli.notify`), the 20 adapter classes, `Snapshot`, the 11 constants (`CLOUDS`, `RESOURCES`, `DELETED`, `STOPPED`, `NICS`, `DISKS`, `VMS`, `IPS`, `KEYPAIRS`, `KMS`, `SPOT_INSTANCE_REQUEST`), `Point`, `WebClient`, `InfluxDBClient`, `get_argparser`, the validators and `notify_cleanup`. `main()` continues to look up `CRC` and `Snapshot` in `crc.py` globals.
+2. **Oracle & non-vacuity (`tests/legacy/crc_main.txt`, `tests/test_cli_crc_parity.py`):**
+   - `git show main:crc.py | cmp - tests/legacy/crc_main.txt` is byte-identical.
+   - `tests/test_cli_crc_parity.py` loads `tests/legacy/crc_main.txt` via `importlib.util.spec_from_file_location("legacy_crc_main_crc", ...)` with `SourceFileLoader` and runs both `oracle.CRC` and `crc.cli.runner.CRC` across 11,936 parametrized cases covering all operations, clouds, empty/non-empty results, dry-run modes, Slack modes (`off`, `on`, `post_fail`, `no_channel`), Influx modes (`off`, `on`, `on_suffix`, `api_error`, `write_error`, `no_conn`), direct notify/lookup/ping methods, constructor validation, and disk result shapes.
+   - Confirmed non-vacuity locally by duplicating `vm.stop()` in `crc/cli/vm_ops.py:293`, verifying `pytest tests/test_cli_crc_parity.py -k "stop_vm"` failed immediately on adapter call log mismatch, and reverting.
+3. **Existing tests (`tests/test_core_report.py`, `tests/test_core_engine.py`, `tests/test_core_selection.py`, `tests/test_notify_parity.py`):**
+   - `tests/test_core_report.py:13,186-188` only retargets `AZU_SpotVM`, `GCP_SpotVM`, `OCI_SpotVM` monkeypatches from `crc_cli` to `vm_ops`.
+   - `tests/test_core_engine.py:14,275` only retargets the adapter monkeypatch from `crc_cli` to `vm_ops if hasattr(vm_ops, attr) else resource_ops`.
+   - `tests/test_core_selection.py` and `tests/test_notify_parity.py` and all other existing tests are completely untouched. No assertion, case table or expected value was changed.
+4. **Architecture, typing, sizes, guardrails:**
+   - All modules in `crc/cli/` are under the 400-line limit (`resource_ops.py`: 314, `vm_ops.py`: 299, `args.py`: 290, `notify.py`: 208, `validate.py`: 78, `base.py`: 62, `constants.py`: 19, `__init__.py`: 19, `runner.py`: 11) and pass ruff and mypy strict.
+   - `crc/cli/README.md` has the four `ARCH-002` sections and its `## Public API` matches all public symbols in `crc/cli/`.
+   - `pyproject.toml`, `docs/refactor/BUGS.md`, `docs/refactor/STATUS.md`, `crc/core/**`, `crc/notify/**`, cloud packages, and all `.github/CODEOWNERS` guardrail files are untouched.
+5. **Bug register (`docs/refactor/bugs/pending/CLI-2.md`):**
+   - Verified all 3 rows against `git show main:crc.py`: row 1 (`ping_on_slack` at `:249`, `:251`, `:493`), row 2 (`CRC.__init__` GCP `project_id` check at `:88` and `delete_spot_instances` GCP check at `:618-619`), row 3 (duplicate `notify_deleted_nic_via_slack` at `:337-352` and `:456-471`).
+6. **Gates (`make check`):**
+   - `ruff check .`: passed (`All checks passed!`)
+   - `mypy`: passed (`Success: no issues found in 189 source files`)
+   - `lint-imports`: passed (`5 kept, 0 broken`)
+   - `pytest -q`: `24498 passed` (up from 12562, +11936)
+
+VERDICT: APPROVE
