@@ -29,7 +29,7 @@ from crc.core.cleaner import (
 from crc.core.registry import register
 from crc.oci._base import Base
 from crc.oci.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
-from crc.oci.disk_api import RegionLister, regions_of
+from crc.oci.disk.api import RegionLister, regions_of
 from crc.oci.vm_api import ApiFactory, ComputeApi, SdkInstance, compute_api_for
 from crc.service import Service
 

@@ -1,0 +1,11 @@
+## Coding summary
+
+**Rung ST-OCI-DISK: `crc/oci/disk.py` and `crc/oci/disk_api.py` are now the subpackage `crc/oci/disk/`. Status: done, `make check` green (ruff, mypy, lint-imports, pytest). Pure move, no behaviour change.**
+
+- **Layout (`git mv`, history follows).** `crc/oci/disk_api.py` -> `crc/oci/disk/api.py` (only the docstring wording changed). `crc/oci/disk.py` -> `crc/oci/disk/cleaner.py` (`DiskCleaner`, `DiskSettings`, `DiskRuntime`, `build_disk_cleaner`, constants, summary log); the `Disk` class moved verbatim into `crc/oci/disk/adapter.py` (imports adjusted; it uses the private `_LIST_CONTEXT` and `_log_summary` of `cleaner.py`). `crc/oci/disk/__init__.py` re-exports `Disk`, `DiskCleaner`, `DiskRuntime`, `DiskSettings`, `build_disk_cleaner` (`__all__`), so `from crc.oci.disk import X` works as before (`crc.py`, `crc/cli/resource_ops.py` unchanged).
+- **Import sites updated.** `crc/oci/vm.py` (`crc.oci.disk_api` -> `crc.oci.disk.api`) and `tests/test_oci_disk.py` line 16 (same). `tests/test_oci_disk_parity.py` imports only `crc.oci.disk`, unchanged. No assertion changed. No shim was needed: none of the five hash-locked files nor `tests/legacy/**` import `crc.oci.disk_api`.
+- **monkeypatch targets.** None needed retargeting: the tests patch `oci.core`, `oci.identity`, `oci.pagination` attributes and `crc.service.init_logging`, all looked up where they were before.
+- **README.** New `crc/oci/disk/README.md` with the four ARCH-002 sections (Public API lists every public name of `api.py`, `cleaner.py`, `adapter.py` and the `__all__`). The `crc/oci/README.md` disk lines (module list, Public API names, SAF bullet, extension rules) now point at it; other sections untouched.
+- **Bugs.** `docs/refactor/bugs/pending/ST-OCI-DISK.md`: no new bugs (module already covered by `BUG-004`, `BUG-096` to `BUG-110`).
+- **Tests.** Before: 42213 passed. After: 42213 passed (same; no test added or removed).
+- **Not changed (lane rules).** `pyproject.toml` and `tests/archtest/legacy_baseline.txt` (which still lists `crc/oci/disk.py`; the entry is now a nonexistent path and may be dropped by the integrator), `docs/refactor/STATUS.md`, `FILTER_VARIANTS.md` (the `oci/disk.py` row now means `crc/oci/disk/cleaner.py`), `crc/README.md`, `tests/README.md`.
