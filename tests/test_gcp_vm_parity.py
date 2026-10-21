@@ -630,7 +630,7 @@ def _cleaner_context(case: Case) -> RunContext:
         "age": case.age,
         "custom_age_tag_key": case.custom_age_tag_key,
     }
-    if case.state is not None and case.op == "delete":
+    if case.state is not None:
         options["instance_state"] = case.state
     return RunContext(
         dry_run=case.dry_run,
@@ -772,6 +772,7 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
         lambda o: "No GCP instances to stop." in [m for _, _, m in o.logs] and o.stopped == [],
     ),
     ("duplicate-names", lambda o: o.deleted == ["dup", "dup"]),
+    ("same-name-two-zones", lambda o: o.deleted == ["dup", "dup"]),
     ("zones-empty", lambda o: o.deleted == [] and _only(o.calls, "instances.list") == []),
     ("build-error", lambda o: o.error is not None and len(o.calls) == 1),
     ("zones-list-permission-denied", lambda o: o.error == ("PermissionDenied", "403 denied")),
