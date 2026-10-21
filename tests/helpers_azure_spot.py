@@ -40,7 +40,7 @@ def not_found() -> Exception:
     return http_error(404, ResourceNotFoundError)
 
 
-def vm(
+def vm(  # noqa: PLR0913
     name: str,
     tags: Any = None,
     *,
