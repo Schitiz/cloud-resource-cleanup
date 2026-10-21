@@ -278,7 +278,9 @@ def build_vm_cleaner(context: RunContext) -> Cleaner:
         notags=options.get("notags"),
         age=options.get("age") or {},
         custom_age_tag_key=options.get("custom_age_tag_key") or "",
-        instance_state=options.get("instance_state") or _DEFAULT_STATE,
+        instance_state=_DEFAULT_STATE
+        if options.get("instance_state") is None
+        else options["instance_state"],
     )
     return VmCleaner(ComputeVmClient(), settings)
 
