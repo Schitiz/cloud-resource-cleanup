@@ -8,14 +8,14 @@ reading custom age tags, and deciding whether a resource is old enough. `crc.cor
 holds the tag, notags, exception, regex, state, yb_task and managed-node filtering used by
 the cleaners, one explicitly named function per variant catalogued in
 `docs/refactor/FILTER_VARIANTS.md`. Cleaners fetch and normalise; this layer decides. The AWS
-key pair (R4a) and Elastic IP (R4b) cleaners are the first cleaners that call it (wiring is one rung per resource).
+key pair (R4a), Elastic IP (R4b) and KMS (R4c) cleaners are the first cleaners that call it (wiring is one rung per resource).
 
 The contracts cleaners plug into live here too: `crc.core.cleaner` (the `Cleaner` protocol
 and its frozen DTOs), `crc.core.registry` (decorator registration by cloud and kind) and
 `crc.core.report` (the report model that reproduces what `crc.py` sends to Slack and
 InfluxDB). `crc.core.engine` runs the registered cleaners of a selection and
 `crc.core.selection` holds the `--cloud` / `--resource` expansion and opt-in gates of
-`crc.py main()`. Only `aws` / `keypair` (R4a) and `aws` / `ip` (R4b) are registered so far and nothing is wired into the engine yet; the Slack and Influx notifiers that
+`crc.py main()`. Only `aws` / `keypair` (R4a), `aws` / `ip` (R4b) and `aws` / `kms` (R4c) are registered so far and nothing is wired into the engine yet; the Slack and Influx notifiers that
 implement the engine's `Notifier` protocol live in `crc.notify` (R3) and `crc.py` already
 sends its notifications through them.
 

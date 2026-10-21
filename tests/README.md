@@ -17,6 +17,8 @@ credentials; SDK clients are mocked. Layout:
   `legacy/aws_keypairs.txt` (frozen `main` copy, see `legacy/README.md`) and the new module on the same fake `boto3.client`.
 - `test_aws_elastic_ips.py`, `test_aws_ip_parity.py`: the refactored AWS Elastic IP cleaner; the parity test runs
   `legacy/aws_elastic_ips.txt` (frozen `main` copy) and the new module (adapter and registered `Cleaner`) on the same fake `boto3.client`.
+- `test_aws_kms.py`, `test_aws_kms_parity.py`: the refactored AWS KMS cleaner; the parity test runs
+  `legacy/aws_kms.txt` (frozen `main` copy) and the new module (adapter and registered `Cleaner`) on the same fake `boto3.client`.
 - `archtest/`: mechanical architecture checks (see `tests/archtest/README.md`).
 
 ## Public API
