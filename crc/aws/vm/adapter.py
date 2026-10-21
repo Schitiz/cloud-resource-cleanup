@@ -1,6 +1,6 @@
 # Copyright (c) Yugabyte, Inc.
 
-"""Legacy `VM` adapter of the AWS EC2 VM cleaner (`crc.aws.vm_cleaner.VmCleaner`).
+"""Legacy `VM` adapter of the AWS EC2 VM cleaner (`crc.aws.vm.cleaner.VmCleaner`).
 
 `VM` keeps the constructor, attributes and methods `crc.py` uses and runs the cleaner region by
 region in the exact call order of the original implementation.
@@ -15,10 +15,9 @@ from typing import Any, ClassVar
 
 import boto3
 
-from crc.aws import vm_scan
 from crc.aws.connectivity import CONNECTIVITY_ERRORS
-from crc.aws.vm_api import VmClient, VmScanClient, VmSession
-from crc.aws.vm_cleaner import (
+from crc.aws.vm import scan as vm_scan
+from crc.aws.vm.cleaner import (
     DEFAULT_REGION,
     DEFAULT_STATE,
     SERVICE_NAME,
@@ -34,6 +33,7 @@ from crc.aws.vm_cleaner import (
     log_summary,
     skip_region,
 )
+from crc.aws.vm.client import VmClient, VmScanClient, VmSession
 from crc.core.cleaner import Candidate, Operation
 from crc.service import Service
 

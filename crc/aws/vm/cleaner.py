@@ -5,7 +5,7 @@
 `VmCleaner` implements the `crc.core.cleaner.Cleaner` contract: `plan()` lists the instances
 of every region (`describe_instances`, `describe_network_interfaces`) and filters them,
 `apply()` calls `terminate_instances` or `stop_instances`. It is registered as `aws` / `vm`;
-`crc.aws.vm.VM` is the legacy adapter `crc.py` uses.
+`crc.aws.vm.VM` (`adapter.py`) is the legacy adapter `crc.py` uses.
 """
 
 import datetime
@@ -16,10 +16,10 @@ from typing import Any
 
 import boto3
 
-from crc.aws import vm_scan
 from crc.aws._base import get_all_regions
 from crc.aws.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
-from crc.aws.vm_api import VmClient
+from crc.aws.vm import scan as vm_scan
+from crc.aws.vm.client import VmClient
 from crc.core import age as core_age
 from crc.core import policy
 from crc.core.age import AgeSpec

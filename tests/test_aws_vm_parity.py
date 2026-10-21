@@ -19,7 +19,7 @@ import pytest
 from botocore.exceptions import ClientError, ConnectTimeoutError, EndpointConnectionError
 
 from crc.aws.vm import VM
-from crc.aws.vm_cleaner import VmCleaner, build_vm_cleaner, dry_run_names
+from crc.aws.vm.cleaner import VmCleaner, build_vm_cleaner, dry_run_names
 from crc.core import registry
 from crc.core.cleaner import Candidate, Operation, RunContext
 
@@ -989,4 +989,3 @@ def test_repeated_operations_match_main(
         return Outcome(aws.calls, names, count, logs, stdout, None)
 
     assert run_twice(_new) == run_twice(_legacy)
-
