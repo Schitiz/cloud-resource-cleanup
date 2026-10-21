@@ -1002,9 +1002,10 @@ def test_cleaner_protocol_matches_main(
     new_rest = [r for r in new.logs if "AWS EBS" not in r[2]]
     assert sorted(new_rest) == sorted(old_rest)
     assert [r for r in new.logs if "AWS EBS" in r[2]] == summary
-    assert [r for r in new.logs if not _is_delete_log(r) and "AWS EBS" not in r[2]] == [
-        r for r in old.logs if not _is_delete_log(r) and "AWS EBS" not in r[2]
-    ] or case.delete_errors
+    if not case.delete_errors:
+        assert [r for r in new.logs if not _is_delete_log(r) and "AWS EBS" not in r[2]] == [
+            r for r in old.logs if not _is_delete_log(r) and "AWS EBS" not in r[2]
+        ]
 
 
 @pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])

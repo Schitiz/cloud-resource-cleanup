@@ -10,7 +10,7 @@ Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.
 
 - `_base.py`: `get_all_regions` (region list via `describe_regions`)
 - `connectivity.py`: `log_skipped_region` (unreachable regions are logged and skipped)
-- `disk.py`: `Disk`: deletes available EBS volumes (`delete_volume`); tags, regex, `yb_task` and Kubernetes skips, CloudWatch detach age; opt-in `--cloud aws --resource disk`
+- `disk/`: package (`__init__.py` keeps the import path `crc.aws.disk`): `DiskCleaner` (registered as `aws` / `disk`) and the `Disk` adapter: deletes available EBS volumes (`delete_volume`); tags, regex, `yb_task` and Kubernetes skips, CloudWatch detach age; opt-in `--cloud aws --resource disk`. See `crc/aws/disk/README.md`
 - `elastic_ips.py`: `ElasticIpCleaner` (registered as `aws` / `ip`) and the `ElasticIPs` adapter: releases unassociated, tagged Elastic IPs (`release_address`)
 - `keypairs.py`: `KeyPairCleaner` (registered as `aws` / `keypair`) and the `KeyPairs` adapter: deletes key pairs by name regex (`delete_key_pair`)
 - `kms.py`: `KmsCleaner` (registered as `aws` / `kms`) and the `Kms` adapter: schedules key deletion (`schedule_key_deletion`) for keys matching description and user ARN
@@ -56,6 +56,10 @@ __init__.py holds only a copyright comment and declares no __all__.
 - `build_vpc_cleaner()`: registry factory behind @register("aws", "vpc"); reads filter_tags, exception_tags and notags from RunContext.options.
 - `VPC`: adapter crc.py calls (delete(), get_deleted, delete_count, vpc_ids_to_delete, get_vpc_ids); runs the cleaner region by region, VPC by VPC, in the order of main.
 
+### disk
+
+The EBS disk cleaner is a subpackage with its own README (crc/aws/disk/README.md) that lists its public names. It exports the Cleaner (registered as aws / disk), the legacy adapter class that crc.py calls, the runtime dataclass and the registry factory, with the typed Protocols of the boto3 EC2 and CloudWatch calls it uses in client.py.
+
 ## Safety Invariants
 
 - Authoritative text: `CLEANUP_SAFETY.md`. Applicable IDs: SAF-006 to SAF-013 (age gates, shared by all clouds), SAF-001, SAF-003, SAF-004, SAF-014, SAF-015, SAF-016, SAF-017 to SAF-020, SAF-025, SAF-026 to SAF-037.
@@ -69,6 +73,10 @@ __init__.py holds only a copyright comment and declares no __all__.
 - Snapshots (AWS-2): `plan()` only calls `describe_snapshots` and `describe_images`; `delete_snapshot` is called from `apply()` (and `Snapshot.delete()` through `SnapshotCleaner.delete_one`) only and never in a dry run (the age gate is its own day cutoff, not `is_old`, so SAF-006 to SAF-013 do not apply as written: `policy.snapshot_old_enough`, a snapshot started exactly at `now - age_days` is old, `StartTime` after it is kept; a non-numeric or overflowing `age_days` raises `TypeError` / `OverflowError` before any call, while `0`, negative or `True` are accepted by `timedelta`). There is no `filter_tags`, `notags` or name filter, so every old snapshot of the account in every region is selected unless an exception tag (`policy.exception_tags_any`, one key at a time so the log names the first matching key and a tag entry without `Key` or `Value` raises `KeyError` as on `main`) or an AMI of the same account and region protects it (AWS-2 entries in `docs/refactor/bugs/pending/AWS-2.md`). Connectivity errors skip the region (SAF-001, `describe_regions` falls back to the static list, other errors propagate, SAF-004); every other listing error propagates and nothing is isolated per snapshot; a `delete_snapshot` error of any kind is logged and swallowed and the snapshot is not recorded. `Snapshot.delete()` keeps the call order of `main` (per region: client, `describe_snapshots`, `describe_images`, then per snapshot the decision and the delete). The Cleaner path lists every region before deleting, so a listing error in a later region is raised before earlier regions are deleted, and its skip log lines come before the `Deleted snapshot` lines. Quirks: `BUG-009`, `BUG-040`, the AWS-2 entries.
 - Do not call real cloud APIs in tests; mock every SDK client.
 
+### disk
+
+- AWS-4: plan() only lists volumes (describe_volumes paginator) and queries CloudWatch get_metric_data; delete_volume is called from apply() and apply_region() only and never in a dry run. An age gate is required (age and/or detach_age), CreateTime is compared with a floor that ignores MAX_AGE, and a missing CreateTime, invalid custom age tag or incomplete CloudWatch answer keeps the volume (SAF-006, SAF-010, SAF-014). Region errors never propagate (connectivity and unauthorised errors skip the region, others are logged and flagged); describe_regions errors other than connectivity propagate. The adapter keeps the call and log order of main; the Cleaner path lists every region before deleting. Quirks: BUG-004, BUG-022 and docs/refactor/bugs/pending/AWS-4.md.
+
 ## Extension Rules
 
 1. Do not edit these modules to add features or fix bugs in a refactor rung; behaviour fixes are
@@ -79,3 +87,7 @@ __init__.py holds only a copyright comment and declares no __all__.
 4. Refactoring a module means removing it from the ruff `extend-exclude` and mypy override lists in
    the same change (the legacy ratchet only shrinks), then updating this README and its symbol list.
 5. Record every new bug or quirk in `docs/refactor/BUGS.md` with its `main` file:line.
+
+### disk
+
+Disk changes need tests/test_aws_disk_parity.py (oracle tests/legacy/aws_disk.txt, a frozen copy of main, never edit it), tests/test_aws_disk_cleaner.py and tests/test_aws_disk.py to stay green.
