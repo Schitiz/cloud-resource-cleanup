@@ -393,11 +393,13 @@ def test_vm_delete_waits_for_the_poller_with_the_timeout(
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    new = _execute(_vm_action(new_module, VmCase("x")), monkeypatch, caplog, capsys)
-    assert new.calls == [("vm.begin_delete", ("rg-test", "vm-1"), {}), ("vm.result", 3600)]
-    assert new.logs == [("root", logging.INFO, "VM delete completed: vm-1")]
-    custom = _execute(_vm_action(new_module, VmCase("x", timeout=7)), monkeypatch, caplog, capsys)
-    assert custom.calls[-1] == ("vm.result", 7)
+    oracle = _load_oracle()
+    for mod in (oracle, new_module):
+        out = _execute(_vm_action(mod, VmCase("x")), monkeypatch, caplog, capsys)
+        assert out.calls == [("vm.begin_delete", ("rg-test", "vm-1"), {}), ("vm.result", 3600)]
+        assert out.logs == [("root", logging.INFO, "VM delete completed: vm-1")]
+        custom = _execute(_vm_action(mod, VmCase("x", timeout=7)), monkeypatch, caplog, capsys)
+        assert custom.calls[-1] == ("vm.result", 7)
 
 
 def test_vm_delete_failure_is_not_swallowed_and_logs_nothing(
@@ -407,9 +409,47 @@ def test_vm_delete_failure_is_not_swallowed_and_logs_nothing(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     case = VmCase("x", result_error=_boom("lro failed"))
-    new = _execute(_vm_action(new_module, case), monkeypatch, caplog, capsys)
-    assert new.error == ("RuntimeError", "lro failed")
-    assert new.logs == []
+    for mod in (_load_oracle(), new_module):
+        out = _execute(_vm_action(mod, case), monkeypatch, caplog, capsys)
+        assert out.error == ("RuntimeError", "lro failed")
+        assert out.logs == []
+
+
+def test_keyword_arguments_match_main(
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def run_kw(mod: Any) -> Callable[[list[tuple[Any, ...]], list[str]], Any]:
+        def action(calls: list[tuple[Any, ...]], names: list[str]) -> Any:
+            vm_ops = FakeVirtualMachines(calls, VmCase("x"))
+            vm_client = types.SimpleNamespace(virtual_machines=vm_ops)
+            nic_client = types.SimpleNamespace(network_interfaces=FakeNicOperations(calls, ()))
+            mod.begin_delete_vm_and_wait(
+                compute_client=vm_client,
+                resource_group="rg-kw",
+                vm_name="vm-kw",
+                timeout_sec=120,
+            )
+            mod.delete_vm_primary_nic(
+                network_client=nic_client,
+                resource_group="rg-kw",
+                vm_name="vm-kw",
+                dry_run=False,
+                nics_names_to_delete=names,
+                nic_name_suffix="-nic-kw",
+            )
+
+        return action
+
+    old = _execute(run_kw(_load_oracle()), monkeypatch, caplog, capsys)
+    new = _execute(run_kw(new_module), monkeypatch, caplog, capsys)
+    assert new.calls == old.calls
+    assert new.names == old.names == ["vm-kw-nic-kw"]
+    assert new.logs == old.logs
+    assert new.stdout == old.stdout
+    assert new.error == old.error is None
 
 
 def test_module_constants_are_unchanged() -> None:

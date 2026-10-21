@@ -7,6 +7,7 @@ a falsy client is rebuilt), the attributes left behind and any raised error must
 The module lists no regions and logs nothing, so there is no region fallback or log to compare.
 """
 
+import logging
 import types
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -71,6 +72,19 @@ CASES = [
         "missing-subscription-and-secret",
         _without("AZURE_CREDENTIALS_SUBSCRIPTION_ID", "AZURE_CREDENTIALS_CLIENT_SECRET"),
     ),
+    Case(
+        "missing-tenant-and-client-id",
+        _without("AZURE_CREDENTIALS_TENANT_ID", "AZURE_CREDENTIALS_CLIENT_ID"),
+    ),
+    Case(
+        "missing-client-id-and-secret",
+        _without("AZURE_CREDENTIALS_CLIENT_ID", "AZURE_CREDENTIALS_CLIENT_SECRET"),
+    ),
+    Case(
+        "missing-secret-and-resource-group",
+        _without("AZURE_CREDENTIALS_CLIENT_SECRET", "AZURE_RESOURCE_GROUP"),
+        resource_group="",
+    ),
     Case("credential-error", credential_error=RuntimeError("bad credential")),
     Case("compute-once", actions=["compute"]),
     Case("compute-twice-is-singleton", actions=["compute", "compute"]),
@@ -105,6 +119,8 @@ class Outcome:
     calls: list[tuple[Any, ...]]
     results: list[tuple[Any, ...]]
     state: dict[str, Any]
+    logs: list[tuple[str, int, str]]
+    stdout: str
     error: tuple[str, str] | None
 
 
@@ -155,19 +171,39 @@ def _describe(client: Any) -> Any:
     return client if isinstance(client, dict) else (client.kind, client.number)
 
 
-def _run(module: Any, case: Case, monkeypatch: pytest.MonkeyPatch) -> Outcome:
+def _records(caplog: pytest.LogCaptureFixture) -> list[tuple[str, int, str]]:
+    return [(r.name, r.levelno, r.getMessage()) for r in caplog.records]
+
+
+def _run(
+    module: Any,
+    case: Case,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> Outcome:
     for name in ENV_NAMES:
         monkeypatch.delenv(name, raising=False)
     for name, value in case.env.items():
         monkeypatch.setenv(name, value)
     FakeClient.serial = 0
+    caplog.set_level(logging.DEBUG)
+    caplog.clear()
+    capsys.readouterr()
     calls: list[tuple[Any, ...]] = []
     _install(module, case, calls, {"compute": case.compute_errors, "network": case.network_errors})
     results: list[tuple[Any, ...]] = []
     try:
         base = module.Base(case.resource_group)
     except Exception as e:
-        return Outcome(calls, results, {}, (type(e).__name__, str(e)))
+        return Outcome(
+            calls,
+            results,
+            {},
+            _records(caplog),
+            capsys.readouterr().out,
+            (type(e).__name__, str(e)),
+        )
     error: tuple[str, str] | None = None
     for action in case.actions:
         try:
@@ -176,16 +212,23 @@ def _run(module: Any, case: Case, monkeypatch: pytest.MonkeyPatch) -> Outcome:
         except Exception as e:
             results.append((action, "error", str(e)))
             error = (type(e).__name__, str(e))
-    return Outcome(calls, results, _state(base), error)
+    return Outcome(calls, results, _state(base), _records(caplog), capsys.readouterr().out, error)
 
 
 @pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
-def test_matches_main(case: Case, monkeypatch: pytest.MonkeyPatch) -> None:
-    old = _run(_load_oracle(), case, monkeypatch)
-    new = _run(_base, case, monkeypatch)
+def test_matches_main(
+    case: Case,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    old = _run(_load_oracle(), case, monkeypatch, caplog, capsys)
+    new = _run(_base, case, monkeypatch, caplog, capsys)
     assert new.calls == old.calls
     assert new.results == old.results
     assert new.state == old.state
+    assert new.logs == old.logs == []
+    assert new.stdout == old.stdout == ""
     assert new.error == old.error
 
 
@@ -202,6 +245,18 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
     (
         "missing-subscription-and-secret",
         lambda o: o.error == ("KeyError", "'AZURE_CREDENTIALS_SUBSCRIPTION_ID'"),
+    ),
+    (
+        "missing-tenant-and-client-id",
+        lambda o: o.error == ("KeyError", "'AZURE_CREDENTIALS_TENANT_ID'"),
+    ),
+    (
+        "missing-client-id-and-secret",
+        lambda o: o.error == ("KeyError", "'AZURE_CREDENTIALS_CLIENT_ID'"),
+    ),
+    (
+        "missing-secret-and-resource-group",
+        lambda o: o.error == ("KeyError", "'AZURE_CREDENTIALS_CLIENT_SECRET'"),
     ),
     ("missing-secret", lambda o: o.error == ("KeyError", "'AZURE_CREDENTIALS_CLIENT_SECRET'")),
     (
@@ -260,7 +315,11 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
 
 @pytest.mark.parametrize(("case_id", "check"), QUIRKS, ids=[q[0] for q in QUIRKS])
 def test_quirk_is_preserved(
-    case_id: str, check: Callable[[Outcome], bool], monkeypatch: pytest.MonkeyPatch
+    case_id: str,
+    check: Callable[[Outcome], bool],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    assert check(_run(_base, _find(case_id), monkeypatch))
-    assert check(_run(_load_oracle(), _find(case_id), monkeypatch))
+    assert check(_run(_base, _find(case_id), monkeypatch, caplog, capsys))
+    assert check(_run(_load_oracle(), _find(case_id), monkeypatch, caplog, capsys))
