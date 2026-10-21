@@ -31,6 +31,13 @@ def _created(**delta: float) -> datetime.datetime:
     return NOW - datetime.timedelta(**delta)
 
 
+class _TruthyEmptyDict(dict[str, int]):
+    """Dict subclass that is truthy when empty, reaching the AGE_KEYS intersection guard."""
+
+    def __bool__(self) -> bool:
+        return True
+
+
 @pytest.mark.parametrize(
     ("age", "expected"),
     [
@@ -61,6 +68,7 @@ def test_require_positive_age_accepts(age: Any, expected: AgeSpec) -> None:
         ({"weeks": 1}, r"age has unsupported keys \['weeks'\]; use days and/or hours"),
         ({"days": 1, "weeks": 1}, "age has unsupported keys"),
         ({1: 1}, r"age has unsupported keys \[1\]"),
+        (_TruthyEmptyDict(), "age must include days and/or hours"),
         ({"days": "abc"}, "age days must be an integer"),
         ({"days": None}, "age days must be an integer"),
         ({"hours": [1]}, "age hours must be an integer"),
