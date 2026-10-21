@@ -71,10 +71,12 @@ Related: `docs/refactor/FILTER_VARIANTS.md` (how each module filters, section 7 
 | BUG-040 | `--cloud all --resource snapshot` runs the AWS `Snapshot(age_days=90).delete()` once per cloud (4 times): the snapshot branch sits inside `for cloud in clouds` and ignores `cloud`; later passes repeat the AWS scan and the dry-run message | `crc.py:39`, `:1532`, `:1544`, `:1629-1643` | yes | cosmetic | low | R2c round 2 | open |
 | BUG-041 | When `usergroups_list` fails, `get_user_groups_list` returns the string `"not_found"`; `ping_on_slack` iterates it as a list of groups, so the first owner without a Slack user raises `TypeError: string indices must be integers` and the remaining owners are not pinged | `crc.py:224-228`, `:245`, `:258-259` | yes | run fails | low | R3 | open |
 | BUG-042 | In `ping_on_slack`, `conversations_open` and the `response["channel"]["id"]` read are outside the `try`, so a failure there aborts the whole disk notification and the run (the post itself is guarded) | `crc.py:296-299` (the `try` starts at `:301`) | yes | run fails | low | R3 | open |
+| BUG-043 | `human_readable_timedelta` (scan-tag uptime) pads zero units inconsistently: 3 hours shows `03h 00s`, 2 days `2d 00s`, 1 day 5 minutes `1d 00h 05m 00s`; the docstring promises `3d 04:12:05` | `crc/notifications.py:74-109` (conditions at `:104`, `:106`) | yes | cosmetic | low | R3 (round 2) | open |
+| BUG-044 | `send_slack_message` `max_retries=3` is the total number of attempts (2 retries), and a part that still fails is logged twice: `logger.exception` in `send_slack_message`, then `logging.exception` on the root logger in `notify_cleanup` | `crc/notifications.py:111`, `:132-133`, `:183` | yes | cosmetic | low | R3 (round 2) | open |
 
 ## Counts
 
-42 rows: critical 2, high 7, medium 9, low 24. All open.
+44 rows: critical 2, high 7, medium 9, low 26. All open.
 
 ## Notes
 
