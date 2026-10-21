@@ -13,7 +13,7 @@ from crc.core import age as core_age
 from crc.core.cleaner import Candidate, Operation
 from crc.oci._base import Base
 from crc.oci.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
-from crc.oci.disk_api import RegionLister, regions_of
+from crc.oci.disk.api import RegionLister, regions_of
 from crc.oci.vm.cleaner import Clock, TagSpec, VmCleaner, VmSettings, _log_summary
 from crc.oci.vm.client import ApiFactory, compute_api_for
 from crc.service import Service

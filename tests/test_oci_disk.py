@@ -13,7 +13,7 @@ from oci.exceptions import ConnectTimeout
 from crc.core.cleaner import Operation, Plan, RunContext
 from crc.core.registry import DEFAULT_REGISTRY
 from crc.oci.disk import DiskCleaner, DiskSettings, build_disk_cleaner
-from crc.oci.disk_api import OciVolumeApi, SdkAttachment, SdkVolume, VolumeApi
+from crc.oci.disk.api import OciVolumeApi, SdkAttachment, SdkVolume, VolumeApi
 
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=datetime.UTC)
 FILTER = {"env": ["ci"]}

@@ -1,6 +1,6 @@
 # Copyright (c) Yugabyte, Inc.
 
-"""The OCI calls `crc.oci.disk` uses, behind small typed Protocols.
+"""The OCI calls the disk cleaner (`crc.oci.disk`) uses, behind small typed Protocols.
 
 `OciVolumeApi` is the real implementation over the OCI SDK clients of one region; tests pass
 fakes that satisfy `VolumeApi` instead.
