@@ -45,12 +45,12 @@ VERDICT: APPROVE
 
 - **`crc/README.md` revert: correct.** `git diff ef1f718..HEAD -- crc/README.md` is empty; the invented `SAF-LOG-001` / `SAF-AGE-001` IDs are gone and the integrator notes sit under `## Coding summary`.
 - **Pending-row citations: correct.** Checked every location in `docs/refactor/bugs/pending/PL-CORE.md` against `git show main:crc/utils.py` (52 lines) and `git show main:crc/service.py` (318 lines): `utils.py:11`, `:21-22`, `:31-34`, `:38-39`, `:43-48`, `:50-52` and `service.py:19`, `:28-29`, `:145-178`, `:222-225`, `:238-239`, `:250`, `:257`, `:268-278`, `:306`, `:314` all point at the described code. The `warn` / `info` / `basicConfig` / `basic_format` corrections are right (`WARN` = 30, `BASICCONFIG` missing, `BASIC_FORMAT` is a string so `setLevel` raises `ValueError`).
-- **Added tests: correct and not weakened.** `basic_format` case, `test_init_logging_repeated_calls_accumulate_handlers_parity` and `test_init_logging_invalid_levels_raise_expected_error_type` (`tests/test_crc_utils_parity.py:107-271`) compare oracle and new outcomes and also assert concrete values (4 handlers, error type). No existing assertion changed. No production code changed in round 1.
+- **Added tests: correct and not weakened.** `basic_format` case, `test_init_logging_repeated_calls_accumulate_handlers_parity` and `test_init_logging_invalid_levels_raise_expected_error_type` (`tests/test_crc_utils_parity.py:109`, `:207-270`) compare oracle and new outcomes and also assert concrete values (4 handlers, error type). No existing assertion changed. No production code changed in round 1.
 
 ### New findings
 
 - **BLOCKING (fixed): wrong `notset` effect in pending row 2 (`docs/refactor/bugs/pending/PL-CORE.md:9`).** Round 1's rewrite said `NOTSET` makes the root logger "delegate to `WARNING`". The root logger has no parent: at level 0 `getEffectiveLevel()` is 0 and `isEnabledFor(DEBUG)` is True (checked), so every record reaches the handlers. Reworded the row.
-- **NIT (left): new public aliases are not documented.** `crc/service.py:9-10` adds module-level `AgeSpec` and `Tags`; `crc/README.md` (outside this lane) does not list them. The Coding summary already asks the integrator to add the typed signatures; `ARCH-002` passes.
+- **NIT (left): new public aliases are not documented.** `crc/service.py:10-11` adds module-level `AgeSpec` and `Tags`; `crc/README.md` (outside this lane) does not list them. The Coding summary already asks the integrator to add the typed signatures; `ARCH-002` passes.
 - **NIT (left): `Tags` duplicates the core's inline union.** `crc/core/age.py:215`, `:227` spell `dict[str, str] | list[dict[str, str]]` inline; a `Tags` alias belongs in `crc.core.age` next to `AgeSpec` (core change, out of lane).
 - **NIT (left): test name.** `tests/test_crc_utils.py:86` `test_service_class_attributes_and_delegation` asserts only the class attributes; delegation is covered by the parity tests.
 
