@@ -33,7 +33,7 @@ as a thin adapter. Status: complete; ruff, mypy strict, lint-imports and pytest 
   or region auth-error cases to cover.
 - Ratchet: `crc/azu/nic.py` removed from ruff `extend-exclude` and the mypy override `crc.azu.nic`.
   No per-SDK mypy override was needed.
-- Open issues: new bugs and quirks in `docs/refactor/bugs/pending/AZ-2.md` (11 rows, ID `NEW`).
+- Open issues: new bugs and quirks in `docs/refactor/bugs/pending/AZ-2.md` (13 rows, ID `NEW`; two added in round 2).
   No existing BUGS.md row is specific to this module (BUG-017 and BUG-028 concern `crc.py`).
 - Needed changes outside this lane (not made): `crc/README.md`, `tests/README.md` and
   `tests/legacy/README.md` should list `tests/legacy/azu_nic.txt`, `tests/test_azure_nic_parity.py`,
@@ -101,3 +101,73 @@ Scope reviewed: `git diff 4f5683b..HEAD` (`crc/azu/nic.py`, `crc/azu/README.md`,
 Test count: 3037 before AZ-2 (`4f5683b`), 3203 now (+166).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 4f5683b..HEAD` (both AZ-2 commits), read against `git show main:crc/azu/nic.py`,
+`git show main:crc.py`, `crc/core/policy.py`, `crc/core/engine.py`, `crc/core/cleaner.py` and
+`REVIEW_CHECKLIST.md`.
+
+### Round 1 fixes
+
+- `NIC.__init__` annotations `list[str]` to `Sequence[str] | None` (`crc/azu/nic.py:203-209`):
+  correct and type-only. `crc.py:684` passes `args.get("name_regex")` / `args.get("exception_regex")`
+  (`crc.py:1190-1191`), which are `None` when the flags are omitted, and the `None` cases are covered
+  by parity cases `name-regex-none-returns-early` and `exception-none`. No behaviour change.
+- `docs/refactor/bugs/pending/AZ-2.md` citations: re-verified against `git show main:crc/azu/nic.py`
+  (`:13` docstring, `:16-22` signature, `:35` list init, `:63-65`, `:83-87`, `:96-102`, `:113-129`).
+  All correct. No test was touched by round 1.
+
+### Independent review
+
+- Parity: `decide()` keeps main's evaluation order (`virtual_machine`, then `name_regex`, then
+  `exception_regex` under truthiness even when not included); `policy.nic_name_included` /
+  `nic_name_excluded` are `any(p in text for p in patterns)`, the same expression and short-circuit
+  as main `:96-101`. `attempt_delete` keeps three attempts, the same log lines and the swallow of
+  `Exception` only (not `BaseException`). The adapter iterates `list_nics()` lazily and appends after
+  each successful attempt, so call order and the cumulative list match main; `list_all` is still
+  requested twice. `tests/legacy/azu_nic.txt` is byte-identical to main.
+- Tests assert outcomes: `test_matches_main` compares ordered SDK calls (including lazy `yield`
+  interleaving), errors, deleted list, count, log records and stdout; the Cleaner path compares
+  list/delete/result/client calls and logs; every quirk check also asserts the oracle shows it.
+  No skip, xfail or vacuous assertion found.
+- Safety: `plan()` makes no mutating call (`begin_delete` only in `attempt_delete`, reached from
+  `apply()` and `NIC.delete()`); the engine never calls `apply()` in a dry run
+  (`crc/core/engine.py:100`). No age or tag gate existed on main, none weakened.
+- Architecture and typing: decorator registration, constructor-injected client factory, SDK behind
+  Protocols, `Any` only for SDK NIC objects; ratchet lines removed only. README symbol list and
+  safety section match the code.
+
+### BLOCKING (fixed)
+
+None in code or tests. One docs fix: the pending row about `.result()` failure retrying
+`begin_delete` had effect `run fails`, but every error is swallowed (`main:crc/azu/nic.py:122-129`),
+so the run cannot fail there; changed to `cosmetic` with the actual effect (a deleted NIC can be
+reported as failed).
+
+### New findings recorded (`docs/refactor/bugs/pending/AZ-2.md`)
+
+- A NIC listed from another resource group is reported as deleted when `begin_delete` on the
+  configured group hits a missing resource (Azure returns 204): `main:crc/azu/nic.py:83-84`, `:116-121`.
+- `--name_regex` help says it only applies to AWS keypairs and GCP IPs, yet it is the only NIC
+  selector: `main:crc.py:1084`, `:826`, `:1573-1574`.
+
+### NIT (left)
+
+- `AzureNicCleaner.plan()` records `Skipped(id=getattr(nic, "name", ""))`, so an attached NIC whose
+  `name` is `None` or an int yields a `Skipped` with a non-`str` id (`crc/azu/nic.py:114`); harmless
+  today (no consumer on the legacy path) but violates the dataclass annotation.
+- Round 1's NIT stands: `apply()` called directly in a dry run logs the dry-run summary again
+  (`crc/azu/nic.py:119-132`); unreachable through `crc.core.engine.run`.
+- `ClientFactory` and `DELETE_ATTEMPTS` are module-level public names not in the README symbol list
+  (ARCH-002 passes; `ip.py` follows the same pattern).
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`: `ruff check .` all
+checks passed; `mypy` no issues in 91 source files; `lint-imports` 5 kept, 0 broken;
+`pytest -q` 3203 passed.
+
+Test count: 3203 (3037 before AZ-2, +166; unchanged by round 2).
+
+ROUND 2 VERDICT: APPROVE
