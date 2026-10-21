@@ -19,8 +19,11 @@ from unittest.mock import MagicMock, Mock
 import pytest
 from influxdb_client.client.write.point import Point
 
-from crc.core.cleaner import Operation, RunContext
+from crc.core.cleaner import Candidate, Operation, Plan, Result, RunContext
+from crc.core.engine import run as run_engine
+from crc.core.registry import Registry
 from crc.core.report import DISK, KEYPAIR, KMS, NIC, SPOT_INSTANCE_REQUEST, VM, Report, Section
+from crc.core.selection import Selection
 from crc.notify.influx import InfluxConfig, InfluxNotifier
 from crc.notify.slack import SlackNotifier
 
@@ -201,16 +204,18 @@ def test_quirks_are_visible_in_the_outcome(legacy: ModuleType, current: ModuleTy
 @pytest.mark.parametrize("operation", ["Deleted", "Stopped"])
 @pytest.mark.parametrize("dry_run", [False, True])
 @pytest.mark.parametrize("cloud", CLOUDS)
-@pytest.mark.parametrize("ids", [[], ["a"], ["a", "b"]])
+@pytest.mark.parametrize("ids", [[], ["a"], ["a", "b"], None])
 def test_get_msg_matches_legacy(
     legacy: ModuleType, current: ModuleType, operation: str, dry_run: bool, cloud: str,
-    ids: list[str],
+    ids: list[str] | None,
 ) -> None:
-    results = [
-        make(module, cloud, dry_run)[0].get_msg("Disk", operation, ids)
-        for module in (legacy, current)
-    ]
-    assert results[0] == results[1]
+    assert_same(
+        legacy,
+        current,
+        lambda crc: print(crc.get_msg("Disk", operation, ids)),
+        cloud=cloud,
+        dry_run=dry_run,
+    )
 
 
 def lookup_setup(
@@ -405,50 +410,271 @@ SECTION_PARAMS = [
 ]
 
 
-@pytest.mark.parametrize("channel", ["chan", "#chan"])
+def run_slack_notifier(
+    report: Report,
+    channel: str | None = "chan",
+    setup: Callable[[Mock], None] | None = None,
+) -> tuple[list[Any], str, tuple[str, str] | None]:
+    slack = Mock()
+    if setup is not None:
+        setup(slack)
+    context = RunContext(report.dry_run, report.operation, {}, NOW)
+    stdout = io.StringIO()
+    error: tuple[str, str] | None = None
+    with contextlib.redirect_stdout(stdout):
+        try:
+            SlackNotifier(slack, channel).send(report, context)  # type: ignore[arg-type]
+        except Exception as e:
+            error = (type(e).__name__, str(e))
+    return slack.mock_calls, stdout.getvalue(), error
+
+
+@pytest.mark.parametrize("channel", ["chan", "#chan", None])
 @pytest.mark.parametrize("dry_run", [False, True])
 @pytest.mark.parametrize(("case", "cloud"), SECTION_PARAMS)
 def test_slack_notifier_matches_legacy(
-    legacy: ModuleType, case: str, cloud: str, dry_run: bool, channel: str
+    legacy: ModuleType,
+    current: ModuleType,
+    case: str,
+    cloud: str,
+    dry_run: bool,
+    channel: str | None,
 ) -> None:
     operation, sections = SECTION_CASES[case]
     method, obj = NOTIFY_CASES[case]
-    old = run(legacy, lambda crc: getattr(crc, method)(obj), cloud=cloud, dry_run=dry_run,
-              channel=channel)
-    slack = Mock()
+    old = assert_same(
+        legacy,
+        current,
+        lambda crc: getattr(crc, method)(obj),
+        cloud=cloud,
+        dry_run=dry_run,
+        channel=channel,
+    )
     report = report_for(cloud, dry_run, operation, sections(obj))
-    context = RunContext(dry_run, operation, {}, NOW)
-    with contextlib.redirect_stdout(io.StringIO()):
-        SlackNotifier(slack, channel).send(report, context)
-    assert slack.mock_calls == old[0]
+    calls, out, error = run_slack_notifier(report, channel)
+    assert (calls, out, error) == (old[0], old[2], old[3])
 
 
+@pytest.mark.parametrize(("case", "cloud"), SECTION_PARAMS)
+def test_slack_notifier_matches_legacy_when_slack_fails(
+    legacy: ModuleType, current: ModuleType, case: str, cloud: str
+) -> None:
+    operation, sections = SECTION_CASES[case]
+    method, obj = NOTIFY_CASES[case]
+
+    def fail(slack: Mock) -> None:
+        slack.chat_postMessage.side_effect = RuntimeError("slack down")
+
+    old = assert_same(
+        legacy, current, lambda crc: getattr(crc, method)(obj), fail, cloud=cloud
+    )
+    report = report_for(cloud, False, operation, sections(obj))
+    calls, out, error = run_slack_notifier(report, "chan", fail)
+    assert (calls, out, error) == (old[0], old[2], old[3])
+
+
+@pytest.mark.parametrize("post_fails", [False, True])
+@pytest.mark.parametrize("channel", ["chan", "#chan", None])
 @pytest.mark.parametrize("dry_run", [False, True])
-def test_slack_notifier_matches_legacy_azure_vm(legacy: ModuleType, dry_run: bool) -> None:
+def test_slack_notifier_matches_legacy_azure_vm(
+    legacy: ModuleType,
+    current: ModuleType,
+    dry_run: bool,
+    channel: str | None,
+    post_fails: bool,
+) -> None:
     method, obj = NOTIFY_CASES["vm"]
-    old = run(legacy, lambda crc: getattr(crc, method)(obj), cloud="azure", dry_run=dry_run)
-    slack = Mock()
+
+    def setup(slack: Mock) -> None:
+        if post_fails:
+            slack.chat_postMessage.side_effect = RuntimeError("slack down")
+
+    old = assert_same(
+        legacy,
+        current,
+        lambda crc: getattr(crc, method)(obj),
+        setup,
+        cloud="azure",
+        dry_run=dry_run,
+        channel=channel,
+    )
     sections = [Section(VM, ("vm-1", "vm-2")), Section(NIC, ("nic-1",), slack_ids=("vm-1", "vm-2"))]
     report = report_for("azure", dry_run, Operation.DELETE, sections)
-    SlackNotifier(slack, "chan").send(report, RunContext(dry_run, Operation.DELETE, {}, NOW))
-    assert slack.mock_calls == old[0]
+    calls, out, error = run_slack_notifier(report, channel, setup)
+    assert (calls, out, error) == (old[0], old[2], old[3])
 
 
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        ("U1", GROUPS, False, False),
+        ("U1", GROUPS, True, False),
+        ("U1", GROUPS, False, True),
+        ("U1", None, False, False),
+        (None, GROUPS, False, False),
+        (None, GROUPS, True, False),
+        (None, [], False, False),
+        (None, None, False, False),
+    ],
+)
+@pytest.mark.parametrize("channel", ["chan", "#chan", None])
+@pytest.mark.parametrize("dry_run", [False, True])
+@pytest.mark.parametrize("cloud", ["aws", "gcp"])
+def test_slack_notifier_owner_pings_match_legacy(
+    legacy: ModuleType,
+    current: ModuleType,
+    cloud: str,
+    dry_run: bool,
+    channel: str | None,
+    scenario: tuple[str | None, list[dict[str, str]] | None, bool, bool],
+) -> None:
+    setup = lookup_setup(*scenario)
+    old = assert_same(
+        legacy,
+        current,
+        lambda crc: crc.ping_on_slack("Disk", "Deleted", OWNERS),
+        setup,
+        cloud=cloud,
+        dry_run=dry_run,
+        channel=channel,
+    )
+    grouped = {k: tuple(v) for k, v in OWNERS.items()}
+    report = Report(cloud, Operation.DELETE, dry_run, (Section(DISK, ()),), by_owner=grouped)
+    calls, out, error = run_slack_notifier(report, channel, setup)
+    assert (calls, out, error) == (old[0], old[2], old[3])
+
+
+@pytest.mark.parametrize("write_fails", [False, True])
 @pytest.mark.parametrize("dry_run", [False, True])
 @pytest.mark.parametrize("suffix", [None, "jenkins"])
 def test_influx_notifier_matches_legacy_writes(
-    legacy: ModuleType, dry_run: bool, suffix: str | None
+    legacy: ModuleType,
+    current: ModuleType,
+    dry_run: bool,
+    suffix: str | None,
+    write_fails: bool,
 ) -> None:
     """The three writes of a spot VM delete, as `crc.py` issues them one by one."""
     def writes(crc: Any) -> None:
+        if write_fails:
+            crc.influxdb_client.write_api.return_value.write.side_effect = RuntimeError("down")
         crc.write_influxdb("VM", ["i-1"])
         crc.write_influxdb("NIC", [])
         crc.write_influxdb("Disk", ["v-1", "v-2"])
 
-    _, old, _, _ = run(legacy, writes, cloud="aws", dry_run=dry_run, suffix=suffix)
+    old = assert_same(legacy, current, writes, cloud="aws", dry_run=dry_run, suffix=suffix)
     influx = MagicMock()
+    if write_fails:
+        influx.write_api.return_value.write.side_effect = RuntimeError("down")
     sections = (Section(VM, ("i-1",)), Section(NIC, ()), Section(DISK, ("v-1", "v-2")))
     report = Report("aws", Operation.DELETE, dry_run, sections)
     context = RunContext(dry_run, Operation.DELETE, {}, NOW)
-    InfluxNotifier(influx, InfluxConfig("bkt", suffix)).send(report, context)
-    assert normalise(influx) == old
+    stdout = io.StringIO()
+    with contextlib.redirect_stdout(stdout):
+        InfluxNotifier(influx, InfluxConfig("bkt", suffix)).send(report, context)
+    assert (normalise(influx), stdout.getvalue()) == (old[1], old[2])
+
+
+@pytest.mark.parametrize("post_fails", [False, True])
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_engine_with_notifiers_matches_legacy_section_and_owner_flows(
+    legacy: ModuleType, current: ModuleType, dry_run: bool, post_fails: bool
+) -> None:
+    """Engine wiring with SlackNotifier(fail_open=False) and InfluxNotifier(fail_open=True)."""
+    def setup(slack: Mock) -> None:
+        lookup_setup("U1", GROUPS, post_fails, False)(slack)
+
+    def legacy_flow(crc: Any) -> None:
+        vm = resource(get_deleted=["vm-1"], get_deleted_nic=["nic-1"])
+        crc.notify_deleted_vm_via_slack(vm)
+        crc.write_influxdb("VM", vm.get_deleted)
+        crc.write_influxdb("NIC", vm.get_deleted_nic)
+
+    old = assert_same(
+        legacy, current, legacy_flow, setup, cloud="azure", dry_run=dry_run, suffix="ci"
+    )
+
+    registry = Registry()
+
+    @registry.register("azure", "vm")
+    class AzureVmCleaner:
+        cloud = "azure"
+        kind = "vm"
+
+        def __init__(self, _ctx: RunContext) -> None:
+            pass
+
+        def supports(self, op: Operation) -> bool:
+            return op is Operation.DELETE
+
+        def plan(self, _ctx: RunContext) -> Plan:
+            return Plan((Candidate("vm-1"),), related={NIC: ("nic-1",)})
+
+        def apply(self, _plan: Plan, _ctx: RunContext) -> Result:
+            return Result(("vm-1",), related={NIC: ("nic-1",)})
+
+    slack, influx = Mock(), MagicMock()
+    setup(slack)
+    notifiers = (SlackNotifier(slack, "chan"), InfluxNotifier(influx, InfluxConfig("bkt", "ci")))
+    ctx = RunContext(dry_run, Operation.DELETE, {}, NOW)
+    stdout = io.StringIO()
+    with contextlib.redirect_stdout(stdout):
+        run_engine(Selection((("azure", "vm"),)), ctx, registry, notifiers)
+    assert (slack.mock_calls, normalise(influx), stdout.getvalue(), None) == old
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        ("U1", GROUPS, True, False),
+        ("U1", GROUPS, False, True),
+        (None, None, False, False),
+    ],
+)
+def test_engine_with_notifiers_matches_legacy_on_disk_owner_pings(
+    legacy: ModuleType,
+    current: ModuleType,
+    scenario: tuple[str | None, list[dict[str, str]] | None, bool, bool],
+) -> None:
+    """chat_postMessage errors print and continue to Influx; BUG-041/042 raise before Influx."""
+    setup = lookup_setup(*scenario)
+
+    def legacy_disk_flow(crc: Any) -> None:
+        disk = resource(get_deleted=OWNERS)
+        crc.notify_deleted_disk_via_slack(disk)
+        crc.write_influxdb("Disk", disk.get_deleted)
+
+    old = assert_same(legacy, current, legacy_disk_flow, setup, cloud="gcp")
+
+    registry = Registry()
+    grouped = {k: tuple(v) for k, v in OWNERS.items()}
+
+    @registry.register("gcp", "disk")
+    class GcpDiskCleaner:
+        cloud = "gcp"
+        kind = "disk"
+
+        def __init__(self, _ctx: RunContext) -> None:
+            pass
+
+        def supports(self, op: Operation) -> bool:
+            return op is Operation.DELETE
+
+        def plan(self, _ctx: RunContext) -> Plan:
+            return Plan(by_owner=grouped)
+
+        def apply(self, _plan: Plan, _ctx: RunContext) -> Result:
+            return Result(by_owner=grouped)
+
+    slack, influx = Mock(), MagicMock()
+    setup(slack)
+    notifiers = (SlackNotifier(slack, "chan"), InfluxNotifier(influx, InfluxConfig("bkt")))
+    ctx = RunContext(False, Operation.DELETE, {}, NOW)
+    stdout = io.StringIO()
+    error: tuple[str, str] | None = None
+    with contextlib.redirect_stdout(stdout):
+        try:
+            run_engine(Selection((("gcp", "disk"),)), ctx, registry, notifiers)
+        except Exception as e:
+            error = (type(e).__name__, str(e))
+    assert (slack.mock_calls, normalise(influx), stdout.getvalue(), error) == old

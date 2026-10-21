@@ -278,6 +278,7 @@ class CRC:
         :return: Message to be sent to the Slack channel
         :rtype: str
         """
+        len(operated_list)
         return report_get_msg(
             self.cloud, resource, _OPERATIONS[operation_type], operated_list, self.dry_run
         )
