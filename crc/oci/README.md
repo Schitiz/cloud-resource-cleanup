@@ -40,7 +40,7 @@ no __all__.
 - `VmRuntime`: frozen dataclass with the injected API factory, region lister and clock (now) of `VM`; unset parts come from Base.
 - `VmSettings`: frozen dataclass with the filters and thresholds of one run (filter tags, exception tags, notags, age, custom age tag key, allowed instance states).
 - `VmCleaner`: the Cleaner (supports delete and stop, read-only plan, mutating apply, plus decide and act used by the adapter).
-- `build_vm_cleaner()`: registry factory behind @register("oci", "vm"); reads filter_tags, exception_tags, notags, age, custom_age_tag_key and instance_state from RunContext.options.
+- `build_vm_cleaner()`: registry factory behind @register("oci", "vm"); reads filter_tags, exception_tags, notags, age, custom_age_tag_key and (delete only; stop always uses RUNNING, as on main) instance_state from RunContext.options.
 - `VM`: adapter crc.py calls (delete(), stop(), get_deleted, get_stopped, delete_count, stopped_count, instance_names_to_delete, instance_names_to_stop); subclasses Service and Base; decides and acts instance by instance in the order of main.
 
 ## Safety Invariants

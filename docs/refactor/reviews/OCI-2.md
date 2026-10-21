@@ -77,3 +77,52 @@ Scope reviewed: `git diff 7d7b4ae..HEAD` (`crc/oci/vm.py`, `crc/oci/vm_api.py`, 
 Test count: 3549 before OCI-2 (`7d7b4ae`), 3913 after OCI-2 (+364).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 7d7b4ae..HEAD` (all three rung commits, including round 1's `a23540e`), checked against `git show main:crc/oci/vm.py`, `git show main:crc.py`, `git show main:crc/oci/_base.py`, `git show main:crc/oci/spot_vm.py`, `crc/core/policy.py`, `crc/core/age.py` and `REVIEW_CHECKLIST.md`.
+
+### Round 1 fixes assessment
+
+- **`instance_state` ignored for `Operation.STOP` in `build_vm_cleaner`** (`crc/oci/vm.py:242`): correct. On main, `VM.stop()` always passes `default_instance_state` (`main:crc/oci/vm.py:208-213`), and `crc.py` `stop_vm` calls `vm.stop()` with no state (`main:crc.py:745-748`). The test change makes the parity check stronger, not weaker: `_run_cleaner` now passes `instance_state` for stop too (`tests/test_oci_vm_parity.py:599-600`), so `custom-states-stop` and `custom-states-empty-stop` now exercise the Cleaner path. The new unit assertion (`tests/test_oci_vm.py:276-280`) pins it. Nothing else in the code changed.
+- **Pending-bug citations** (rows 7, 8, 11, 13): I re-checked each against `git show main:...`. `crc.py:108-111` (`_delete_vm`), `:558-559`, `:1576-1583`, `crc/oci/vm.py:43-46`, `:169-196`, `:200` are all correct. I also spot-checked rows 1 to 3 (`spot_vm.py:74-90`, `:266`; `_base.py:14`, `:33-40`, `:65-84`; `connectivity.py:14-18`): all correct.
+
+### Independent review
+
+- **Parity.** `tests/legacy/oci_vm.txt` is byte-identical to `git show main:crc/oci/vm.py` (`cmp`). I compared the filter helpers line by line with main. `_key_matches` (`crc/core/policy.py:90-91`) is main's `key in tags and (not value or tags[key] in value)`, so string specs remain substring tests. `effective_age` is `retention_age or age`. `state_in` is `in tuple(allowed)`. `Operation` is a `StrEnum`, so the f-string log lines still say `delete` / `stop`. The adapter keeps main's call order: regions, client and list inside the region `try`, then terminate or stop per instance. `normalize_tags` turns a `None` or non-`str` tag value into a string, where main compares the raw value. OCI freeform tag values are always `str`, so this cannot change behaviour in practice (FILTER_VARIANTS.md line 25 already documents the normalisation).
+- **Safety.** `plan()` makes no mutating call (`crc/oci/vm.py:127-146`). The fail-open custom age (BUG-004, SAF-009), the empty-age match (SAF-006) and the `MAX_AGE` shortening (SAF-010) are unchanged and pinned by parity cases. Auth errors from `list_region_subscriptions` are still swallowed exactly as on main (pending row 3). No safety test was removed, skipped or weakened.
+- **Tests.** The unit tests assert candidates, skip reasons, exact SDK call lists, results and log records; none is vacuous. The parity suite compares calls, results, counts, logs, stdout and errors against the oracle.
+- **Architecture and typing.** `lint-imports` shows 5 contracts kept. `pyproject.toml` only removes `crc/oci/vm.py` / `crc.oci.vm` from the ratchets. `Any` appears only at the SDK edge (`OciComputeApi.__init__`). Registration uses the decorator, and the factory builds `Base()` only when it is called. No file outside the lane was touched.
+
+### BLOCKING (fixed)
+
+None.
+
+### Fixed in passing (docs accuracy)
+
+- `crc/oci/README.md` (`build_vm_cleaner` entry) still said the factory reads `instance_state` without qualification. After round 1's fix it is read only for delete, and the entry now says so.
+
+### NIT (left)
+
+1. **`instance_state: []` in the factory options means "match nothing"** (`crc/oci/vm.py:242`, `:249`). On main, `crc.py` `_delete_vm` treats an empty `resource_states` as "use the default" and calls `vm.delete()` (`main:crc.py:108-111`). The factory matches main's `VM.delete([])` instead (parity case `custom-states-empty`). Nothing is affected today because `crc.py` still calls the `VM` adapter, `resource_states` defaults to `None` (`main:crc.py:1329`), and the mismatch keeps instances rather than deleting them. The rung that wires `crc.py` to `engine.run` must either map `[]` to `None` before building the options or change the factory to `options.get("instance_state") or None`.
+2. `VmCleaner.apply()` calls `self._api_factory(region)` outside a `try` (`crc/oci/vm.py:159`). With `Base` the client is already cached by `plan()`, so it cannot raise a new connectivity error. With an injected factory that raises, `apply()` would propagate instead of skipping the region. This is acceptable because `plan()` has already built the same client.
+3. Same as round 1: `Failure.id` is the display name (`crc/oci/vm.py:204`), consistent with `crc/oci/disk.py`.
+
+### New bugs and quirks
+
+One row was added to `docs/refactor/bugs/pending/OCI-2.md`: the age check logs the whole freeform tag dict at INFO with no instance name (`main:crc/oci/vm.py:116-117`, cosmetic, low).
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`:
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed |
+| `mypy` | Success: no issues found in 97 source files |
+| `lint-imports` | Contracts: 5 kept, 0 broken |
+| `pytest -q` | 3913 passed |
+
+Test count: 3913 (3549 before the rung, +364). Not lower than before.
+
+ROUND 2 VERDICT: APPROVE
