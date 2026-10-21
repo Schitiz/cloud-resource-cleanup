@@ -18,7 +18,7 @@ import boto3
 
 from crc.aws._base import get_all_regions
 from crc.aws.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
-from crc.aws.vpc_api import Ec2Client, Ec2Resource, Vpc
+from crc.aws.vpc.client import Ec2Client, Ec2Resource, Vpc
 from crc.core import policy
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext, Skipped
 from crc.core.registry import register
