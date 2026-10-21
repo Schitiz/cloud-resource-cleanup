@@ -131,4 +131,5 @@ def test_default_registry_functions_use_default_instance(
         registry.register("aws", "keypair")(StubCleaner)
     monkeypatch.undo()
     assert registry.DEFAULT_REGISTRY is not isolated
+    assert registry.DEFAULT_REGISTRY.clouds() == ()
 

@@ -31,6 +31,10 @@ def _empty_map() -> Mapping[str, Any]:
     return MappingProxyType({})
 
 
+def _freeze_id_groups(groups: Mapping[str, Sequence[str]]) -> Mapping[str, tuple[str, ...]]:
+    return _frozen_map({key: tuple(ids) for key, ids in groups.items()})
+
+
 @dataclass(frozen=True, slots=True)
 class Candidate:
     """One cloud resource, normalised by the cleaner. No SDK objects."""
@@ -65,10 +69,15 @@ class Plan:
 
     candidates: tuple[Candidate, ...] = ()
     skipped: tuple[Skipped, ...] = ()
+    related: Mapping[str, tuple[str, ...]] = field(default_factory=_empty_map)
+    by_owner: Mapping[str, tuple[str, ...]] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "candidates", tuple(self.candidates))
         object.__setattr__(self, "skipped", tuple(self.skipped))
+        object.__setattr__(self, "related", _freeze_id_groups(self.related))
+        if self.by_owner is not None:
+            object.__setattr__(self, "by_owner", _freeze_id_groups(self.by_owner))
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,18 +93,21 @@ class Result:
     """Outcome of `apply()`.
 
     `related` holds dependent resources (NICs, leftover disks, volumes) keyed by the
-    resource label used in reports, for example `"NIC"` or `"Disk"`.
+    resource label used in reports, for example `"NIC"` or `"Disk"`. `by_owner` holds
+    owner-grouped resource ids when `--slack_notify_users` is active (`None` otherwise).
     """
 
     succeeded: tuple[str, ...] = ()
     failed: tuple[Failure, ...] = ()
     related: Mapping[str, tuple[str, ...]] = field(default_factory=_empty_map)
+    by_owner: Mapping[str, tuple[str, ...]] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "succeeded", tuple(self.succeeded))
         object.__setattr__(self, "failed", tuple(self.failed))
-        grouped = {label: tuple(ids) for label, ids in self.related.items()}
-        object.__setattr__(self, "related", _frozen_map(grouped))
+        object.__setattr__(self, "related", _freeze_id_groups(self.related))
+        if self.by_owner is not None:
+            object.__setattr__(self, "by_owner", _freeze_id_groups(self.by_owner))
 
 
 @dataclass(frozen=True, slots=True)

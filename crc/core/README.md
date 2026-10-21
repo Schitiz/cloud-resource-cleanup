@@ -82,9 +82,9 @@ dataclasses; mappings are copied into read-only views and sequences become tuple
 - `Operation`: enum of run operations, delete and stop (the --operation_type values).
 - `Candidate`: one normalised cloud resource (id, name, region, state, instance type, launch time, console URL, tags, cleaner-specific extra).
 - `Skipped`: a resource kept by policy, with the reason.
-- `Plan`: candidates to act on plus skipped items; what --dry_run computes.
+- `Plan`: candidates to act on, skipped items, related resources and optional owner grouping; what --dry_run computes.
 - `Failure`: a resource that failed, with the error text.
-- `Result`: outcome of apply, succeeded ids, failures, and related resources (NICs, leftover disks) grouped by resource label.
+- `Result`: outcome of apply, succeeded ids, failures, related resources (NICs, leftover disks) grouped by resource label, and optional owner grouping.
 - `RunContext`: dry run flag, operation, parsed CLI options and the caller-supplied now; cleaners never read the clock.
 - `Cleaner`: protocol with cloud, kind, supports, a read-only plan and a mutating apply.
 - `candidate_ids()`: ids of candidates, in order.
@@ -102,7 +102,7 @@ Cleaner, usually the cleaner class. Tests create their own registry so registrat
 
 Report (module report.py). Pure model and text builders; sending stays in the notifiers.
 
-- `Report`: cloud, operation, dry run, sections and failures; builds Slack messages and Influx data from results or plans.
+- `Report`: cloud, operation, dry run, sections, failures and optional owner grouping; builds Slack messages and Influx data from results or plans.
 - `Section`: ids of one resource label, with flags for empty-message and link_names behaviour.
 - `SlackMessage`: text and link_names flag of one Slack post.
 - `InfluxPoint`: measurement (the cloud), resource tag, names field and count field of one point.

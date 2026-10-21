@@ -52,7 +52,7 @@ def make_crc(
     conn = {"bucket": "b", "resource_suffix": suffix}
     instance = crc_cli.CRC(
         cloud, dry_run, {}, slack, influx,
-        project_id="p", slack_channel="chan", influxdb_conn=conn,
+        project_id="p", resource_group="rg", slack_channel="chan", influxdb_conn=conn,
     )
     return instance, slack, influx
 
@@ -151,44 +151,70 @@ def test_single_section_notifications(
 @pytest.mark.parametrize("dry_run", [False, True])
 @pytest.mark.parametrize("volumes", [[], ["vol-1", "vol-2"]])
 def test_spot_request_notification(crc_cli: ModuleType, dry_run: bool, volumes: list[str]) -> None:
-    instance, slack, _ = make_crc(crc_cli, "aws", dry_run)
+    instance, slack, influx = make_crc(crc_cli, "aws", dry_run)
     request = SimpleNamespace(get_deleted=IDS, volumes_to_delete=volumes)
     instance.notify_deleted_spot_request_via_slack(request)
+    instance.write_influxdb(crc_cli.VMS, request.get_deleted)
+    instance.write_influxdb(crc_cli.DISKS, request.volumes_to_delete)
     result = Result(tuple(IDS), related={DISK: tuple(volumes)})
     report = Report.from_result(
         "aws", SPOT_INSTANCE_REQUEST, result, Operation.DELETE, dry_run
     )
     assert list(report.slack_messages()) == sent(slack)
     assert len(sent(slack)) == (2 if volumes else 1)
+    assert [line(crc_cli, p) for p in report.influx_points()] == written_lines(influx)
+    assert report.influx_payload() == {VM: IDS, DISK: volumes}
 
 
-@pytest.mark.parametrize("cloud", ["gcp", "oci"])
+@pytest.mark.parametrize("cloud", ["azure", "gcp", "oci"])
 @pytest.mark.parametrize("disks", [[], ["d1"]])
 def test_spot_vm_notification_and_disk_message(
-    crc_cli: ModuleType, cloud: str, disks: list[str]
+    crc_cli: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    cloud: str,
+    disks: list[str],
 ) -> None:
-    instance, slack, _ = make_crc(crc_cli, cloud, False)
-    spot = SimpleNamespace(get_deleted=IDS)
-    instance.notify_deleted_vm_via_slack(spot)
-    if disks:
-        instance.slack_client.chat_postMessage(
-            channel="#chan", text=instance.get_msg("Disk", "Deleted", disks)
-        )
-    result = Result(tuple(IDS), related={DISK: tuple(disks)})
+    instance, slack, influx = make_crc(crc_cli, cloud, False)
+    fake_spot = SimpleNamespace(
+        delete=lambda: None,
+        get_deleted=IDS,
+        get_deleted_nic=["nic-1"],
+        get_deleted_disks=disks,
+        get_deleted_volumes=disks,
+    )
+    monkeypatch.setattr(crc_cli, "AZU_SpotVM", lambda *_a, **_kw: fake_spot)
+    monkeypatch.setattr(crc_cli, "GCP_SpotVM", lambda *_a, **_kw: fake_spot)
+    monkeypatch.setattr(crc_cli, "OCI_SpotVM", lambda *_a, **_kw: fake_spot)
+    instance.delete_spot_instances({}, {}, {"days": 1}, "retention_age")
+    related = (
+        {NIC: ("nic-1",), DISK: tuple(disks)}
+        if cloud == "azure"
+        else {DISK: tuple(disks)}
+    )
+    result = Result(tuple(IDS), related=related)
     report = Report.from_result(cloud, VM, result, Operation.DELETE, False)
     assert list(report.slack_messages()) == sent(slack)
+    assert [line(crc_cli, p) for p in report.influx_points()] == written_lines(influx)
 
 
-def test_azure_vm_nic_message_quirk_is_not_reproduced(crc_cli: ModuleType) -> None:
-    instance, slack, _ = make_crc(crc_cli, "azure", False)
-    vm = SimpleNamespace(get_deleted=["vm-1"], get_deleted_nic=["nic-1"])
+@pytest.mark.parametrize("dry_run", [False, True])
+@pytest.mark.parametrize(
+    ("vms", "nics"),
+    [([], []), (["vm-1"], ["nic-1"])],
+)
+def test_azure_vm_nic_notification_and_influx_matches_crc(
+    crc_cli: ModuleType, dry_run: bool, vms: list[str], nics: list[str]
+) -> None:
+    instance, slack, influx = make_crc(crc_cli, "azure", dry_run)
+    vm = SimpleNamespace(get_deleted=vms, get_deleted_nic=nics)
     instance.notify_deleted_vm_via_slack(vm)
-    texts = [m.text for m in sent(slack)]
-    assert texts[1] == instance.get_msg("NIC", "Deleted", ["vm-1"])
+    instance.write_influxdb(crc_cli.VMS, vm.get_deleted)
+    instance.write_influxdb(crc_cli.NICS, vm.get_deleted_nic)
     report = Report.from_result(
-        "azure", VM, Result(("vm-1",), related={NIC: ("nic-1",)}), Operation.DELETE, False
+        "azure", VM, Result(tuple(vms), related={NIC: tuple(nics)}), Operation.DELETE, dry_run
     )
-    assert report.slack_messages()[1].text == instance.get_msg("NIC", "Deleted", ["nic-1"])
+    assert list(report.slack_messages()) == sent(slack)
+    assert [line(crc_cli, p) for p in report.influx_points()] == written_lines(influx)
 
 
 @pytest.mark.parametrize("suffix", [None, "", "ci"])
@@ -207,11 +233,15 @@ def test_influx_matches_write_influxdb(
     assert report.influx_payload(suffix)[expected_vm] == ids
 
 
-def test_influx_is_written_for_empty_and_dry_run() -> None:
+def test_influx_is_written_for_empty_and_dry_run(crc_cli: ModuleType) -> None:
+    instance, slack, influx = make_crc(crc_cli, "gcp", True)
+    instance.notify_deleted_vm_via_slack(SimpleNamespace(get_deleted=[]))
+    instance.write_influxdb(VM, [])
     report = Report.from_result("gcp", VM, Result(), Operation.DELETE, True)
     assert report.influx_points() == (InfluxPoint("gcp", "VM", "[]", 0),)
+    assert [line(crc_cli, p) for p in report.influx_points()] == written_lines(influx)
     assert report.influx_payload() == {"VM": []}
-    assert report.slack_messages()[0].text == "`Dry Run`: Will be Deleted: `0` gcp VM(s):\n`[]`"
+    assert list(report.slack_messages()) == sent(slack)
 
 
 def test_influx_payload_literal_and_merge() -> None:
@@ -239,13 +269,44 @@ def test_failures_do_not_change_messages() -> None:
     )
 
 
-def test_from_plan_uses_candidate_ids_for_dry_run() -> None:
-    plan = Plan((Candidate(id="i-1"), Candidate(id="i-2")))
-    report = Report.from_plan("aws", VM, plan, Operation.DELETE, True)
-    assert report.sections == (Section(VM, ("i-1", "i-2")),)
-    assert report.slack_messages()[0].text == (
-        "`Dry Run`: Will be Deleted: `2` aws VM(s):\n`['i-1', 'i-2']`"
+def test_from_plan_uses_candidate_ids_and_related_for_dry_run(crc_cli: ModuleType) -> None:
+    instance, slack, influx = make_crc(crc_cli, "aws", True)
+    request = SimpleNamespace(get_deleted=["i-1", "i-2"], volumes_to_delete=["vol-1"])
+    instance.notify_deleted_spot_request_via_slack(request)
+    instance.write_influxdb(crc_cli.VMS, request.get_deleted)
+    instance.write_influxdb(crc_cli.DISKS, request.volumes_to_delete)
+    plan = Plan(
+        (Candidate(id="i-1"), Candidate(id="i-2")),
+        related={DISK: ("vol-1",)},
     )
+    report = Report.from_plan("aws", SPOT_INSTANCE_REQUEST, plan, Operation.DELETE, True)
+    assert list(report.slack_messages()) == sent(slack)
+    assert [line(crc_cli, p) for p in report.influx_points()] == written_lines(influx)
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+@pytest.mark.parametrize("owners", [{}, {"owner": IDS}])
+def test_owner_grouped_disk_report_matches_crc(
+    crc_cli: ModuleType, dry_run: bool, owners: dict[str, list[str]]
+) -> None:
+    instance, slack, influx = make_crc(crc_cli, "gcp", dry_run)
+    instance.slack_lookup_user_by_email = Mock(return_value="not_found")
+    instance.get_user_groups_list = Mock(return_value=[])
+    disk = SimpleNamespace(get_deleted=owners)
+    instance.notify_deleted_disk_via_slack(disk)
+    instance.write_influxdb(DISK, disk.get_deleted)
+    grouped = {k: tuple(v) for k, v in owners.items()}
+    report = Report.from_result(
+        "gcp", DISK, Result(by_owner=grouped), Operation.DELETE, dry_run
+    )
+    assert report.slack_messages() == ()
+    assert report.by_owner == grouped
+    pings = [
+        format_owner_ping(report, DISK, owner, ids, None)
+        for owner, ids in (report.by_owner or {}).items()
+    ]
+    assert [m.text for m in sent(slack)] == pings
+    assert [line(crc_cli, p) for p in report.influx_points()] == written_lines(influx)
 
 
 def test_report_is_frozen() -> None:

@@ -143,7 +143,10 @@ def test_operation_values_match_cli() -> None:
 
 def test_defaults() -> None:
     assert Plan() == Plan((), ())
+    assert Plan().related == {}
+    assert Plan().by_owner is None
     assert Result() == Result((), (), {})
+    assert Result().by_owner is None
     one = Candidate(id="x")
     assert (one.name, one.region, one.state, one.instance_type) == ("", "", "", "")
     assert one.launch_time is None
@@ -177,18 +180,34 @@ def test_mappings_are_copied_and_read_only() -> None:
     extra: dict[str, Any] = {"zone": "z1"}
     options: dict[str, Any] = {"age": {"days": 1}}
     related: dict[str, tuple[str, ...]] = {"Disk": ("d1",)}
+    by_owner: dict[str, tuple[str, ...]] = {"alice": ("d1", "d2")}
     one = Candidate(id="a", tags=tags, extra=extra)
     context = RunContext(False, Operation.DELETE, options, NOW)
-    result = Result(related=related)
+    plan = Plan(related=related, by_owner=by_owner)
+    result = Result(related=related, by_owner=by_owner)
     tags["k"] = "changed"
     extra["zone"] = "changed"
     options["age"] = "changed"
     related["Disk"] = ("d2",)
+    by_owner["alice"] = ("d3",)
     assert one.tags == {"k": "v"}
     assert one.extra == {"zone": "z1"}
     assert context.options == {"age": {"days": 1}}
+    assert plan.related == {"Disk": ("d1",)}
+    assert plan.by_owner == {"alice": ("d1", "d2")}
     assert result.related == {"Disk": ("d1",)}
-    for frozen in (one.tags, one.extra, context.options, result.related):
+    assert result.by_owner == {"alice": ("d1", "d2")}
+    assert plan.by_owner is not None
+    assert result.by_owner is not None
+    for frozen in (
+        one.tags,
+        one.extra,
+        context.options,
+        plan.related,
+        plan.by_owner,
+        result.related,
+        result.by_owner,
+    ):
         assert isinstance(frozen, Mapping)
         with pytest.raises(TypeError):
             frozen["new"] = 1  # type: ignore[index]
