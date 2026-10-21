@@ -199,6 +199,11 @@ CASES: list[Case] = [
         "notags-value-mismatch", one(inst("a", tags=named("a", tag("x", "2")))), notags={"x": ["1"]}
     ),
     *both(
+        "notags-last-duplicate-wins",
+        one(inst("a", tags=named("a", tag("env", "prod"), tag("env", "dev")))),
+        notags={"env": ["prod"]},
+    ),
+    *both(
         "notags-and-exception",
         one(inst("a", tags=named("a", tag("x"))), inst("b")),
         notags={"x": []},
@@ -654,20 +659,18 @@ def test_cleaner_protocol_matches_main(
     ]
     if new.error is not None:
         assert not any(_is_mutating(c) for c in new.calls)
+        assert new.logs == _stream(
+            old.logs, lambda r: not _is_mutate_log(r) and not _is_summary_log(r)
+        )
         return
     assert [c for c in new.calls if _is_mutating(c)] == [c for c in old.calls if _is_mutating(c)]
     assert new.deleted == old.deleted
     if len(case.regions) <= 1 or case.dry_run:
         assert new.logs == old.logs
-    for pick in (
-        _is_mutate_log,
-        _is_summary_log,
-        lambda r: not _is_mutate_log(r) and not _is_summary_log(r),
-    ):
-        assert _stream(new.logs, pick) == _stream(old.logs, pick)
-    assert [r for r in new.logs if _is_summary_log(r)] == new.logs[
-        len(new.logs) - len([r for r in new.logs if _is_summary_log(r)]) :
-    ]
+    listing = _stream(old.logs, lambda r: not _is_mutate_log(r) and not _is_summary_log(r))
+    mutating = _stream(old.logs, _is_mutate_log)
+    summary = _stream(old.logs, _is_summary_log)
+    assert new.logs == [*listing, *mutating, *summary]
 
 
 QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
@@ -715,6 +718,7 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
     ("exception-string-values-delete", lambda o: o.deleted == []),
     ("notags-all-match-skips-delete", lambda o: o.deleted == ["vm-b"]),
     ("notags-partial-not-skipped-delete", lambda o: o.deleted == ["a"]),
+    ("notags-last-duplicate-wins-delete", lambda o: o.deleted == ["a"]),
     (
         "filter-tags-empty-values-delete",
         lambda o: any("'Values': []" in c[2] for c in o.calls if c[0] == "describe_instances"),
@@ -912,3 +916,77 @@ def test_helpers_match_main(
     assert outcome(lambda: new._get_filter(["running"])) == outcome(
         lambda: old._get_filter(["running"])
     )
+
+
+FILTERED_CASES = [
+    "real-delete",
+    "age-just-under-delete",
+    "untagged-no-key-delete",
+    "no-name-tag-delete",
+    "exception-key-only-delete",
+    "custom-age-valid-delete",
+    "nic-client-error-isolated-delete",
+    "reservations-key-missing-delete",
+]
+
+
+@pytest.mark.parametrize("case_id", FILTERED_CASES)
+def test_get_filtered_instances_matches_main(
+    case_id: str,
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    case = next(c for c in CASES if c.id == case_id)
+
+    def run_helper(build: Callable[[Case], Any]) -> Any:
+        aws = _prepare(case, monkeypatch, caplog, capsys)
+        vm = build(case)
+        ec2 = aws.client("ec2", "us-west-2")
+        details = ec2.describe_instances(Filters=[])
+        aws.calls.clear()
+        caplog.clear()
+        try:
+            result: Any = ("ok", vm._get_filtered_instances(ec2, details))
+        except Exception as e:
+            result = (type(e).__name__, str(e))
+        return result, aws.calls, _logs(caplog)
+
+    assert run_helper(_new) == run_helper(_legacy)
+
+
+@pytest.mark.parametrize(
+    "steps",
+    [
+        ("delete", "delete", True),
+        ("delete", "delete", False),
+        ("delete", "stop", False),
+        ("stop", "delete", False),
+    ],
+)
+def test_repeated_operations_match_main(
+    steps: tuple[str, str, bool],
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    first_op, second_op, second_has_instances = steps
+    first = Case("first", one(inst("a")))
+    second = Case("second", one(inst("b")) if second_has_instances else {"us-west-2": Region([])})
+
+    def run_twice(build: Callable[[Case], Any]) -> Outcome:
+        aws = _prepare(first, monkeypatch, caplog, capsys)
+        vm = build(first)
+        getattr(vm, first_op)()
+        aws.case = second
+        getattr(vm, second_op)()
+        logs = _logs(caplog)
+        stdout = capsys.readouterr().out
+        names = [*vm.get_deleted, *vm.get_stopped]
+        count = vm.delete_count + vm.stopped_count
+        return Outcome(aws.calls, names, count, logs, stdout, None)
+
+    assert run_twice(_new) == run_twice(_legacy)
+

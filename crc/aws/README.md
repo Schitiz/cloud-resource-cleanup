@@ -4,7 +4,7 @@
 
 Legacy AWS cleaners (boto3). They delete or stop leftover EC2, EBS, network, key and KMS resources across regions.
 
-**Partly refactored.** `keypairs.py` (R4a), `elastic_ips.py` (R4b), `kms.py` (R4c), `vpc.py` with `vpc_api.py` (AWS-1) and `snapshot.py` (AWS-2) and `vm.py` with `vm_cleaner.py`, `vm_api.py`, `vm_scan.py` (AWS-3) are `Cleaner`s (no behaviour change); every other module is legacy, not yet refactored, and the same as on `main`. Any change must follow `ARCHITECTURE.md` and the refactor rung for this package in `docs/refactor/PLAN.md` (Rung R4+), with `make check` green.
+**Partly refactored.** `keypairs.py` (R4a), `elastic_ips.py` (R4b), `kms.py` (R4c), `vpc.py` with `vpc_api.py` (AWS-1), `snapshot.py` (AWS-2) and `vm.py` with `vm_cleaner.py`, `vm_api.py`, `vm_scan.py` (AWS-3) are `Cleaner`s (no behaviour change); every other module is legacy, not yet refactored, and the same as on `main`. Any change must follow `ARCHITECTURE.md` and the refactor rung for this package in `docs/refactor/PLAN.md` (Rung R4+), with `make check` green.
 
 Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.md`):
 
