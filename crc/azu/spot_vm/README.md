@@ -22,7 +22,7 @@ Azure Spot VM cleaner (rung AZ-5). Deletes Spot VMs that are stopped or dealloca
 
 ## Safety Invariants
 
-- Authoritative text: `CLEANUP_SAFETY.md`. Applicable IDs: SAF-005 (a failed VM list is logged and re-raised), SAF-006 to SAF-013 (age gate: `age` must be positive, an invalid custom age tag skips the VM), SAF-042 (untagged VMs are never deleted).
+- Authoritative text: `CLEANUP_SAFETY.md`. Applicable IDs: SAF-005 (a failed VM list is logged and re-raised), SAF-006 to SAF-013 and SAF-041 (age gate: `age` must be positive, an invalid custom age tag skips the VM), SAF-038 (only Detach or unset `delete_option` disks are deleted after the VM), SAF-042 (untagged VMs are never deleted), SAF-044 (leftover disks outside `--resource_group` or protected by their own tags are kept).
 - `plan()` only reads: `virtual_machines.list`, `instance_view` and, in a dry run, `disks.get`. `begin_delete` (VM, disks, NIC) is called from `apply()` and `SpotVM.delete()` only and never in a dry run.
 - Order per VM as on main: VM delete (waited), leftover disks (tag check by `disks.get`, then delete), NIC. A failing VM is logged and skipped, the run goes on; leftover disks outside `--resource_group` or protected by their own exception_tags or notags are kept; a failed disk tag read keeps the disk.
 - A dry run needs `plan()` alone: it also previews the disks and the NIC and logs the summary. The Cleaner path in a real run differs from main only in ordering: all VMs are listed and checked before the first delete.

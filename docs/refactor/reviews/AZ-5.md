@@ -11,7 +11,7 @@ Rung AZ-5: the Azure Spot VM cleaner `crc/azu/spot_vm.py` is now the subpackage 
 - Tests: baseline `pytest -q` 4681 passed on the lane base, now 4859 passed (+178); new tests: `tests/test_azure_spot_instances_parity.py` (83 cases, 167 tests: 83 through the adapter against the frozen oracle, 83 through the registered Cleaner, plus repeated `delete()` accumulation), `tests/test_azure_spot_instances.py` (11 focused `plan()`/`apply()` tests), fake SDK in `tests/helpers_azure_spot.py`. `tests/test_azu_spot_vm.py` and all other existing tests are unchanged. Oracle `tests/legacy/azu_spot_vm.txt` is byte-identical to `git show main:crc/azu/spot_vm.py`.
 - The module lists no regions, so there is no region-listing fallback or auth-error case; list errors are covered (`list-error`, `list-error-dry-run`).
 - Ratchet: `crc/azu/spot_vm.py` removed from ruff `extend-exclude` and `crc.azu.spot_vm` from the mypy override. No per-SDK mypy override was needed. `tests.test_azu_spot_vm` stays in the test ratchet (that test file is unchanged).
-- Open issues: 8 new rows in `docs/refactor/bugs/pending/AZ-5.md` (ID `NEW`). No existing BUGS.md row is specific to this module.
+- Open issues: 11 new rows in `docs/refactor/bugs/pending/AZ-5.md` (ID `NEW`; 7 from coding, 1 from round 1, 3 from round 2). No existing BUGS.md row is specific to this module.
 - Needed changes outside this lane (not made): `crc/README.md`, `tests/README.md` and `tests/legacy/README.md` should list `tests/legacy/azu_spot_vm.txt`, `tests/test_azure_spot_instances_parity.py`, `tests/test_azure_spot_instances.py` and `tests/helpers_azure_spot.py`; `FILTER_VARIANTS.md` section 3 `azu/spot_vm.py` row now lives in `crc/azu/spot_vm/cleaner.py` (`decide`, `tags_skip`, `tags_include`) and `removal.py` (`_disk_tags_protect`), line numbers refer to main; `crc/core/README.md` could list `azure`/`spot_instances` as registered. `crc.py` needs no change.
 
 ## Round 1 (Argon)
@@ -69,3 +69,57 @@ Scope reviewed: `git diff e7926e2..HEAD` (`crc/azu/README.md`, `crc/azu/spot_vm/
 Test count: 4681 before AZ-5 (`e7926e2`), 4854 before review, 4859 after review additions (+5).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff e7926e2..HEAD` (including round 1 commit `34cb62d`), compared with `git show main:crc/azu/spot_vm.py`, `main:crc/azu/vm_delete_helpers.py`, `crc/core/policy.py`, `crc/core/age.py`, `CLEANUP_SAFETY.md` and `REVIEW_CHECKLIST.md`.
+
+### Round 1 fixes
+
+- Pending-bug citations: correct. I re-checked every row against `git show main:crc/azu/spot_vm.py` (for example row 4, where `:385` is the `now().astimezone(...)` line and `:395` the `is_old` call). The effect `run fails` on row 4 is right. Row 8 (accumulation on a repeated `delete()`) is real and cited correctly.
+- New parity cases `disk-delete-not-found-rg-fallback` and `disk-delete-404-rg-fallback`: correct. They exercise the `rg_from_id=False` branch (`main:crc/azu/spot_vm.py:289-294`, `:300-305`) against the oracle. The new log assertion on `fails_in_plan` cases and `test_repeated_delete_accumulates_lists_as_main` only add assertions; no existing assertion was removed or loosened.
+- Widened `SpotVM.__init__` annotations: type-only. Runtime behaviour is unchanged (`require_positive_age` still converts an `int` and rejects an empty age).
+
+### Independent review
+
+- Parity: the filter order (spot priority, then skip tags, include tags, power state, `time_created`, custom age tag, `is_old`) matches main `:357-396`. `policy.should_skip_by_tags`, `filter_tags_all_keys`, `exception_tags_any` and `notags_all` reduce to main's `key in tags and (not value or tags[key] in value)`, keeping the `in` semantics on raw tag values. An empty spec gives the same result as main's `self.x and ...` guards. `state_in` is exact membership, like main's `not in`. `effective_age` is `retention_age or age`.
+- The dry-run preview in `plan()` calls `self._network_factory()` and records `<vm>-NIC`, matching `delete_vm_primary_nic`'s dry-run branch (`main:crc/azu/vm_delete_helpers.py:48-51`), including the client construction.
+- The legacy path still uses `datetime.datetime.now` by default; `crc.py` passes no `clock`.
+- Safety: SAF-005 (the list error is re-raised; `list-error` cases pass), the SAF-008/041 fail-closed custom age (`custom-age-*` cases), SAF-042 (untagged VMs skipped) and SAF-038/044 (`disks-*` cases) all hold. `plan()` makes no mutating call (ARCH-005; `test_plan_makes_no_mutating_call_in_a_real_run`).
+- Tests are not vacuous. I ran three mutations, then reverted each one:
+  - Dropping the resource-group check in `Remover.disk_protected` made 5 tests fail, including `tests/test_azu_spot_vm.py`.
+  - Making an invalid custom age tag fall back to `--age` made 6 tests fail.
+  - Removing the network-factory call in the dry-run preview made 5 tests fail.
+- Architecture and typing: `lint-imports` keeps 5 contracts and ARCH-001..005 pass. The `pyproject.toml` diff removes only this module's two ratchet lines. Any `Any` is at the SDK edge only, and the one `# type: ignore[arg-type]` is in a test helper that builds the config from a dict.
+
+### BLOCKING (fixed)
+
+- None in code. Doc fix: the Safety Invariants section of `crc/azu/spot_vm/README.md` did not cite SAF-038, SAF-041 and SAF-044, although the module implements them (`CLEANUP_SAFETY.md:173`, `:177-182`). I added them.
+
+### NIT (left)
+
+- Lane rules: `crc/azu/README.md` edits lines in the shared Modules, Public API and Notes sections, not a dedicated `### spot_vm` subsection. These are the module's own bullets, and the removal of `SpotVM` from the "legacy" sentence is needed for accuracy, but that sentence is shared with other Azure lanes, so the merge may conflict.
+- `tests/test_azure_spot_instances.py::test_apply_isolates_a_failing_vm` passes a `script` entry for `vm_begin` that is never used, because `RemovalOps.delete_vm` is replaced. This is harmless; the outcome is asserted through the replaced deleter.
+- In the Cleaner dry run, `plan.candidates` (and so `apply()`'s `Result.succeeded`) includes a VM whose preview raised, while `related` stays as main would record it. This can only happen if `detached_disk_refs` raises before the VM is recorded, which needs a malformed SDK object. It only affects the engine path, which `crc.py` does not use yet.
+- Round 1's NIT about `apply()` in a dry run still applies.
+
+### New bugs and quirks (in `docs/refactor/bugs/pending/AZ-5.md`)
+
+- `poller.result(timeout=...)` returns without raising after the timeout, so a disk or VM still being deleted is logged and counted as deleted (`main:crc/azu/spot_vm.py:279-284`, `:318-326`; `main:crc/azu/vm_delete_helpers.py:31-33`).
+- A disk id without a `resourceGroups` segment falls back to a name-only guess in the VM's resource group (`main:crc/azu/spot_vm.py:136-148`, `:164-170`, `:183-188`).
+- A NIC that returns not-found is recorded as deleted, and only `<vm>-NIC` is ever tried (`main:crc/azu/spot_vm.py:333-339`; `main:crc/azu/vm_delete_helpers.py:48`, `:62-70`).
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt`, then `make check` (Python 3.12.3 locally; CI uses 3.11):
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed |
+| `mypy` | Success: no issues found in 111 source files |
+| `lint-imports` | Contracts: 5 kept, 0 broken |
+| `pytest -q` | 4859 passed |
+
+Test count: 4859, the same as after round 1. Round 2 added no tests and removed none. The count before AZ-5 was 4681.
+
+ROUND 2 VERDICT: APPROVE
