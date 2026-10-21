@@ -25,6 +25,7 @@ are; `BUGS.md` already contains all of them.
 | AWS-2 | done, reviewed: VERDICT: APPROVE; ROUND 2 VERDICT: APPROVE | Lane rung merged into `refactor/python-agentic`. Details: `docs/refactor/reviews/AWS-2.md`. New bugs: BUG-142, BUG-143, BUG-144, BUG-145, BUG-146, BUG-147, BUG-148, BUG-149, BUG-150, BUG-151, BUG-152, BUG-153, BUG-154, BUG-155, BUG-156, BUG-157. |
 | OCI-2 | done, reviewed: VERDICT: APPROVE; ROUND 2 VERDICT: APPROVE | Lane rung merged into `refactor/python-agentic`. Details: `docs/refactor/reviews/OCI-2.md`. New bugs: BUG-158, BUG-159, BUG-160, BUG-161, BUG-162, BUG-163, BUG-164, BUG-165, BUG-166, BUG-167, BUG-168, BUG-169, BUG-170, BUG-171. |
 | AZ-3 | done, reviewed: VERDICT: APPROVE; ROUND 2 VERDICT: APPROVE | Lane rung merged into `refactor/python-agentic`. Details: `docs/refactor/reviews/AZ-3.md`. New bugs: BUG-172, BUG-173, BUG-174, BUG-175, BUG-176, BUG-177, BUG-178, BUG-179, BUG-180, BUG-181, BUG-182. |
+| GCP-3 | done, reviewed: VERDICT: APPROVE; ROUND 2 VERDICT: APPROVE | Lane rung merged into `refactor/python-agentic`. Details: `docs/refactor/reviews/GCP-3.md`. New bugs: BUG-183, BUG-184, BUG-185, BUG-186, BUG-187, BUG-188, BUG-189, BUG-190, BUG-191, BUG-192, BUG-193, BUG-194, BUG-195, BUG-196, BUG-197. |
 
 Open issues (R0a):
 
