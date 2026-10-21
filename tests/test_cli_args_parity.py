@@ -6,8 +6,11 @@ or the `SystemExit` code with the captured stdout and stderr, must be equal. Eve
 run on a table of values and compared on the return value, the exception type and its message.
 """
 
+import argparse
+import importlib.util
 import sys
 from collections.abc import Callable
+from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -51,8 +54,11 @@ DEFAULTS_EXPECTED: dict[str, Any] = {
 
 @pytest.fixture(scope="module")
 def oracle() -> ModuleType:
-    module = ModuleType("legacy_crc_main")
-    exec(compile(ORACLE.read_text(), str(ORACLE), "exec"), module.__dict__)
+    loader = SourceFileLoader("legacy_crc_main", str(ORACLE))
+    spec = importlib.util.spec_from_file_location("legacy_crc_main", ORACLE, loader=loader)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
     return module
 
 
@@ -510,9 +516,45 @@ def test_help_lists_every_flag(
     assert "--kms_pending_window" in outcome[2]
 
 
-def test_crc_py_reexports_the_same_functions() -> None:
-    import importlib.util
+class _Built(Exception):
+    def __init__(self, parser: argparse.ArgumentParser) -> None:
+        super().__init__()
+        self.parser = parser
 
+
+def _built_parser(
+    parse: Callable[[], dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+) -> argparse.ArgumentParser:
+    def stop(self: argparse.ArgumentParser, *_: Any, **__: Any) -> None:
+        raise _Built(self)
+
+    monkeypatch.setattr(argparse.ArgumentParser, "parse_args", stop)
+    with pytest.raises(_Built) as built:
+        parse()
+    monkeypatch.undo()
+    return built.value.parser
+
+
+ACTION_FIELDS = ["option_strings", "dest", "nargs", "const", "default", "type", "choices"]
+ACTION_FIELDS += ["required", "help", "metavar"]
+PARSER_FIELDS = ["prog", "usage", "description", "epilog", "formatter_class", "prefix_chars"]
+PARSER_FIELDS += ["argument_default", "conflict_handler", "add_help", "allow_abbrev"]
+
+
+def test_raw_parser_definition_matches_main(
+    oracle: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    old = _built_parser(oracle.get_argparser, monkeypatch)
+    new = _built_parser(cli_args.get_argparser, monkeypatch)
+    assert [getattr(new, f) for f in PARSER_FIELDS] == [getattr(old, f) for f in PARSER_FIELDS]
+    assert len(new._actions) == len(old._actions) == len(DEFAULTS_EXPECTED) + 1
+    for old_action, new_action in zip(old._actions, new._actions, strict=True):
+        assert type(new_action) is type(old_action)
+        for field in ACTION_FIELDS:
+            assert getattr(new_action, field) == getattr(old_action, field), (old_action, field)
+
+
+def test_crc_py_reexports_the_same_functions() -> None:
     spec = importlib.util.spec_from_file_location("crc_py_reexport_check", ROOT / "crc.py")
     assert spec is not None
     assert spec.loader is not None

@@ -36,3 +36,64 @@ Reviewed `git diff d1918f3..HEAD` against the CLI-1 task and `REVIEW_CHECKLIST.m
    - `pytest -q`: `12561 passed` (up from 8516, +4045)
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff d1918f3..HEAD` (commits `8d18379`, `4dc6717`), read against `AGENTS.md`,
+`ARCHITECTURE.md`, `docs/refactor/BUGS.md`, `REVIEW_CHECKLIST.md` and the CLI contract.
+
+### Round 1 fixes
+
+- The only code-free fix (line references in `docs/refactor/bugs/pending/CLI-1.md`) is correct:
+  re-checked with `git show main:crc.py`, `validate_influxdb_inputs` is called at `:1415-1416`,
+  the `--resource` choices are `:1011-1023` and its help `:1025-1030`. No code or test was changed
+  by round 1, so no behaviour change and no weakened test.
+
+### Independent verification
+
+- Oracle: `cmp <(git show main:crc.py) tests/legacy/crc_main.txt` is byte-identical.
+- Parser: built both parsers (oracle and `crc.cli.args`) by intercepting `parse_args` and compared
+  every parser attribute and all 25 actions field by field (`option_strings`, `dest`, `nargs`,
+  `const`, `default`, `type`, `choices`, `required`, raw `help`, `metavar`, action class): all equal.
+- Validators: the six functions in `crc/cli/validate.py` have the same AST as `main:crc.py:1241-1315`
+  once annotations and docstrings are stripped.
+- `crc.py`: the diff only removes `import argparse`, `import ast` (no other use left) and the
+  moved functions, and adds the imports from `crc.cli`; `main()` (`crc.py:856`) still looks
+  `get_argparser` up in the module globals, the validator calls are untouched. The four
+  path-loading tests are unchanged and every name they patch is still in `crc.py`.
+- Safety (`CLEANUP_SAFETY.md`): no cleaner, age, tag or notification code changed; `--max_age`
+  stays an untyped string exported as `MAX_AGE`. Not applicable beyond that.
+- Architecture: `crc/cli/README.md` has the four ARCH-002 sections, Public API matches `__all__`;
+  `crc.cli` imports only `argparse`, `ast`, `typing`. Files are 290/78/19 lines, mypy strict and ruff
+  clean. `pyproject.toml` and CODEOWNERS files untouched.
+
+### Findings
+
+- **BLOCKING (fixed):** `tests/test_cli_args_parity.py` loaded the oracle with `exec` into a bare
+  `ModuleType`, while the lane contract requires `importlib.util.spec_from_file_location` (round 1
+  left it as a NIT). Now loaded with `spec_from_file_location("legacy_crc_main", ORACLE,
+  loader=SourceFileLoader(...))` (the explicit loader is needed for the `.txt` suffix); the
+  function-local `import importlib.util` moved to the module imports. Same 4045 cases pass.
+- **BLOCKING (fixed), test gap:** the parity test compared only the formatted `-h` output, which
+  argparse reflows, so a whitespace-only change to a raw help string passed all 4045 tests
+  (checked: `Enable dry_run only mode` to `Enable  dry_run only mode`). Added
+  `test_raw_parser_definition_matches_main`, which compares the parser attributes and every action
+  field against the oracle; the same mutation now fails it, then reverted.
+- **NIT (left):** the summary says "5 quirks" and lists 6 (round 1 noted it); the file now has 7.
+- **NIT (left):** round 1 reported `mypy` on "75 source files"; this run checks 182.
+- **NIT (left):** the rule "`crc.cli` imports no cloud package, no `crc.notify`, no SDK"
+  (`crc/cli/README.md:39`) is not enforced by an import-linter contract; adding one needs a
+  `pyproject.toml` change, which is outside this lane.
+- **NIT (left):** `tests/legacy/README.md` and `tests/README.md` do not mention `crc_main.txt` and
+  `test_cli_args_parity.py` (outside the lane's editable files, already listed under Open issues).
+- **New quirk recorded** in `docs/refactor/bugs/pending/CLI-1.md`: `ArgumentDefaultsHelpFormatter`
+  prints the default twice for `--resource` / `--operation_type` and `(default: None)` on 15 flags
+  (`main:crc.py:992`, `:1029`, `:1048`).
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check` (Python 3.12.3; 3.11 is
+not installed): `ruff check .` passed, `mypy` passed (182 source files), `lint-imports` 7 contracts
+kept, `pytest -q` 12562 passed (12561 before this round, +1 new test).
+
+ROUND 2 VERDICT: APPROVE
