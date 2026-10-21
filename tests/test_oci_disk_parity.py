@@ -516,13 +516,15 @@ class FakeOci:
         self.calls.append(("IdentityClient", config["region"]))
         return FakeIdentity(self, config["region"])
 
+    def paginate(self, fn: Any, **kwargs: Any) -> Any:
+        self.calls.append(("list_call_get_all_results", fn.__name__))
+        return fn(**kwargs)
+
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(oci.core, "ComputeClient", self.compute)
         monkeypatch.setattr(oci.core, "BlockstorageClient", self.blockstorage)
         monkeypatch.setattr(oci.identity, "IdentityClient", self.identity)
-        monkeypatch.setattr(
-            oci.pagination, "list_call_get_all_results", lambda fn, **kwargs: fn(**kwargs)
-        )
+        monkeypatch.setattr(oci.pagination, "list_call_get_all_results", self.paginate)
 
 
 @dataclass
@@ -669,6 +671,16 @@ def _is_delete(call: tuple[Any, ...]) -> bool:
     return call[0] in ("delete_volume", "delete_boot_volume")
 
 
+def _is_apply_log(log: tuple[str, int, str]) -> bool:
+    return log[2].startswith(("Deleting ", "Error occurred while deleting "))
+
+
+def _is_summary_log(log: tuple[str, int, str]) -> bool:
+    return log[2].startswith(
+        ("No OCI disk to delete.", "number of OCI disks deleted:", "List of OCI disk")
+    )
+
+
 @pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
 def test_cleaner_protocol_matches_main(
     case: Case,
@@ -691,8 +703,10 @@ def test_cleaner_protocol_matches_main(
     ]
     assert [c for c in new.calls if _is_delete(c)] == [c for c in old.calls if _is_delete(c)]
     old_logs = [log for log in old.logs if not log[2].startswith("count of items")]
-    assert sorted(new.logs) == sorted(old_logs)
-    assert new.logs[-2:] == old_logs[-2:] if not case.dry_run else new.logs[-1] == old_logs[-1]
+    plan_logs = [log for log in old_logs if not _is_apply_log(log) and not _is_summary_log(log)]
+    apply_logs = [log for log in old_logs if _is_apply_log(log)]
+    summary_logs = [log for log in old_logs if _is_summary_log(log)]
+    assert new.logs == plan_logs + apply_logs + summary_logs
 
 
 QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
