@@ -29,7 +29,6 @@ extend-exclude = [
     "crc/aws/connectivity.py",
     "crc/aws/disk.py",
     "crc/aws/elastic_ips.py",
-    "crc/aws/keypairs.py",
     "crc/aws/kms.py",
     "crc/aws/snapshot.py",
     "crc/aws/spot_instance_requests.py",
@@ -95,7 +94,6 @@ module = [
     "crc.aws.connectivity",
     "crc.aws.disk",
     "crc.aws.elastic_ips",
-    "crc.aws.keypairs",
     "crc.aws.kms",
     "crc.aws.snapshot",
     "crc.aws.spot_instance_requests",
@@ -131,6 +129,11 @@ module = [
     "tests.test_oci_spot_vm",
 ]
 ignore_errors = true
+
+# SDKs without stubs or py.typed: only the SDK, never a repository module.
+[[tool.mypy.overrides]]
+module = ["boto3", "boto3.*", "botocore", "botocore.*"]
+ignore_missing_imports = true
 
 [tool.importlinter]
 root_package = "crc"

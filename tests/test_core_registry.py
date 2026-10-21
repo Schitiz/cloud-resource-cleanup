@@ -117,6 +117,7 @@ def test_registries_are_isolated() -> None:
 def test_default_registry_functions_use_default_instance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    registered_before = registry.DEFAULT_REGISTRY.clouds()
     isolated = Registry()
     monkeypatch.setattr(registry, "DEFAULT_REGISTRY", isolated)
 
@@ -131,5 +132,5 @@ def test_default_registry_functions_use_default_instance(
         registry.register("aws", "keypair")(StubCleaner)
     monkeypatch.undo()
     assert registry.DEFAULT_REGISTRY is not isolated
-    assert registry.DEFAULT_REGISTRY.clouds() == ()
+    assert registry.DEFAULT_REGISTRY.clouds() == registered_before
 

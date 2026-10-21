@@ -13,6 +13,8 @@ credentials; SDK clients are mocked. Layout:
   the notifiers.
 - `test_aws_*.py`, `test_azu_*.py`, `test_gcp_*.py`, `test_oci_*.py`: mocked tests of the legacy
   cloud modules, several of them locked by `SAF-LOCK`.
+- `test_aws_keypairs.py`, `test_aws_keypair_parity.py`: the refactored AWS key pair cleaner; the parity test runs
+  `legacy/aws_keypairs.txt` (frozen `main` copy, see `legacy/README.md`) and the new module on the same fake `boto3.client`.
 - `archtest/`: mechanical architecture checks (see `tests/archtest/README.md`).
 
 ## Public API

@@ -47,6 +47,7 @@ Related: `docs/refactor/FILTER_VARIANTS.md` (how each module filters, section 7 
 | BUG-016 | Custom age tag parsed by `get_retention_age` is not validated: `{'days': inf}` (`1e999`) or zero/negative dicts are returned as is | `crc/service.py:268-274`, `:306`, `:314` | yes | deletes what it should keep | medium | R1a | open |
 | BUG-017 | `--cloud all --resource keypair` deletes AWS keypairs and then raises `ValueError` on Azure (same shape for `nic` on non-Azure clouds), so the run fails after the first cloud already deleted | `crc.py:799-800`, `:823` | yes | run fails | medium | R2b | open |
 | BUG-018 | `--cloud all --resource all` and `--cloud all --resource disk` can never run: the AWS EBS breaker raises on the first pair; `--cloud aws --resource all` fails earlier | `crc.py:1367`, `:1394`, `:1546-1552` | yes | run fails | medium | R2b | open |
+| BUG-045 | AWS key pair cleanup has no age gate or name gate: an empty `age` (`is_old({})` is True) with an empty `name_regex` deletes every key pair in every region; `__init__` does not validate either | `crc/aws/keypairs.py:48-69` (`__init__`), `:112-114`, `:120-124` | yes | deletes what it should keep | medium | R4a | open |
 | BUG-019 | Azure disk state test is a substring of the allowed string (`disk_state in "Unattached"`), so `"attached"` and the empty string pass | `crc/azu/disk.py:16`, `:124-126` | yes | deletes what it should keep | low | R1b | open |
 | BUG-020 | AWS VM and Elastic IP skip untagged resources only when the `Tags` key is absent, an empty list is processed | `crc/aws/vm.py:200-201`, `crc/aws/elastic_ips.py:125` | yes | deletes what it should keep | low | R1b | open |
 | BUG-021 | EC2 server-side `tag:key` filter is passed an empty value list unchanged; its effect was never verified | `crc/aws/vm.py:181-183`, `crc/aws/vpc.py:86-92`, `crc/aws/spot_instance_requests.py:109-115` | yes | deletes what it should keep | low | R1b | open |
@@ -73,10 +74,13 @@ Related: `docs/refactor/FILTER_VARIANTS.md` (how each module filters, section 7 
 | BUG-042 | In `ping_on_slack`, `conversations_open` and the `response["channel"]["id"]` read are outside the `try`, so a failure there aborts the whole disk notification and the run (the post itself is guarded) | `crc.py:296-299` (the `try` starts at `:301`) | yes | run fails | low | R3 | open |
 | BUG-043 | `human_readable_timedelta` (scan-tag uptime) pads zero units inconsistently: 3 hours shows `03h 00s`, 2 days `2d 00s`, 1 day 5 minutes `1d 00h 05m 00s`; the docstring promises `3d 04:12:05` | `crc/notifications.py:74-109` (conditions at `:104`, `:106`) | yes | cosmetic | low | R3 (round 2) | open |
 | BUG-044 | `send_slack_message` `max_retries=3` is the total number of attempts (2 retries), and a part that still fails is logged twice: `logger.exception` in `send_slack_message`, then `logging.exception` on the root logger in `notify_cleanup` | `crc/notifications.py:111`, `:132-133`, `:183` | yes | cosmetic | low | R3 (round 2) | open |
+| BUG-046 | AWS key pair cleanup is not atomic across regions: it lists and deletes region by region, a non-connectivity error (ClientError, invalid regex, naive `CreateTime`) aborts the run after earlier regions were already deleted, and no summary line is logged; a connectivity error mid-region keeps the names already deleted but skips the rest | `crc/aws/keypairs.py:99-146`, `:143-145`, `:147-155` | yes | cosmetic | low | R4a | open |
+| BUG-047 | AWS key pair deletion order comes from a `set` (and the exception regex patterns are also tried in set order), so it varies between processes and decides which invalid pattern raises | `crc/aws/keypairs.py:95-98`, `:101`, `:136-141` | yes | cosmetic | low | R4a | open |
+| BUG-048 | AWS key pairs without `KeyName` or `CreateTime` are skipped silently (no log); the exception regex is evaluated even when the name regex does not match, so an invalid exception pattern raises for any key pair | `crc/aws/keypairs.py:105-106`, `:112-118` | yes | cosmetic | low | R4a | open |
 
 ## Counts
 
-44 rows: critical 2, high 7, medium 9, low 26. All open.
+48 rows: critical 2, high 7, medium 10, low 29. All open.
 
 ## Notes
 
