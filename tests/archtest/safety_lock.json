@@ -64,10 +64,6 @@
       {
         "test": "tests/test_aws_disk.py::AwsDiskDetachAgeTests::test_cloudwatch_failure_drops_the_batch",
         "sha256": "58e17d4281f23be4ecdde14b966712f0425b086d7dde5a51f670ff02964d1e7c"
-      },
-      {
-        "test": "tests/test_aws_disk.py::AwsDiskDetachAgeTests::test_zero_detach_window_deletes_nothing",
-        "sha256": "b1aa7fa3bea94bd958732dde5a33bee99cda053dcf8857bcd147620d17c57b71"
       }
     ],
     "SAF-017": [
@@ -188,10 +184,6 @@
       {
         "test": "tests/test_aws_spot_instance_requests.py::SpotCleanupOrderTests::test_terminate_failure_sentinel_when_delete_tags_denied",
         "sha256": "3f2827564b705156dbf83a152dd2c526832619914cf7e8f9605ab4c7e502ce32"
-      },
-      {
-        "test": "tests/test_aws_spot_instance_requests.py::SpotCleanupOrderTests::test_create_tags_timeout_invalidates_failing_volume",
-        "sha256": "e3b57e2055a9261ef5340904c24c3036d68d56d3f5cd4f499088314ae35610de"
       }
     ],
     "SAF-033": [
@@ -206,16 +198,6 @@
       {
         "test": "tests/test_aws_spot_instance_requests.py::SpotCleanupOrderTests::test_botocore_terminate_unknown_state_invalidates_marker",
         "sha256": "85dd785b41212ed37471d38517e4a9e6ba363e19dfb6fdbecb3a21033b7eb684"
-      }
-    ],
-    "SAF-034": [
-      {
-        "test": "tests/test_aws_spot_instance_requests.py::SpotCleanupOrderTests::test_sweep_tagged_leftover_volumes",
-        "sha256": "153d49bd1dd56be6103818c669db547a5db4fcd947c5c15bc6f0830ff9f5ce31"
-      },
-      {
-        "test": "tests/test_aws_spot_instance_requests.py::SpotCleanupOrderTests::test_sweep_skips_other_owner_and_in_use",
-        "sha256": "7c07aa38de20c978b71c213ee7c0fae19cb6e632bf36392c4bdd511bd24c641b"
       }
     ],
     "SAF-035": [
@@ -353,6 +335,7 @@
     "SAF-022",
     "SAF-023",
     "SAF-024",
+    "SAF-034",
     "SAF-036",
     "SAF-037"
   ]

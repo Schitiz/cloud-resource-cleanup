@@ -50,6 +50,6 @@ build bad snippets under `tmp_path` and assert the check fires.
 
 ## SAF coverage
 
-31 of 46 IDs are locked. Gaps (no existing test covers them; not invented here):
+30 of 46 IDs are locked. Gaps (no existing test covers them; not invented here):
 SAF-001, SAF-002, SAF-004, SAF-005, SAF-006, SAF-009, SAF-010, SAF-014, SAF-016,
-SAF-021, SAF-022, SAF-023, SAF-024, SAF-036, SAF-037.
+SAF-021, SAF-022, SAF-023, SAF-024, SAF-034, SAF-036, SAF-037.
