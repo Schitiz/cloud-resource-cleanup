@@ -1,7 +1,13 @@
 """Engine: plan/apply orchestration with fake cleaners and notifiers in an isolated registry."""
 
 import datetime
+import importlib.util
 import logging
+import sys
+from collections.abc import Iterator
+from pathlib import Path
+from types import ModuleType
+from typing import Any
 
 import pytest
 
@@ -11,7 +17,20 @@ from crc.core.registry import Registry, UnknownCleanerError
 from crc.core.report import Report
 from crc.core.selection import RESOURCES, Selection
 
+ROOT = Path(__file__).resolve().parent.parent
 NOW = datetime.datetime(2026, 1, 1)
+
+
+@pytest.fixture
+def crc_cli() -> Iterator[ModuleType]:
+    spec = importlib.util.spec_from_file_location("crc_cli_engine", ROOT / "crc.py")
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["crc_cli_engine"] = module
+    spec.loader.exec_module(module)
+    yield module
+    del sys.modules["crc_cli_engine"]
 
 
 def make_context(dry_run: bool = False, operation: Operation = Operation.DELETE) -> RunContext:
@@ -32,6 +51,8 @@ class FakeCleaner:
         self.events = events
         self.supported = supported
         self.fail_in = fail_in
+        if self.fail_in == "init":
+            raise RuntimeError("init failed")
 
     def supports(self, operation: Operation) -> bool:
         self.events.append(f"{self.cloud}.{self.kind}.supports")
@@ -139,7 +160,7 @@ def test_notifiers_run_in_dry_run_with_a_plan_report() -> None:
     assert slack.reports[0].sections[0].ids == ("aws-vm-1",)
 
 
-@pytest.mark.parametrize("fail_in", ["plan", "apply"])
+@pytest.mark.parametrize("fail_in", ["init", "plan", "apply"])
 def test_cleaner_exceptions_propagate_and_stop_the_run(fail_in: str) -> None:
     events: list[str] = []
     registry = make_registry(events, [("aws", "vm"), ("azure", "vm")], fail_in=fail_in)
@@ -157,16 +178,18 @@ def test_dry_run_apply_failure_is_not_reached() -> None:
     assert outcomes[0].result is None
 
 
+@pytest.mark.parametrize("slack_first", [True, False])
 def test_fail_open_notifier_error_is_logged_and_swallowed(
-    caplog: pytest.LogCaptureFixture,
+    caplog: pytest.LogCaptureFixture, slack_first: bool
 ) -> None:
     events: list[str] = []
     pairs = [("aws", "vm"), ("azure", "vm")]
     registry = make_registry(events, pairs)
     influx = FakeNotifier("influx", events, fail_open=True, error=OSError("influx down"))
     slack = FakeNotifier("slack", events)
+    notifiers = [slack, influx] if slack_first else [influx, slack]
     with caplog.at_level(logging.ERROR):
-        outcomes = run(Selection(tuple(pairs)), make_context(), registry, [influx, slack])
+        outcomes = run(Selection(tuple(pairs)), make_context(), registry, notifiers)
     assert len(outcomes) == len(pairs)
     assert len(slack.reports) == len(pairs)
     messages = [r.getMessage() for r in caplog.records]
@@ -174,6 +197,101 @@ def test_fail_open_notifier_error_is_logged_and_swallowed(
         "Notifier influx failed for aws report: influx down",
         "Notifier influx failed for azure report: influx down",
     ]
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        ("aws", "vm", Operation.DELETE, "AWS_VM", lambda c: c.delete_vm({}, {}, {}, None, [])),
+        ("aws", "vm", Operation.STOP, "AWS_VM", lambda c: c.stop_vm({}, {}, {}, None)),
+        (
+            "aws",
+            "disk",
+            Operation.DELETE,
+            "AWS_Disk",
+            lambda c: c.delete_disks({}, {}, {}, None, {}, [], [], False, None),
+        ),
+        ("aws", "ip", Operation.DELETE, "ElasticIPs", lambda c: c.delete_ip({}, {}, [], [])),
+        ("aws", "keypair", Operation.DELETE, "KeyPairs", lambda c: c.delete_keypairs([], [], {})),
+        ("azure", "nic", Operation.DELETE, "NIC", lambda c: c.delete_nic([], [])),
+        (
+            "aws",
+            "kms",
+            Operation.DELETE,
+            "Kms",
+            lambda c: c.delete_kms({}, {}, "d", "u", 7, {}, None),
+        ),
+        (
+            "aws",
+            "spot_instance_requests",
+            Operation.DELETE,
+            "SpotInstanceRequests",
+            lambda c: c.delete_spot_instance_requests({}, {}, {}, None),
+        ),
+        (
+            "oci",
+            "spot_instances",
+            Operation.DELETE,
+            "OCI_SpotVM",
+            lambda c: c.delete_spot_instances({}, {}, {}, None),
+        ),
+    ],
+)
+def test_notifier_order_and_influx_fail_open_match_crc_py(
+    crc_cli: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    case: tuple[str, str, Operation, str, Any],
+) -> None:
+    cloud, kind, operation, attr, call_fn = case
+    crc_events: list[str] = []
+
+    class FakeResource:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self.get_deleted = [f"{cloud}-{kind}-1"]
+            self.get_stopped = [f"{cloud}-{kind}-1"]
+            self.get_deleted_nic: list[str] = []
+            self.get_deleted_disks: list[str] = []
+            self.get_deleted_volumes: list[str] = []
+            self.volumes_to_delete: list[str] = []
+
+        def delete(self, *args: Any) -> None:
+            crc_events.append(f"{cloud}.{kind}.apply")
+
+        def stop(self) -> None:
+            crc_events.append(f"{cloud}.{kind}.apply")
+
+    class FakeSlack:
+        def chat_postMessage(self, **kwargs: Any) -> None:
+            crc_events.append(f"notify.slack.{cloud}")
+
+    class FakeInflux:
+        def write_api(self, **kwargs: Any) -> Any:
+            tag = f"notify.influx.{cloud}"
+            if not crc_events or crc_events[-1] != tag:
+                crc_events.append(tag)
+            raise OSError("influx down")
+
+    monkeypatch.setattr(crc_cli, attr, FakeResource)
+    crc_obj = crc_cli.CRC(
+        cloud,
+        False,
+        {},
+        FakeSlack(),
+        FakeInflux(),
+        project_id="proj",
+        resource_group="rg",
+        slack_channel="chan",
+        influxdb_conn={"bucket": "b"},
+    )
+    call_fn(crc_obj)
+
+    engine_events: list[str] = []
+    registry = make_registry(engine_events, [(cloud, kind)])
+    slack = FakeNotifier("slack", engine_events, fail_open=False)
+    influx = FakeNotifier("influx", engine_events, fail_open=True, error=OSError("influx down"))
+    run(Selection(((cloud, kind),)), make_context(False, operation), registry, [slack, influx])
+    filtered = [e for e in engine_events if e.endswith(".apply") or e.startswith("notify.")]
+    assert filtered == crc_events
 
 
 def test_fail_closed_notifier_error_propagates() -> None:

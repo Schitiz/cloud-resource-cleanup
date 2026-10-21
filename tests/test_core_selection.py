@@ -11,7 +11,14 @@ from typing import Any
 import pytest
 
 from crc.core.cleaner import Operation
-from crc.core.selection import CLOUDS, RESOURCES, Selection, SelectionOptions, build_selection
+from crc.core.selection import (
+    CLOUDS,
+    EXTRA_RESOURCES,
+    RESOURCES,
+    Selection,
+    SelectionOptions,
+    build_selection,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 KMS_OPTIONS = SelectionOptions(kms_key_description="desc", kms_user="arn:user")
@@ -43,6 +50,9 @@ def crc_cli() -> Iterator[ModuleType]:
     del sys.modules["crc_cli_selection"]
 
 
+LAST_RECORDED_CALLS: list[tuple[str, str]] = []
+
+
 def run_crc_main(
     crc_cli: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
@@ -52,11 +62,15 @@ def run_crc_main(
     options: dict[str, Any],
 ) -> list[tuple[str, str]]:
     """Run crc.py main() with a recording CRC; return the (cloud, kind) pairs it reached."""
-    calls: list[tuple[str, str]] = []
+    LAST_RECORDED_CALLS.clear()
+    calls = LAST_RECORDED_CALLS
+    current_cloud = "?"
 
     class FakeCRC:
         def __init__(self, cloud: str, *args: Any, **kwargs: Any) -> None:
+            nonlocal current_cloud
             self.cloud = cloud
+            current_cloud = cloud
 
         def __getattr__(self, name: str) -> Any:
             kind = METHOD_KINDS[name]
@@ -73,7 +87,7 @@ def run_crc_main(
             self.get_deleted: list[str] = []
 
         def delete(self) -> None:
-            calls.append((calls[-1][0] if calls else "?", "snapshot"))
+            calls.append((current_cloud, "snapshot"))
 
     args = dict.fromkeys(
         ["project_id", "resource_states", "filter_tags", "exception_tags", "name_regex",
@@ -151,11 +165,7 @@ def test_build_selection_matches_crc_main(
         }
     with caplog.at_level(logging.WARNING):
         reached = run_crc_main(crc_cli, monkeypatch, cloud, resource, operation.value, extra)
-    if resource == "snapshot":
-        # crc.py runs the AWS-only Snapshot class for every cloud; the fake cannot tell the cloud
-        assert [kind for _, kind in reached] == [kind for _, kind in expected]
-    else:
-        assert reached == expected
+    assert reached == expected
     logged = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert logged == list(selection.warnings)
 
@@ -204,16 +214,30 @@ def test_build_selection_errors_match_crc_main(
         run_crc_main(crc_cli, monkeypatch, cloud, resource, operation.value, extra)
     assert str(ours.value) == str(theirs.value)
     assert message in str(ours.value)
+    assert LAST_RECORDED_CALLS == []
 
 
+@pytest.mark.parametrize(
+    ("cloud", "resource", "options", "extra"),
+    [
+        ("all", "all", KMS_OPTIONS, {"kms_key_description": "desc", "kms_user": "arn:user"}),
+        ("all", "disk", None, {}),
+    ],
+)
 def test_ebs_breaker_selects_nothing_before_raising(
-    crc_cli: ModuleType, monkeypatch: pytest.MonkeyPatch
+    crc_cli: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    cloud: str,
+    resource: str,
+    options: SelectionOptions | None,
+    extra: dict[str, Any],
 ) -> None:
-    calls: list[tuple[str, str]] = []
-    with pytest.raises(ValueError, match="AWS EBS volume cleanup requires"):
-        calls = run_crc_main(crc_cli, monkeypatch, "all", "all", "delete",
-                             {"kms_key_description": "d", "kms_user": "u"})
-    assert calls == []
+    with pytest.raises(ValueError) as ours:
+        build_selection(cloud, resource, Operation.DELETE, options)
+    with pytest.raises(ValueError) as theirs:
+        run_crc_main(crc_cli, monkeypatch, cloud, resource, "delete", extra)
+    assert str(ours.value) == str(theirs.value)
+    assert LAST_RECORDED_CALLS == []
 
 
 def test_all_expansion_order_follows_crc_py(crc_cli: ModuleType) -> None:
@@ -222,9 +246,14 @@ def test_all_expansion_order_follows_crc_py(crc_cli: ModuleType) -> None:
 
 
 @pytest.mark.parametrize("cloud", ["aws", "azure", "gcp", "oci"])
-@pytest.mark.parametrize("resource", ["ip", "vm", "nic", "keypair"])
-def test_single_pair(cloud: str, resource: str) -> None:
-    assert build_selection(cloud, resource) == Selection(((cloud, resource),))
+@pytest.mark.parametrize("resource", ["ip", "vm", "nic", "keypair", "snapshot", "vpc"])
+def test_single_pair(
+    crc_cli: ModuleType, monkeypatch: pytest.MonkeyPatch, cloud: str, resource: str
+) -> None:
+    selection = build_selection(cloud, resource)
+    reached = run_crc_main(crc_cli, monkeypatch, cloud, resource, "delete", {})
+    assert selection == Selection(tuple(reached))
+    assert list(selection.items) == reached
 
 
 @pytest.mark.parametrize(
@@ -235,18 +264,54 @@ def test_unknown_values_raise(cloud: str, resource: str) -> None:
         build_selection(cloud, resource)
 
 
-def test_warning_texts_match_crc_py() -> None:
-    requests = build_selection("gcp", "spot_instance_requests").warnings
-    assert requests == (
-        "spot_instance_requests is AWS-only; skipped for gcp (use --resource spot_instances)",
-    )
-    aws = build_selection("aws", "spot_instances").warnings
-    assert aws == (
-        "For AWS use --resource spot_instance_requests "
-        "(cancel request before terminate). Skipping spot_instances.",
-    )
-    everything = build_selection("all", "spot_instances").warnings
-    assert everything[0] == aws[0]
-    assert everything[1].startswith("GCP/OCI spot_instances require explicit --cloud gcp (not")
-    assert everything[2].startswith("GCP/OCI spot_instances require explicit --cloud oci (not")
-    assert everything[1].endswith("under --cloud all for backward compatibility.")
+@pytest.mark.parametrize(
+    ("cloud", "resource"),
+    [
+        ("azure", "spot_instance_requests"),
+        ("gcp", "spot_instance_requests"),
+        ("oci", "spot_instance_requests"),
+        ("all", "spot_instance_requests"),
+        ("aws", "spot_instances"),
+        ("all", "spot_instances"),
+    ],
+)
+def test_warning_texts_match_crc_py(
+    crc_cli: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    cloud: str,
+    resource: str,
+) -> None:
+    selection = build_selection(cloud, resource)
+    with caplog.at_level(logging.WARNING):
+        reached = run_crc_main(crc_cli, monkeypatch, cloud, resource, "delete", {})
+    logged = tuple(r.getMessage() for r in caplog.records if r.levelno == logging.WARNING)
+    assert selection.warnings == logged
+    assert list(selection.items) == reached
+
+
+@pytest.mark.parametrize("cloud", [*CLOUDS, "all"])
+@pytest.mark.parametrize("resource", [*RESOURCES, *EXTRA_RESOURCES, "all"])
+@pytest.mark.parametrize("operation", [Operation.DELETE, Operation.STOP])
+def test_exhaustive_grid_matches_crc_main(
+    crc_cli: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    cloud: str,
+    resource: str,
+    operation: Operation,
+) -> None:
+    extra = {"kms_key_description": "desc", "kms_user": "arn:user"}
+    try:
+        selection = build_selection(cloud, resource, operation, KMS_OPTIONS)
+    except ValueError as ours:
+        with pytest.raises(ValueError) as theirs:
+            run_crc_main(crc_cli, monkeypatch, cloud, resource, operation.value, extra)
+        assert str(ours) == str(theirs.value)
+        assert LAST_RECORDED_CALLS == []
+        return
+    with caplog.at_level(logging.WARNING):
+        reached = run_crc_main(crc_cli, monkeypatch, cloud, resource, operation.value, extra)
+    logged = tuple(r.getMessage() for r in caplog.records if r.levelno == logging.WARNING)
+    assert list(selection.items) == reached
+    assert selection.warnings == logged
