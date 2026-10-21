@@ -379,10 +379,11 @@ Related: `docs/refactor/FILTER_VARIANTS.md` (how each module filters, section 7 
 | BUG-348 | In the scan loop a hit that is not a dict (a provider returning strings) raises `AttributeError` at `h.get(...)`, outside every `try`, and aborts the scan after earlier clouds were already reported | `crc.py:1466-1468` | yes | run fails | low | CLI-3 | open |
 | BUG-349 | The scan Slack message is sent with the run's `--operation_type` (`stop` reports "vm" scan hits as a stopped operation that never ran) and always as resource `vm` | `crc.py:1509` | yes | cosmetic | low | CLI-3 | open |
 | BUG-350 | `scan_tag` is read from `args` twice (the first read is dead) and the `# Handle read-only scanning` comment is mis-indented | `crc.py:1348`, `:1427-1428` | yes | cosmetic | low | CLI-3 | open |
+| BUG-351 | `find_instances_with_tag` is annotated `List[Dict[str, str]]` but each record holds a `tags` dict, a `datetime` `launch_time` and possibly `None` `id` / `instance_type`; `state` is upper-cased (`RUNNING`) although the inline comment says `'running'`, `'stopped'`; and the name falls back to `tags.get("Name")`, the last `Name` value, when the first `Name` tag is empty, so an instance with duplicated `Name` tags gets a different name here than in the delete/stop path (`_get_instance_name`, first value) | `crc/aws/vm.py:110`, `:136-141`, `:290-292` | yes | cosmetic | low | ST-AWS-VM (round 2) | open |
 
 ## Counts
 
-350 rows: critical 5, high 25, medium 61, low 259. All open.
+351 rows: critical 5, high 25, medium 61, low 260. All open.
 
 ## Notes
 
