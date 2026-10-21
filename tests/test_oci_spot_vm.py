@@ -76,9 +76,9 @@ def _instance(
     inst.defined_tags = {} if defined_tags is None else defined_tags
     inst.metadata = {} if metadata is None else metadata
     inst.preemptible_instance_config = mock.Mock() if preemptible else None
-    inst.time_created = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(
-        days=days_old
-    )
+    inst.time_created = datetime.datetime.now(
+        datetime.timezone.utc
+    ) - datetime.timedelta(days=days_old)
     return inst
 
 
@@ -101,14 +101,20 @@ class OciPreemptibleDetectTests(unittest.TestCase):
     def test_oke_freeform_tag_skipped(self):
         s = _oci_spot()
         self.assertTrue(
-            s._is_managed_or_oke_node(_instance(tags={"yb_task": "itest", "oke-cluster-id": "c1"}))
+            s._is_managed_or_oke_node(
+                _instance(tags={"yb_task": "itest", "oke-cluster-id": "c1"})
+            )
         )
 
     def test_instance_pool_defined_tag_skipped(self):
         s = _oci_spot()
         self.assertTrue(
             s._is_managed_or_oke_node(
-                _instance(defined_tags={"Oracle-Tags": {"CreatedBy": "instancepool/pool-1"}})
+                _instance(
+                    defined_tags={
+                        "Oracle-Tags": {"CreatedBy": "instancepool/pool-1"}
+                    }
+                )
             )
         )
 
@@ -121,7 +127,9 @@ class OciLeftoverVolumeTests(unittest.TestCase):
     def test_attached_volumes_collected_detached_skipped(self):
         s = _oci_spot()
         compute = mock.Mock()
-        with mock.patch("crc.oci.spot_vm.oci.pagination.list_call_get_all_results") as listed:
+        with mock.patch(
+            "crc.oci.spot_vm.oci.pagination.list_call_get_all_results"
+        ) as listed:
             listed.return_value = mock.Mock(
                 data=[
                     _attachment("vol-keep", "ATTACHED"),
@@ -138,7 +146,9 @@ class OciLeftoverVolumeTests(unittest.TestCase):
             "crc.oci.spot_vm.oci.pagination.list_call_get_all_results",
             side_effect=RuntimeError("boom"),
         ):
-            self.assertIsNone(s._attached_block_volume_ids(mock.Mock(), "ocid1.instance.oc1..test"))
+            self.assertIsNone(
+                s._attached_block_volume_ids(mock.Mock(), "ocid1.instance.oc1..test")
+            )
 
     def test_volume_exception_tags_skip_delete(self):
         s = _oci_spot(exception_tags={"keep": ["true"]})
@@ -158,12 +168,17 @@ class OciLeftoverVolumeTests(unittest.TestCase):
     def test_filter_requires_tags_on_instance(self):
         s = _oci_spot()
         self.assertFalse(s._has_matching_filter_tags(_instance(tags={})))
-        self.assertTrue(s._has_matching_filter_tags(_instance(tags={"yb_task": "itest"})))
+        self.assertTrue(
+            s._has_matching_filter_tags(_instance(tags={"yb_task": "itest"}))
+        )
 
     def test_empty_filter_allows_untagged(self):
         s = _oci_spot(filter_tags={})
         self.assertTrue(s._has_matching_filter_tags(_instance(tags={})))
-        self.assertTrue(s._has_matching_filter_tags(_instance(tags={"yb_task": "itest"})))
+        self.assertTrue(
+            s._has_matching_filter_tags(_instance(tags={"yb_task": "itest"}))
+        )
+
 
     def test_requires_positive_age(self):
         from crc.oci.spot_vm import SpotVM
@@ -200,34 +215,41 @@ class OciLeftoverVolumeTests(unittest.TestCase):
 
         compute.terminate_instance.side_effect = terminate
         inst = _instance()
-        with (
-            mock.patch.object(s, "get_all_regions", return_value=["us-ashburn-1"]),
-            mock.patch.object(s, "get_compute_client", return_value=compute),
-            mock.patch.object(s, "get_blockstorage_client", return_value=block),
-            mock.patch("crc.oci.spot_vm.oci.pagination.list_call_get_all_results") as listed,
-            mock.patch.object(s, "_attached_block_volume_ids", return_value=["vol-keep"]),
-            mock.patch.object(s, "_wait_instance_terminated", side_effect=wait),
-            mock.patch.object(s, "_volume_ok_to_delete", return_value=True),
-            mock.patch.object(s, "_delete_volume", side_effect=delete_vol),
+        with mock.patch.object(s, "get_all_regions", return_value=["us-ashburn-1"]), mock.patch.object(
+            s, "get_compute_client", return_value=compute
+        ), mock.patch.object(
+            s, "get_blockstorage_client", return_value=block
+        ), mock.patch(
+            "crc.oci.spot_vm.oci.pagination.list_call_get_all_results"
+        ) as listed, mock.patch.object(
+            s, "_attached_block_volume_ids", return_value=["vol-keep"]
+        ), mock.patch.object(
+            s, "_wait_instance_terminated", side_effect=wait
+        ), mock.patch.object(
+            s, "_volume_ok_to_delete", return_value=True
+        ), mock.patch.object(
+            s, "_delete_volume", side_effect=delete_vol
         ):
             listed.return_value = mock.Mock(data=[inst])
             s.delete()
 
-        self.assertEqual(call_order, ["terminate", "wait", ("volume", "vol-keep")])
+        self.assertEqual(
+            call_order, ["terminate", "wait", ("volume", "vol-keep")]
+        )
         self.assertEqual(s.instance_names_to_delete, ["spot-1"])
 
     def test_skip_terminate_when_attachment_list_fails(self):
         s = _oci_spot(dry_run=False)
         compute = mock.Mock()
-        with (
-            mock.patch.object(s, "get_all_regions", return_value=["us-ashburn-1"]),
-            mock.patch.object(s, "get_compute_client", return_value=compute),
-            mock.patch.object(s, "get_blockstorage_client", return_value=mock.Mock()),
-            mock.patch(
-                "crc.oci.spot_vm.oci.pagination.list_call_get_all_results",
-                return_value=mock.Mock(data=[_instance()]),
-            ),
-            mock.patch.object(s, "_attached_block_volume_ids", return_value=None),
+        with mock.patch.object(s, "get_all_regions", return_value=["us-ashburn-1"]), mock.patch.object(
+            s, "get_compute_client", return_value=compute
+        ), mock.patch.object(
+            s, "get_blockstorage_client", return_value=mock.Mock()
+        ), mock.patch(
+            "crc.oci.spot_vm.oci.pagination.list_call_get_all_results",
+            return_value=mock.Mock(data=[_instance()]),
+        ), mock.patch.object(
+            s, "_attached_block_volume_ids", return_value=None
         ):
             s.delete()
         compute.terminate_instance.assert_not_called()
@@ -244,20 +266,21 @@ class OciLeftoverVolumeTests(unittest.TestCase):
 
         compute.terminate_instance.side_effect = terminate
         inst = _instance()
-        with (
-            mock.patch.object(s, "get_all_regions", return_value=["us-ashburn-1"]),
-            mock.patch.object(s, "get_compute_client", return_value=compute),
-            mock.patch.object(s, "get_blockstorage_client", return_value=block),
-            mock.patch(
-                "crc.oci.spot_vm.oci.pagination.list_call_get_all_results",
-                return_value=mock.Mock(data=[inst]),
-            ),
-            mock.patch.object(s, "_attached_block_volume_ids", return_value=["vol-keep"]),
-            mock.patch.object(s, "_wait_instance_terminated", return_value=False),
-            mock.patch.object(s, "_volume_ok_to_delete", return_value=True),
-            mock.patch.object(
-                s, "_delete_volume", side_effect=lambda c, v: call_order.append(("volume", v))
-            ),
+        with mock.patch.object(s, "get_all_regions", return_value=["us-ashburn-1"]), mock.patch.object(
+            s, "get_compute_client", return_value=compute
+        ), mock.patch.object(
+            s, "get_blockstorage_client", return_value=block
+        ), mock.patch(
+            "crc.oci.spot_vm.oci.pagination.list_call_get_all_results",
+            return_value=mock.Mock(data=[inst]),
+        ), mock.patch.object(
+            s, "_attached_block_volume_ids", return_value=["vol-keep"]
+        ), mock.patch.object(
+            s, "_wait_instance_terminated", return_value=False
+        ), mock.patch.object(
+            s, "_volume_ok_to_delete", return_value=True
+        ), mock.patch.object(
+            s, "_delete_volume", side_effect=lambda c, v: call_order.append(("volume", v))
         ):
             s.delete()
 
