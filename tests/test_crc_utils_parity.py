@@ -106,6 +106,7 @@ CASES: list[tuple[str, dict[str, Any], list[str] | None]] = [
     ("logs/crc.log", {"log_level": "loud"}, None),
     ("logs/crc.log", {"log_level": ""}, None),
     ("logs/crc.log", {"log_level": "basicConfig"}, None),
+    ("logs/crc.log", {"log_level": "basic_format"}, None),
     ("logs/crc.log", {"log_level": "warn"}, None),
     ("a/b/c/deep.log", {}, None),
     ("flat.log", {}, None),
@@ -201,6 +202,72 @@ def test_init_logging_keeps_existing_handlers_parity(
         snapshots.append(_run(init, capsys, base, (str(base / "l" / "c.log"),), {}))
     assert snapshots[1] == snapshots[0]
     assert snapshots[1]["kept"] is True
+
+
+def test_init_logging_repeated_calls_accumulate_handlers_parity(
+    capsys: pytest.CaptureFixture[str],
+    restore_logging: None,
+    tmp_path: Path,
+) -> None:
+    oracle = _load_oracle()
+    outcomes: list[tuple[list[tuple[str, int, str | None]], str, list[str] | None]] = []
+    for label, init in (("old", oracle.init_logging), ("new", utils.init_logging)):
+        base = tmp_path / label
+        base.mkdir()
+        target = base / "logs" / "crc.log"
+        root = logging.getLogger()
+        before = list(root.handlers)
+        capsys.readouterr()
+        init(str(target))
+        init(str(target))
+        out = capsys.readouterr().out.replace(str(base), "<base>")
+        added = [h for h in root.handlers if h not in before]
+        for handler in added:
+            handler.flush()
+        info = [_handler_info(h) for h in added]
+        for handler in added:
+            root.removeHandler(handler)
+            handler.close()
+        outcomes.append((info, out, _file_lines(target, base)))
+    expected_handlers_after_two_calls = 4
+    assert outcomes[1] == outcomes[0]
+    assert len(outcomes[1][0]) == expected_handlers_after_two_calls
+
+
+@pytest.mark.parametrize(
+    ("bad_level", "expected_exc"),
+    [
+        ("loud", "AttributeError"),
+        ("", "AttributeError"),
+        ("basicConfig", "AttributeError"),
+        ("basic_format", "ValueError"),
+    ],
+)
+def test_init_logging_invalid_levels_raise_expected_error_type(
+    capsys: pytest.CaptureFixture[str],
+    restore_logging: None,
+    tmp_path: Path,
+    bad_level: str,
+    expected_exc: str,
+) -> None:
+    oracle = _load_oracle()
+    old_snap = _run(
+        oracle.init_logging,
+        capsys,
+        tmp_path / "old",
+        (str(tmp_path / "old" / "c.log"),),
+        {"log_level": bad_level},
+    )
+    new_snap = _run(
+        utils.init_logging,
+        capsys,
+        tmp_path / "new",
+        (str(tmp_path / "new" / "c.log"),),
+        {"log_level": bad_level},
+    )
+    assert new_snap == old_snap
+    assert new_snap["error"] is not None
+    assert new_snap["error"][0] == expected_exc
 
 
 def test_log_formatter_is_unchanged() -> None:
