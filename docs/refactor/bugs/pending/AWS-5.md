@@ -1,0 +1,14 @@
+# AWS-5 pending bugs and quirks (`crc/aws/spot_instance_requests.py`)
+
+Same columns as `docs/refactor/BUGS.md`. Locations are `file:line` on `main`, verified with
+`git show main:crc/aws/spot_instance_requests.py`. Not fixed in the refactor rung.
+
+| ID | Title | Location on main | Exists on main | Effect | Risk | Found in | Status |
+|----|-------|------------------|----------------|--------|------|----------|--------|
+| NEW | The volume wait deadline uses the wall clock (`time.time()`), so a clock step during the wait shortens or lengthens the 180 s timeout. The refactor uses `time.monotonic()` (ARCH-003 bans wall-clock reads); only a clock step during the wait can tell the two apart | `crc/aws/spot_instance_requests.py:773-774` | yes | wrong timeout under clock changes | low | AWS-5 | open |
+| NEW | A failure to list regions (non-connectivity error, for example an auth error) logs one error and returns before the summary: no `Total` warnings are written, so a failed run looks like an empty one in the log | `crc/aws/spot_instance_requests.py:1078-1083` | yes | misleading log | low | AWS-5 | open |
+| NEW | Any exception from `terminate_instances` other than `ClientError` (the clause is `(BotoCoreError, Exception)`) is treated as an ambiguous transport error: the instance is re-described and, if it is `shutting-down`, `terminated` or not found, the leftover markers are kept and the volumes are deleted | `crc/aws/spot_instance_requests.py:967-998` | yes | deletes after an unrelated error | low | AWS-5 | open |
+| NEW | `_should_skip_spot_request` evaluates exception tags per tag entry in order but `notags` on the last value of each key, so duplicate keys behave differently for the two flags (AWS does not allow duplicate keys; fakes and other sources can) | `crc/aws/spot_instance_requests.py:210-226` | yes | inconsistent protection | low | AWS-5 | open |
+| NEW | The sweep treats `InvalidSpotInstanceRequestID.Malformed` like `NotFound` (request "gone"), so a volume whose marker holds a malformed id is gated on its scope-tag copies and volume `CreateTime` only | `crc/aws/spot_instance_requests.py:670-677` | yes | deletes on copied tags only | low | AWS-5 | open |
+| NEW | A retried (already cancelled) request is added to `spot_requests_to_delete` only when this run deleted a volume or terminated the instance; a dry run lists it whenever the instance is not done or leftovers exist, so dry-run and real counts can differ | `crc/aws/spot_instance_requests.py:854-862`, `:1028-1031` | yes | dry-run report differs from the real run | low | AWS-5 | open |
+| NEW | `volumes_to_delete` is de-duplicated only in the sweep; the per-request path appends without checking, so the same volume id can be reported twice | `crc/aws/spot_instance_requests.py:1021-1022`, `:1057-1066` | yes | duplicate ids in the report | low | AWS-5 | open |
