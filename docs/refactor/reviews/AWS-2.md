@@ -71,3 +71,45 @@ Scope reviewed: `git diff 5f82f96..HEAD` (`crc/aws/snapshot.py`, `crc/aws/README
 Test count: 3339 before AWS-2 (`5f82f96`), 3607 on `16b7571`, 3628 after review additions (+289).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 5f82f96..HEAD` (both commits), read against `git show main:crc/aws/snapshot.py`, `git show main:crc/aws/_base.py`, `git show main:crc.py` (`:1629-1643`), `crc/core/policy.py` and the review checklist.
+
+### Round 1 fixes assessment
+
+- Bug file corrections (row 4 effect `keeps what it should delete`, row 1 and row 7 line ranges, 3 added rows): correct; I checked every cited line with `git show main:`. `crc.py:1630-1634` and `:1638-1642` are correct as well.
+- Added helper parity tests (`test_is_protected_matches_main`, `test_get_snapshots_used_by_amis_matches_main`) and the stronger factory test: they compare return values, logs, calls and exceptions with the oracle. They are not vacuous and change no behaviour.
+- README wording fixes (`crc/aws/README.md`): accurate. `CLEANUP_SAFETY.md` has no snapshot section, so removing that citation was right.
+- None of the round 1 changes touches `crc/aws/snapshot.py`, so they cannot change behaviour.
+
+### Independent parity check
+
+- Age: `policy.snapshot_old_enough` is `not start_time > now - timedelta(days)`, which is exactly main's `if start_time > cutoff: continue` (`main:crc/aws/snapshot.py:59`, `:72`). `check_age` reads the clock and builds the `timedelta` in the same order as main and before `get_all_regions`.
+- Exception tags: `policy.exception_tags_any(tag_map, {key: values})` goes through `_key_matches` (`key in tags and (not values or tags[key] in values)`), the same expression as `main:crc/aws/snapshot.py:34`. It is applied one key at a time in dict order, so the same key is logged.
+- Calls: the default `_boto3_client` / `_all_regions` resolve `boto3.client` and `get_all_regions` at call time. The parity harness patches `boto3.client` / `boto3.session.Session` and so runs the production defaults (only the clock is injected). `describe_images` is still called when a region has no snapshots, because the generator runs both describes on its first `next()`. The `try` covers the client, both describes and the whole snapshot loop, as on main (`:61-93`).
+- Safety (`CLEANUP_SAFETY.md`): `plan()` makes no mutating call. `delete_snapshot` is reached only from `delete_one`, which returns before the call in a dry run. `describe_regions` auth errors still propagate (`_base.py` unchanged). No age gate is weakened.
+- Architecture: import-linter 5/5 kept, archtests green, `crc/aws/README.md` symbol list synced (ARCH-002). `pyproject.toml` only drops the two `snapshot` ratchet lines. `crc.py`, `crc/core/**` and the shared docs are untouched.
+
+### BLOCKING (fixed)
+
+1. **Vacuous parametrizations in `test_cleaner_protocol_logs_in_order_when_nothing_interleaves`** (`tests/test_aws_snapshot_parity.py:507-528`). 43 of its 69 cases returned before any assertion: 33 because of an error, more than one region or delete errors, and 10 because of skip log lines. They still counted as passing tests, which inflated the "69 whole-log-order checks" in the coding summary. Skipping them is not allowed (`AGENTS.md` rule 1, `tests/archtest/safety_lock.py`). Instead, those cases now assert the documented Cleaner-path ordering: the whole log stream equals listing lines followed by delete lines, and after an error there is no delete line. I checked this by mutation: an extra listing-style log line emitted by `apply()` fails 40 cases. Test count is unchanged (3628).
+
+### NIT (left)
+
+- `SnapshotCleaner.__init__` and `_is_protected` type `age_days` / `exception_tags` / `tags` as `Any` (`crc/aws/snapshot.py:91`, `:121-127`). This is outside an SDK edge, but it is deliberate: it keeps main's `TypeError` / `KeyError` / `AttributeError` behaviour for malformed legacy input. A later typed-options rung can narrow it.
+- `plan()` caches clients in `self._clients` (`crc/aws/snapshot.py:153`). This is instance state, not a cloud mutation, but it makes a `SnapshotCleaner` single-run. That is fine for the registry factory, which builds one cleaner per run.
+- Round 1 NIT still applies: `apply()` called directly with `dry_run=True` reports every candidate as succeeded (`crc/aws/snapshot.py:161-181`). The engine never calls it that way.
+
+### New quirks (added to `docs/refactor/bugs/pending/AWS-2.md`)
+
+- Unpaginated `describe_snapshots` / `describe_images` (`main:crc/aws/snapshot.py:49`, `:65`), run fails, low.
+- Disabled AMIs left out of `describe_images` by default, so their snapshots are attempted, refused and logged as errors, and dry runs count them (`main:crc/aws/snapshot.py:49-54`, `:78-90`), cosmetic, low.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`: `ruff check .` passed, `mypy` passed (strict, `crc` and `tests`), `lint-imports` 5 kept / 0 broken, `pytest -q` 3628 passed, including archtests.
+
+Test count: 3339 before AWS-2, 3628 after (+289, unchanged by round 2).
+
+ROUND 2 VERDICT: APPROVE

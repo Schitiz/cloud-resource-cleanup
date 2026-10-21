@@ -512,15 +512,19 @@ def test_cleaner_protocol_logs_in_order_when_nothing_interleaves(
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """With nothing to skip between deletions, the whole log stream is equal to main's."""
+    """With nothing to skip between deletions, the whole log stream is equal to main's.
+    Otherwise every listing line comes before the first delete line, and after an error
+    there is no delete line at all."""
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run_cleaner(case, monkeypatch, caplog, capsys)
-    if old.error is not None or not _single_region_error_free_matches_exactly(case):
-        return
     skip_logs = [r for r in old.logs if r[2].startswith(("Skipping snapshot", "Snap "))]
-    if skip_logs:
+    if old.error is None and _single_region_error_free_matches_exactly(case) and not skip_logs:
+        assert new.logs == old.logs
         return
-    assert new.logs == old.logs
+    plan_logs, delete_logs = _split_logs(new.logs)
+    assert new.logs == plan_logs + delete_logs
+    if new.error is not None:
+        assert delete_logs == []
 
 
 def _deleted(o: Outcome) -> list[str]:
