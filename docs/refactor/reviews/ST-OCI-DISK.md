@@ -71,7 +71,7 @@ Round 1 (`b6e7cab`) made no code or test change: it only appended its report. No
 ### Findings
 
 - **BLOCKING (fixed)**: `crc/oci/disk/README.md` (Safety Invariants) and `crc/oci/README.md:39` (disk part only) sent new disk quirks to the nonexistent `docs/refactor/bugs/pending/OCI-1.md`; they now cite `BUGS.md` rows and `pending/ST-OCI-DISK.md`. Same README bullet also grouped `BUG-098` (no availability domains) under "connectivity error swallowed"; reworded to match `BUGS.md:84`.
-- **NIT (left)**: `crc/oci/disk/adapter.py:15-23` imports the private `_LIST_CONTEXT` and `_log_summary` from `cleaner.py`; the `spot_vm/` precedent made the shared helpers public (`log_summary`). Renaming would add names to the README Public API; left for a later tidy-up.
+- **NIT (left)**: `crc/oci/disk/adapter.py:17-26` imports the private `_LIST_CONTEXT` and `_log_summary` from `cleaner.py`; the `spot_vm/` precedent made the shared helpers public (`log_summary`). Renaming would add names to the README Public API; left for a later tidy-up.
 - **NIT (left)**: `crc/oci/README.md` extension rule 2 still says "SDK calls behind a Protocol in a `*_api.py` module" while disk now uses `disk/api.py`, and the VM part of `crc/oci/README.md:39` cites the folded `pending/OCI-2.md`; both are shared or VM text outside this lane.
 - **NIT (left)**: round 1's `crc/oci/vm.py:32` merge note stands: the integrator must apply `crc.oci.disk.api` in whatever the OCI VM lane produces.
 - **New bugs** (`docs/refactor/bugs/pending/ST-OCI-DISK.md`, both `NEW`, kept as on main): INFO log of every candidate's freeform tags with no volume name (main `crc/oci/disk.py:144-145`; VM analogue `BUG-170`), and main's inverted `notags` docstring (main `crc/oci/disk.py:41` vs `:116-122`).
