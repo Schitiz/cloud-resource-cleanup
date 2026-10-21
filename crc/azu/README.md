@@ -4,7 +4,7 @@
 
 Legacy Azure cleaners (azure-mgmt SDK). They delete or stop leftover VMs, disks, IPs and NICs in one resource group.
 
-**Refactored.** `ip.py` (rung AZ-1), `nic.py` (rung AZ-2), `disk.py` (rung AZ-3), `vm/` (rung AZ-4) and `spot_vm/` (rung AZ-5) are refactored into registered `Cleaner`s; `vm_delete_helpers.py` and `__init__.py` (rung PL-AZ) are strict-typed plumbing with the same behaviour as on `main`. `_base.py` is typed and parity-tested but stays on the legacy ratchet: it reads `os.environ`, which ARCH-003 bans outside legacy modules, until the CLI rung passes the credentials in. Any change must follow `ARCHITECTURE.md` and the refactor rung for this package in `docs/refactor/PLAN.md` (Rung R4+), with `make check` green.
+**Refactored.** `ip.py` (rung AZ-1), `nic.py` (rung AZ-2), `disk.py` (rung AZ-3), `vm/` (rung AZ-4) and `spot_vm/` (rung AZ-5) are refactored into registered `Cleaner`s; `vm_delete_helpers.py` and `__init__.py` (rung PL-AZ) are strict-typed plumbing with the same behaviour as on `main`. `_base.py` is strict-clean too; its `os.environ` credential read is an owner-approved ARCH-003 allowlist entry (`tests/archtest/bans.py`), so the credentials are still read when an Azure cleaner is built, as on `main`. Any change must follow `ARCHITECTURE.md` and the refactor rung for this package in `docs/refactor/PLAN.md` (Rung R4+), with `make check` green.
 
 Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.md`):
 
@@ -19,9 +19,10 @@ Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.
 ## Public API
 
 The ip, nic and disk modules are refactored, so the names below are synced with this README by ARCH-002.
-The vm and spot_vm subpackages document their own API in their own READMEs. The VM delete helpers module is refactored too (rung PL-AZ); the base module is typed but still on the legacy ratchet. The package init holds only a
+The vm and spot_vm subpackages document their own API in their own READMEs. The VM delete helpers module and the base module are refactored too (rung PL-AZ). The package init holds only a
 copyright comment and declares no export list.
 
+- `Base`: Azure credential from the AZURE_CREDENTIALS_* environment variables (read when a cleaner is built) plus the lazily built, shared compute and network clients of one resource group; the client getters are typed as any object because each cleaner narrows the client with its own Protocol.
 - `DeletePoller`: Protocol of the handle begin_delete returns (result(timeout)), used by the delete helpers.
 - `begin_delete_vm_and_wait()`: starts a VM delete and waits on the poller (default timeout 3600 s), then logs the completion; errors propagate.
 - `delete_vm_primary_nic()`: deletes the NIC named after the VM plus a suffix (default "-NIC") with up to 24 attempts 15 s apart; not-found counts as deleted and a final failure is logged, never raised.

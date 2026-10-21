@@ -4,11 +4,11 @@
 
 OCI cleaners (oci SDK). They delete or stop leftover instances and volumes across regions.
 
-**Partly refactored.** `disk.py` (rung OCI-1) is a `Cleaner` registered as `oci` / `disk` (no behaviour change); `vm.py` (rung OCI-2) is a `Cleaner` registered as `oci` / `vm` (no behaviour change); `spot_vm/` (rung OCI-3) is a subpackage with a `Cleaner` registered as `oci` / `spot_instances` (no behaviour change; see its README); the shared helpers `connectivity.py` and `__init__.py` (rung PL-OCI) are strict-clean (no behaviour change); `_base.py` is typed and parity-tested but stays legacy because it reads `os.environ`, which ARCH-003 bans in non-legacy cloud modules. Any change must follow `ARCHITECTURE.md` and the refactor rung for this package in `docs/refactor/PLAN.md` (Rung R4+), with `make check` green.
+**Refactored.** `disk.py` (rung OCI-1) is a `Cleaner` registered as `oci` / `disk` (no behaviour change); `vm.py` (rung OCI-2) is a `Cleaner` registered as `oci` / `vm` (no behaviour change); `spot_vm/` (rung OCI-3) is a subpackage with a `Cleaner` registered as `oci` / `spot_instances` (no behaviour change; see its README); the shared helpers `connectivity.py` and `__init__.py` (rung PL-OCI) are strict-clean (no behaviour change); `_base.py` (rung PL-OCI) is strict-clean too; its `os.environ` read of the private key is an owner-approved ARCH-003 allowlist entry (`tests/archtest/bans.py`), so the key is still read when an OCI cleaner is built, as on `main`. Any change must follow `ARCHITECTURE.md` and the refactor rung for this package in `docs/refactor/PLAN.md` (Rung R4+), with `make check` green.
 
 Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.md`):
 
-- `_base.py` (legacy; typed and parity-tested in rung PL-OCI, kept on the ratchet for its environment read): `Base`: API signing key config from `OCI_PRIVATE_KEY_CONTENT` / `OCI_PRIVATE_KEY_FILE`, identity, compute and block storage clients cached per region, region and availability domain lookup
+- `_base.py` (rung PL-OCI): `Base`: API signing key config from `OCI_PRIVATE_KEY_CONTENT` / `OCI_PRIVATE_KEY_FILE`, identity, compute and block storage clients cached per region, region and availability domain lookup
 - `connectivity.py` (refactored, rung PL-OCI): `CONNECTIVITY_ERRORS` and `log_skipped_region`
 - `disk.py`: `DiskCleaner` (registered as `oci` / `disk`) and the `Disk` adapter: deletes available block and boot volumes not attached (`delete_volume`, `delete_boot_volume`); freeform tag any-key filter
 - `disk_api.py`: the typed Protocols of the OCI calls the disk cleaner uses and their SDK implementation
@@ -19,9 +19,10 @@ Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.
 ## Public API
 
 disk.py and disk_api.py are refactored, so the names below are synced with this README by
-ARCH-002. vm.py and vm_api.py are refactored too, and so are the shared helpers connectivity.py and __init__.py (rung PL-OCI). _base.py (Base) is legacy: it reads the private key environment variables, which ARCH-003 bans in non-legacy cloud modules. The spot_vm subpackage has its own README and symbol list. The package __init__.py holds only a copyright comment and declares
+ARCH-002. vm.py and vm_api.py are refactored too, and so are the shared helpers connectivity.py and __init__.py (rung PL-OCI). _base.py (Base) is refactored too; its private key environment read is an owner-approved ARCH-003 allowlist entry. The spot_vm subpackage has its own README and symbol list. The package __init__.py holds only a copyright comment and declares
 no __all__.
 
+- `Base`: OCI signing key config from the OCI_PRIVATE_KEY_CONTENT or OCI_PRIVATE_KEY_FILE environment variable (KeyError when neither is set), identity, compute and block storage clients cached per region, region subscription and availability domain lookup with the connectivity fallback.
 - `SdkVolume`: Protocol of the attributes read from an OCI volume or boot volume.
 - `SdkAttachment`: Protocol of the attributes read from a volume or boot volume attachment.
 - `VolumeApi`: Protocol of the seven OCI calls the disk cleaner uses (list volumes, boot volumes, attachments, availability domains, delete volume, delete boot volume); tests pass fakes.

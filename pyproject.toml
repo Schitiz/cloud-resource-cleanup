@@ -22,8 +22,6 @@ testpaths = ["tests"]
 target-version = "py311"
 line-length = 100
 extend-exclude = [
-    "crc/azu/_base.py",
-    "crc/oci/_base.py",
     "tests/test_aws_disk.py",
     "tests/test_aws_spot_instance_requests.py",
     "tests/test_azu_spot_vm.py",
@@ -55,8 +53,6 @@ exclude = ['^crc\.py$']
 # listed here because mypy never checks it, see `files`).
 [[tool.mypy.overrides]]
 module = [
-    "crc.azu._base",
-    "crc.oci._base",
     "tests.test_aws_disk",
     "tests.test_aws_spot_instance_requests",
     "tests.test_azu_spot_vm",

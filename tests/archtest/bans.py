@@ -11,7 +11,14 @@ CLOUD_PACKAGES = ("crc/aws", "crc/azu", "crc/gcp", "crc/oci")
 
 # Explicit exceptions: repo-relative path -> banned kinds that file may use.
 # Kinds: "re", "clock", "env", "print", "sys.exit". Only the repository owner adds entries.
-ARCH003_ALLOWLIST: Mapping[str, frozenset[str]] = {}
+ARCH003_ALLOWLIST: Mapping[str, frozenset[str]] = {
+    # Credential loading, owner-approved 2026-10-21: `Base` reads the credentials from the
+    # environment when an Azure or OCI cleaner is built, exactly as on main. Reading them in
+    # crc/cli instead would move the KeyError for a missing variable to startup and break
+    # single-cloud Jenkins jobs that do not set the other clouds' variables.
+    "crc/azu/_base.py": frozenset({"env"}),
+    "crc/oci/_base.py": frozenset({"env"}),
+}
 
 _CLOCK_CALLS = frozenset(
     {"datetime.now", "datetime.utcnow", "datetime.datetime.now", "datetime.datetime.utcnow"}

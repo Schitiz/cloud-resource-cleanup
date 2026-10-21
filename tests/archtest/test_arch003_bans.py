@@ -34,9 +34,17 @@ def test_arch003_cloud_modules_have_no_banned_constructs() -> None:
     assert not problems, "\n\n".join(problems)
 
 
-def test_arch003_allowlist_is_explicit_and_empty_by_default() -> None:
+# The owner-approved exceptions, pinned: any other entry fails here, so an agent cannot widen
+# the allowlist without also editing this owner-only file.
+APPROVED_ALLOWLIST = {
+    "crc/azu/_base.py": frozenset({"env"}),
+    "crc/oci/_base.py": frozenset({"env"}),
+}
+
+
+def test_arch003_allowlist_is_explicit_and_owner_approved() -> None:
     assert isinstance(ARCH003_ALLOWLIST, dict)
-    assert not ARCH003_ALLOWLIST
+    assert dict(ARCH003_ALLOWLIST) == APPROVED_ALLOWLIST
 
 
 @pytest.mark.parametrize("snippet", list(BAD_SNIPPETS.values()), ids=list(BAD_SNIPPETS))
