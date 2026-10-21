@@ -273,6 +273,11 @@ def test_factory_reads_the_options(monkeypatch: pytest.MonkeyPatch) -> None:
         custom_age_tag_key="ttl",
         instance_states=["STOPPED"],
     )
+    stop_built = build_vm_cleaner(
+        RunContext(dry_run=True, operation=Operation.STOP, options=options, now=NOW)
+    )
+    assert isinstance(stop_built, VmCleaner)
+    assert stop_built._settings.instance_states == ("RUNNING",)
 
 
 def test_adapter_runs_the_cleaner_with_injected_api(oci_env: None) -> None:

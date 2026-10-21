@@ -596,7 +596,7 @@ def _run_cleaner(
         "age": case.age,
         "custom_age_tag_key": case.custom_age_tag_key,
     }
-    if case.states is not None and operation == "delete":
+    if case.states is not None:
         options["instance_state"] = case.states
     context = RunContext(
         dry_run=case.dry_run,

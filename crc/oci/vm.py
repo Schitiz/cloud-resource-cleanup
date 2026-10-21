@@ -239,7 +239,7 @@ def build_vm_cleaner(context: RunContext) -> Cleaner:
     (dict), `custom_age_tag_key` and `instance_state` (list, default `["RUNNING"]`)."""
     options = context.options
     base = Base()
-    states = options.get("instance_state")
+    states = options.get("instance_state") if context.operation is Operation.DELETE else None
     settings = VmSettings(
         filter_tags=options.get("filter_tags") or {},
         exception_tags=options.get("exception_tags") or {},
