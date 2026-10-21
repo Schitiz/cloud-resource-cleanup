@@ -37,8 +37,9 @@ README_EXCLUDED_DIRS = frozenset(
     }
 )
 # Directories (relative posix paths, "" is the repository root) exempt on their own only:
-# the root README is the user-facing CLI document and .cursor holds only environment.json.
-README_EXEMPT_DIRS = frozenset({"", ".cursor"})
+# the root README is the user-facing CLI document, .cursor holds only environment.json,
+# and .cursor/skills only groups skill directories.
+README_EXEMPT_DIRS = frozenset({"", ".cursor", ".cursor/skills"})
 
 
 def sections(markdown: str) -> dict[str, str]:
@@ -113,16 +114,22 @@ def package_dirs(root: Path, legacy: frozenset[str]) -> dict[Path, list[Path]]:
 
 
 def directories_with_files(root: Path) -> list[Path]:
-    """Directories that directly contain files, minus `README_EXCLUDED_DIRS` trees."""
-    found: list[Path] = []
+    """Directories that contain files (directly or in subdirectories), minus exclusions."""
+    found: set[Path] = set()
     for current, dirnames, filenames in os.walk(root):
         dirnames[:] = sorted(d for d in dirnames if d not in README_EXCLUDED_DIRS)
         files = [f for f in filenames if not f.endswith((".pyc", ".pyo"))]
+        if not files:
+            continue
         directory = Path(current)
-        rel = "" if directory == root else relpath(root, directory)
-        if files and rel not in README_EXEMPT_DIRS:
-            found.append(directory)
-    return found
+        while True:
+            rel = "" if directory == root else relpath(root, directory)
+            if rel not in README_EXEMPT_DIRS:
+                found.add(directory)
+            if directory == root:
+                break
+            directory = directory.parent
+    return sorted(found)
 
 
 def _check_readme(root: Path, directory: Path, modules: list[Path]) -> list[str]:
