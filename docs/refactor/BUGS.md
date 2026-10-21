@@ -79,10 +79,13 @@ Related: `docs/refactor/FILTER_VARIANTS.md` (how each module filters, section 7 
 | BUG-048 | AWS key pairs without `KeyName` or `CreateTime` are skipped silently (no log); the exception regex is evaluated even when the name regex does not match, so an invalid exception pattern raises for any key pair | `crc/aws/keypairs.py:105-106`, `:112-118` | yes | cosmetic | low | R4a | open |
 | BUG-049 | AWS key pair cleanup does not check whether a key pair is still referenced (running instances, launch templates, Auto Scaling): any old matching key pair is deleted, so later launches from those templates fail; only the name and age decide | `crc/aws/keypairs.py:104-142` (no lookup before `delete_key_pair` at `:138`) | yes | deletes what it should keep | low | R4a (round 2) | open |
 | BUG-050 | Deleted key pairs are recorded by bare name without region (`deleted_keypairs.append(keypair_to_delete)`), so the same name deleted in two regions appears twice in the Slack and InfluxDB report with no way to tell the regions apart | `crc/aws/keypairs.py:142`, `crc.py:446` | yes | cosmetic | low | R4a (round 2) | open |
+| BUG-051 | AWS Elastic IP cleanup is not atomic across regions: it lists and releases region by region, a non-connectivity error (`ClientError`, `KeyError` on a missing `AllocationId`, `TypeError` from `notags`) aborts the run after earlier regions were already released, and no summary line is logged | `crc/aws/elastic_ips.py:119-147`, `:152-160` | yes | cosmetic | low | R4b | open |
+| BUG-052 | A connectivity error while releasing addresses of a region loses the record of the ones already released: `deleted_ips.extend` runs only after the release loop, so those IPs are gone but missing from `get_deleted`, Slack and InfluxDB | `crc/aws/elastic_ips.py:141-147`, `:148-150` | yes | cosmetic | low | R4b | open |
+| BUG-053 | AWS Elastic IP cleanup has no age gate: every unassociated tagged address that matches the filter is released at once, including one allocated minutes ago and not yet associated by its owner; `Describe` data carries no allocation time, so the module cannot tell | `crc/aws/elastic_ips.py:125-144` (no age check before `release_address` at `:143`) | yes | deletes what it should keep | medium | R4b | open |
 
 ## Counts
 
-50 rows: critical 2, high 7, medium 10, low 31. All open.
+53 rows: critical 2, high 7, medium 11, low 33. All open.
 
 ## Notes
 

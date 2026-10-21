@@ -5,7 +5,8 @@
 Frozen copies of `main` code, used as parity oracles. They are `.txt` files so they are never
 linted, imported by the product or collected by pytest. `aws_keypairs.txt` is the exact output
 of `git show main:crc/aws/keypairs.py`; `tests/test_aws_keypair_parity.py` loads it and runs it
-against the refactored `crc.aws.keypairs`.
+against the refactored `crc.aws.keypairs`. `aws_elastic_ips.txt` is the exact output of
+`git show main:crc/aws/elastic_ips.py`; `tests/test_aws_ip_parity.py` runs it against `crc.aws.elastic_ips`.
 
 ## Public API
 
