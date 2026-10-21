@@ -33,10 +33,10 @@ Modules (split by responsibility):
 
 ## Safety Invariants
 
-- Authoritative text: `CLEANUP_SAFETY.md` (SAF-005, SAF-006 to SAF-013, SAF-041, SAF-042, SAF-044).
-- `plan()` only calls `list_all` and `instance_view`; `begin_delete`, `begin_power_off` and the NIC `begin_delete` are called from `apply()` (and the adapter) only and never in a dry run (ARCH-005, SAF-005).
+- Authoritative text: `CLEANUP_SAFETY.md` (SAF-006, SAF-009, SAF-010, SAF-042; SAF-011 to SAF-013 are not met, as on main).
+- `plan()` only calls `list_all` and `instance_view`; `begin_delete`, `begin_power_off` and the NIC `begin_delete` are called from `apply()` (and the adapter) only and never in a dry run (ARCH-005).
 - Untagged VMs are skipped (SAF-042); filter tags need all keys, exception tags any key, notags all keys (`FILTER_VARIANTS.md` section 3, `crc.core.policy`).
-- Age uses `crc.core.age` (`get_retention_age`, fail open, then `is_old`, which still reads `MAX_AGE`); the clock is injected (`RunContext.now`, `VM(clock=...)`). SAF-011 holds only when `age` is non-empty: an empty age selects every old-enough VM.
+- Age uses `crc.core.age` (`get_retention_age`, fail open, then `is_old`, which still reads `MAX_AGE`); the clock is injected (`RunContext.now`, `VM(clock=...)`). There is no age gate in `__init__` (SAF-011 is not met): an empty age selects every VM that passes the tag and status checks (SAF-006).
 - A VM is acted on only when an allowed state is a substring of `instance_view(...).statuses[1].display_status`; a failing status read keeps the VM (fail closed) and is logged.
 - Per-VM errors (status, delete, power-off) are logged and swallowed, as on main; list errors and age errors propagate.
 - The listing is subscription-wide while status, delete and power-off use the configured resource group (BUG-002); stop is `begin_power_off`, not a deallocate (BUG-003); `statuses[1]` is unchecked (BUG-010). New quirks are in `docs/refactor/bugs/pending/AZ-4.md`.

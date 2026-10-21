@@ -119,3 +119,82 @@ Scope reviewed: `git diff e7926e2..HEAD` (`crc/azu/README.md`, `crc/azu/vm/READM
 Test count: 4681 before AZ-4 (`e7926e2`), 4965 before review, 4969 after review additions (+4).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff e7926e2..HEAD` (commits `26d5846`, `5f492e1`), read against
+`git show main:crc/azu/vm.py`, `main:crc/azu/vm_delete_helpers.py`, `main:crc/azu/_base.py`,
+`main:crc/service.py`, `CLEANUP_SAFETY.md`, `AGENTS.md`, `ARCHITECTURE.md`, `docs/refactor/BUGS.md`
+and `REVIEW_CHECKLIST.md`.
+
+### Round 1 fixes assessment
+
+- Line-range changes in `docs/refactor/bugs/pending/AZ-4.md`: re-checked every row against
+  `git show main:crc/azu/vm.py` (byte-identical to `tests/legacy/azu_vm.txt`); all cited lines are
+  correct. The four rows round 1 added are real `main` behaviour and correctly scoped.
+- Parity cases round 1 added (`filter-string-spec-is-substring-test`,
+  `test_stop_then_empty_delete_shares_name_lists_like_main`) assert outcomes against the oracle and
+  pass; no test was removed, loosened or skipped, and no production code was changed in round 1.
+- Round 1's two NITs stand (`Skipped.id` can be `None`; the future CLI wiring must map an empty
+  `--resource_states` list to `None`).
+
+### Independent review
+
+- Parity: the adapter keeps main's order (lazy `list_all`, tag checks, clock, `logging.info(vm.tags)`,
+  `get_retention_age` on the raw tags, `is_old(retention_age or age)` outside the `try`, then status,
+  action and NIC inside the per-VM `try`), the same number of client factory calls and the same log
+  lines. `policy.normalize_tags` only differs from the raw dict for `None` tag values, which the
+  Azure SDK does not return. `RunContext.options` freezing (tuples, read-only mappings) works with
+  `crc.core.policy` and `crc.core.age`.
+- Safety: `plan()` makes no mutating call (ARCH-005 green); dry runs call nothing mutating on
+  either path; a status-read failure keeps the VM (fail closed); list and age errors still propagate;
+  BUG-002, BUG-003, BUG-004, BUG-010, BUG-028 are preserved, not fixed.
+- Tests: mutation probes, each reverted, were all caught by `tests/test_azure_vm_parity.py` /
+  `tests/test_azure_vm.py`: `statuses[1]` to `statuses[-1]`; NIC delete before recording the VM;
+  `UntaggedMode.SKIP` to `INCLUDE`; adapter clock replaced by `datetime.datetime.now`.
+- Architecture and typing: registration by decorator, factories injected, SDK behind the Protocols
+  in `crc/azu/vm/client.py`, ratchet lines only removed, no `# type: ignore`, no new mypy override.
+  Lane-restricted files (`crc.py`, `crc/core/**`, `BUGS.md`, `STATUS.md`, `FILTER_VARIANTS.md`,
+  `crc/README.md`, `tests/README.md`, `tests/legacy/README.md`) are untouched in the rung diff.
+
+### BLOCKING (fixed)
+
+1. `crc/azu/vm/README.md`, Safety Invariants: the authoritative list cited SAF-005 (Spot VM list
+   re-raise), SAF-041 and SAF-044 (Spot modules), which do not apply to this module, and said "SAF-011
+   holds only when `age` is non-empty: an empty age selects every old-enough VM", which is
+   self-contradictory (SAF-011 is an `__init__` age gate that this module, as on main, does not
+   have). Now cites SAF-006, SAF-009, SAF-010, SAF-042, states SAF-011 to SAF-013 are not met, and
+   says an empty age selects every VM that passes the tag and status checks.
+
+### NIT (left)
+
+- `VmCleaner.apply` (`crc/azu/vm/cleaner.py:163-168`, `:214-219`): if `self._network()` raises after
+  the VM delete finished, the VM is already in `tally.deleted` and is also added to `failed`, so the
+  `Result` lists it in both `succeeded` and `failed`. The adapter path matches main; only the new
+  `Result` shape is ambiguous.
+- `crc/azu/README.md`: the rung edits shared lines (the "Mostly legacy" sentence, the legacy list in
+  "Public API" and Extension rule 3) rather than only a module subsection; the edits are accurate and
+  needed for ARCH-002, but other Azure lanes editing the same sentences will conflict on merge.
+- `## Coding summary` gives 4969 tests as the coding result while round 1 reports 4965 before its
+  additions; the summary was updated with round 1's count.
+
+### New bugs
+
+- One row added to `docs/refactor/bugs/pending/AZ-4.md`: `display_status=None` on the second
+  instance view status raises `TypeError` inside the per-VM `try` and the VM is never cleaned
+  (`main:crc/azu/vm.py:147-149`, `:255-260`, `:154`; variant of BUG-010; low; AZ-4 round 2).
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`:
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed |
+| `mypy` (`crc`, `tests`) | Success: no issues found in 110 source files |
+| `lint-imports` | Contracts: 5 kept, 0 broken |
+| `pytest -q` | 4969 passed |
+
+Test count: 4681 before AZ-4 (`e7926e2`), 4969 now (round 2 added no tests).
+
+ROUND 2 VERDICT: APPROVE
