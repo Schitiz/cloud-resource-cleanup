@@ -28,7 +28,6 @@ _SERVICE_NAME = "ec2"
 _DEFAULT_REGION = "us-west-2"
 _SKIP_CONTEXT = "VPC cleanup"
 _DELETE_RETRIES = 5
-_VPC = "vpc"
 _PROTECTED = "protected"
 
 TagSpec = Mapping[str, Sequence[str]]
@@ -171,6 +170,7 @@ class VpcCleaner:
         self._filter_tags = filter_tags
         self._exception_tags = exception_tags
         self._notags = notags
+        self._vpcs: dict[tuple[str, str], list[Vpc]] = {}
 
     def supports(self, operation: Operation) -> bool:
         return operation is Operation.DELETE
@@ -179,6 +179,7 @@ class VpcCleaner:
         """List every region and decide. Makes no mutating call. Every listed VPC is a
         candidate (main records them all before the skip check, BUG-012); protected ones carry
         `protected` in `extra` and are listed in `skipped` too."""
+        self._vpcs.clear()
         vpc_filter = self.build_filter()
         candidates: list[Candidate] = []
         skipped: list[Skipped] = []
@@ -243,13 +244,9 @@ class VpcCleaner:
         skipped: list[Skipped] = []
         for vpc_id, vpc in zip(ids, vpcs, strict=True):
             protected = False if dry_run else self.is_protected(vpc)
+            self._vpcs.setdefault((region, vpc_id), []).append(vpc)
             candidates.append(
-                Candidate(
-                    id=vpc_id,
-                    name=vpc_id,
-                    region=region,
-                    extra={_VPC: vpc, _PROTECTED: protected},
-                )
+                Candidate(id=vpc_id, name=vpc_id, region=region, extra={_PROTECTED: protected})
             )
             if protected:
                 skipped.append(Skipped(id=vpc_id, reason="matches exception_tags or notags"))
@@ -260,9 +257,10 @@ class VpcCleaner:
     ) -> None:
         """Tear down every unprotected candidate of one region."""
         for candidate in candidates:
+            vpc = self._vpcs[(candidate.region, candidate.id)].pop(0)
             if candidate.extra[_PROTECTED]:
                 continue
-            self.delete_vpc(client, ec2, candidate.extra[_VPC])
+            self.delete_vpc(client, ec2, vpc)
 
     def is_protected(self, vpc: Vpc) -> bool:
         """BUG-012: main hands the boto3 Vpc resource to a function that iterates tags, so with

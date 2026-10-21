@@ -74,7 +74,7 @@ def test_plan_candidates_carry_region_and_unprotected_flag() -> None:
     aws = _aws({W2: [full("vpc-1")]})
     (candidate,) = _cleaner(aws).plan(_context()).candidates
     assert (candidate.id, candidate.name, candidate.region) == ("vpc-1", "vpc-1", W2)
-    assert candidate.extra["protected"] is False
+    assert dict(candidate.extra) == {"protected": False}
 
 
 def test_plan_sends_the_server_side_tag_filter() -> None:
