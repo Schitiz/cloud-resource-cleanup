@@ -8,7 +8,8 @@
 - **README.** New `crc/oci/vm/README.md` with the four ARCH-002 sections (Safety Invariants cite SAF-006 to SAF-013). The OCI section of `crc/oci/README.md` is trimmed to a pointer (module list, VM symbol list and VM safety bullet).
 - **pyproject.toml.** Not touched; neither moved file was on a legacy list.
 - **Gates.** `make check`: ruff, mypy, lint-imports and pytest green. Test count unchanged (see the commit summary: 42213 collected before and after).
-- **Open issues.** None new; `docs/refactor/bugs/pending/ST-OCI-VM.md` records that no quirk was found. BUG-158 to BUG-171 still apply.
+- **Open issues.** The move adds none. Round 2 recorded one pre-existing quirk in `docs/refactor/bugs/pending/ST-OCI-VM.md` (`terminate_instance` keeps launch-time data volumes, `crc/oci/vm.py:156` on main). BUG-158 to BUG-171 still apply.
+- **Review status.** Round 1 (Argon): APPROVE. Round 2 (Opus): APPROVE, with one stale README pointer fixed (see `## Round 2 (Opus)`).
 - **Needed changes outside this lane (not made).** `docs/refactor/STATUS.md` (record the rung), `crc/README.md` and `tests/README.md` if they name `crc/oci/vm.py` or `vm_api.py`, and `docs/refactor/bugs/pending/README.md` (list `ST-OCI-VM.md`).
 
 ## Round 1 (Argon)
