@@ -39,3 +39,67 @@ pytest).
   note that the `TypeError` for untagged IPs is kept in the cleaner (as BUG-011 for AWS), not in
   policy, so item 3 of section 7 is "kept in the cleaner, fix in a behaviour rung". No core change
   needed. `STATUS.md` and `BUGS.md` rows are for the integrator.
+
+## Round 1 (Argon)
+
+Scope reviewed: `git diff 9b5c85a..HEAD` (`crc/azu/ip.py`, `crc/azu/README.md`, `pyproject.toml`,
+`docs/refactor/bugs/README.md`, `docs/refactor/bugs/pending/README.md`,
+`docs/refactor/bugs/pending/AZ-1.md`, `docs/refactor/reviews/AZ-1.md`,
+`tests/legacy/azu_ip.txt`, `tests/helpers_azure_ip.py`, `tests/test_azure_ip.py`,
+`tests/test_azure_ip_parity.py`) against `git show main:crc/azu/ip.py`, `AGENTS.md`,
+`docs/refactor/BUGS.md` and `.cursor/skills/crc-python-refactor/REVIEW_CHECKLIST.md`.
+
+### 1. Behaviour parity with `git show main:crc/azu/ip.py`
+
+- **SDK calls (order and arguments)** (`crc/azu/ip.py:107-117`, `:203-224` vs `main:crc/azu/ip.py:59`, `:87-90`):
+  - `IP.delete()` calls `self.base.get_network_client().public_ip_addresses.list_all()`, iterates lazily, and for each selected address when `not self.dry_run` calls `self.base.get_network_client().public_ip_addresses.begin_delete(resource_group_name=self.base.resource_group, public_ip_address_name=ip.name)` before advancing the iterator.
+- **Filter and age decisions** (`crc/azu/ip.py:119-138` vs `main:crc/azu/ip.py:62-85`):
+  - No age gate exists on `main` (recorded in `docs/refactor/bugs/pending/AZ-1.md`).
+  - `decide()` evaluates `filter_tags` (`policy.filter_tags_any_key`), `exception_tags` (`policy.should_skip_by_tags`), and `notags` (`policy.should_skip_by_tags`) in `main`'s exact order, then checks `ip.ip_configuration is None`.
+- **Log lines, printed messages, errors and dry-run path** (`crc/azu/ip.py:50-56`, `:93-105`, `:117`, `:195-201`, `:221-224` vs `main:crc/azu/ip.py:47-53`, `:86-99`):
+  - All `logging.info` and `logging.warning` messages match `main` verbatim (`Deleted IP address: ...`, `count of items in deleted_ips: ...`, real and dry-run summaries).
+  - `BUG-013` (`TypeError: argument of type 'NoneType' is not iterable` when `ip.tags is None` and `exception_tags` or `notags` is non-empty) and mid-run error propagation match `main`.
+
+### 2. Oracle and parity test verification (`tests/legacy/azu_ip.txt`, `tests/test_azure_ip_parity.py`)
+
+- Diffed `tests/legacy/azu_ip.txt` against `git show main:crc/azu/ip.py`: byte-for-byte identical (0 lines of diff).
+- Verified `tests/test_azure_ip_parity.py` runs both the oracle (`tests/legacy/azu_ip.txt`) and the refactored code (`IP` and registered `AzureIpCleaner`) against the same `FakeAzure` fake and compares ordered SDK `calls` (including lazy `yield` interleaving), `error`, `deleted`, `count`, `logs` and `stdout`.
+- Tested a deliberate one-line behaviour change in `crc/azu/ip.py` (`if ip.ip_configuration is None:` in `decide`), confirmed `python3 -m pytest -q tests/test_azure_ip_parity.py` failed immediately, and reverted it.
+
+### 3. Architecture and lane rules
+
+- `AzureIpCleaner` implements `Cleaner` (`cloud = "azure"`, `kind = "ip"`, `supports`, read-only `plan`, mutating `apply`) and is registered with `@register("azure", "ip")` on `build_ip_cleaner`.
+- `plan()` never mutates (`ARCH-005` passes; `begin_delete` is only in `delete_candidate`, called from `apply()` and `IP.delete()`).
+- Filtering uses `crc.core.policy.filter_tags_any_key`, `crc.core.policy.should_skip_by_tags`, and `crc.core.policy.normalize_tags` as named in `docs/refactor/FILTER_VARIANTS.md`.
+- SDK is behind the typed `PublicIpOperations` and `IpNetworkClient` `Protocol`s.
+- `crc/azu/ip.py` (`crc.azu.ip`) left both legacy ratchet lists in `pyproject.toml`; nothing was added.
+- `crc.py`, `crc/core/**`, shared docs (`BUGS.md`, `STATUS.md`, `FILTER_VARIANTS.md`, `crc/README.md`, `tests/README.md`, `tests/legacy/README.md`), and other cloud packages are untouched. `crc/azu/README.md` is accurate and passes `ARCH-002` symbol sync.
+
+### BLOCKING (fixed)
+
+1. **`AzureIpCleaner.decide` normalised `ip.tags` before tag matching (converting `None` tag values to `""`) and returned early on `not filter_match` before evaluating `exception_tags` and `notags` (`main:crc/azu/ip.py:62-78`)** (`crc/azu/ip.py:119-138`, `tests/test_azure_ip_parity.py:159-197`, `:387-402`):
+   - On `main`, a tag with value `None` (`{"env": None}`) does not match `[""]` (`None in [""]` is `False`) and raises `TypeError` against a string spec (`None in "testing"`), whereas normalising `None` to `""` before `filter_tags_any_key` / `should_skip_by_tags` made `"" in [""]` and `"" in "testing"` return `True`. Furthermore, `main` evaluates `exception_tags_match` and `no_tags_match` unconditionally before the combined `if`, so a `TypeError` in `exception_tags` or `notags` (for example a non-iterable spec value on a present key) raises even when `filter_tags_match` is `False` or `exception_tags_match` is already `True`.
+   - Updated `decide` to evaluate `policy.filter_tags_any_key` and `policy.should_skip_by_tags` directly against `ip.tags` in `main`'s exact order and normalize tags with `policy.normalize_tags` when constructing `Candidate`. Added 7 parity cases and quirk checks to `tests/test_azure_ip_parity.py`.
+2. **`test_cleaner_protocol_matches_main` used `assert new.logs == old.logs[: len(new.logs)]` on error cases, which would pass vacuously if `new.logs` were empty** (`tests/test_azure_ip_parity.py:331-339`):
+   - Tightened `test_cleaner_protocol_matches_main` to assert `new.logs == []` when `case.fails_in_plan` and `new.logs == old.logs[:-1]` for all other cases (including mid-apply delete errors).
+3. **`docs/refactor/bugs/pending/AZ-1.md` cited `crc/azu/ip.py:21-26` for the `__init__` signature instead of `crc/azu/ip.py:14-21` on `main`, and row 8 noted the pre-fix `normalize_tags` discrepancy** (`docs/refactor/bugs/pending/AZ-1.md:12`, `:18`):
+   - Verified all 8 rows against `git show main:crc/azu/ip.py`; fixed the `__init__` signature citation to `crc/azu/ip.py:14-21` and updated row 8 to reflect preserved `main` semantics.
+
+### NIT (left)
+
+- Calling `AzureIpCleaner.apply()` directly with `context.dry_run=True` logs the dry-run summary warning a second time after `plan()` and returns `Result(succeeded=...)` (`crc/azu/ip.py:97-105`); `crc.core.engine.run` does not call `apply()` in a dry run (`crc/core/engine.py:99-100`).
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`:
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed |
+| `mypy` (`crc`, `tests`) | Success: no issues found in 86 source files |
+| `lint-imports` | Contracts: 5 kept, 0 broken |
+| `pytest -q` | 2861 passed in 9.66s |
+
+Test count: 2703 before AZ-1 (`9b5c85a`), 2840 before review, 2861 after review additions (+21).
+
+VERDICT: APPROVE

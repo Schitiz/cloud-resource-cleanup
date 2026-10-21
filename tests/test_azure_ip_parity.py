@@ -157,6 +157,43 @@ CASES = [
     ),
     Case("name-none", [ip(None, ENV)]),
     Case("tag-value-none-key-only-filter", [ip("a", {"env": None})], filter_tags={"env": []}),
+    Case(
+        "tag-value-none-does-not-match-empty-string-filter",
+        [ip("a", {"env": None})],
+        filter_tags={"env": [""]},
+    ),
+    Case(
+        "tag-value-none-does-not-match-empty-string-exception",
+        [ip("a", {"env": None})],
+        exception_tags={"env": [""]},
+    ),
+    Case(
+        "tag-value-none-does-not-match-empty-string-notags",
+        [ip("a", {"env": None})],
+        notags={"env": [""]},
+    ),
+    Case(
+        "string-spec-value-matches-substring",
+        [ip("a", {"env": "test"})],
+        filter_tags={"env": "testing"},
+    ),
+    Case(
+        "tag-value-none-with-string-spec-raises",
+        [ip("a", {"env": None})],
+        filter_tags={"env": "testing"},
+    ),
+    Case(
+        "exception-evaluated-when-filter-misses",
+        [ip("a", ENV)],
+        filter_tags={"zzz": []},
+        exception_tags={"env": 123},
+    ),
+    Case(
+        "notags-evaluated-when-exception-matches",
+        [ip("a", ENV)],
+        exception_tags={"env": ["test"]},
+        notags={"owner": 123},
+    ),
 ]
 
 
@@ -294,14 +331,13 @@ def test_cleaner_protocol_matches_main(
     assert _only(new.calls, "list_all") == _only(old.calls, "list_all")
     if case.fails_in_plan:
         assert _only(new.calls, "begin_delete") == []
+        assert new.logs == []
         return
     assert _only(new.calls, "begin_delete") == _only(old.calls, "begin_delete")
+    assert new.logs == old.logs[:-1]
     if new.error is None:
         assert new.deleted == old.deleted
-        assert new.logs == old.logs[:-1]
         assert _only(new.calls, "client") == _only(old.calls, "client")
-    else:
-        assert new.logs == old.logs[: len(new.logs)]
 
 
 def _find(case_id: str) -> Case:
@@ -347,6 +383,22 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
     ("delete-error-not-called-in-dry-run", lambda o: o.error is None and o.deleted == ["a"]),
     ("missing-ip-configuration-attribute", lambda o: o.error is not None),
     ("missing-ip-configuration-not-reached-when-filtered", lambda o: o.error is None),
+    ("tag-value-none-does-not-match-empty-string-filter", lambda o: o.deleted == []),
+    ("tag-value-none-does-not-match-empty-string-exception", lambda o: o.deleted == ["a"]),
+    ("tag-value-none-does-not-match-empty-string-notags", lambda o: o.deleted == ["a"]),
+    ("string-spec-value-matches-substring", lambda o: o.deleted == ["a"]),
+    (
+        "tag-value-none-with-string-spec-raises",
+        lambda o: o.error is not None and o.error[0] == "TypeError",
+    ),
+    (
+        "exception-evaluated-when-filter-misses",
+        lambda o: o.error is not None and o.error[0] == "TypeError",
+    ),
+    (
+        "notags-evaluated-when-exception-matches",
+        lambda o: o.error is not None and o.error[0] == "TypeError",
+    ),
 ]
 
 

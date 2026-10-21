@@ -20,8 +20,6 @@ from crc.service import Service
 
 TagSpec = Mapping[str, Sequence[str]]
 
-_NONE_TAGS_ERROR = "argument of type 'NoneType' is not iterable"
-
 
 class PublicIpOperations(Protocol):
     """The two `public_ip_addresses` calls this cleaner uses."""
@@ -121,20 +119,20 @@ class AzureIpCleaner:
         exception_tags = self._exception_tags or {}
         notags = self._notags or {}
         filter_tags = self._filter_tags or {}
-        # main reads `ip.tags` only when one of the three specs is set.
-        needs_tags = bool(filter_tags or exception_tags or notags)
-        raw_tags = ip.tags if needs_tags else getattr(ip, "tags", None)
-        tags = policy.normalize_tags(raw_tags)
-        filter_match = policy.filter_tags_any_key(tags, filter_tags)
-        if raw_tags is None and (exception_tags or notags):
-            # BUG-013: main evaluates `key in None` for untagged addresses.
-            raise TypeError(_NONE_TAGS_ERROR)
+        filter_match = not filter_tags or (
+            bool(ip.tags) and policy.filter_tags_any_key(ip.tags, filter_tags)
+        )
+        exception_match = bool(exception_tags) and policy.should_skip_by_tags(
+            ip.tags, exception_tags, {}
+        )
+        notags_match = bool(notags) and policy.should_skip_by_tags(ip.tags, {}, notags)
         if not filter_match:
             return None, "no filter_tags match"
-        if policy.should_skip_by_tags(tags, exception_tags, notags):
+        if exception_match or notags_match:
             return None, "matches exception_tags or notags"
         if ip.ip_configuration is not None:
             return None, "attached to an IP configuration"
+        tags = policy.normalize_tags(getattr(ip, "tags", None))
         return Candidate(id=ip.name, name=ip.name, tags=tags), ""
 
 
