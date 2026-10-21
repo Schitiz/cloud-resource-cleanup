@@ -8,7 +8,7 @@ Rung AWS-1: `crc/aws/vpc.py` refactored into a registered `Cleaner` (`@register(
   - Cleaner path vs `main`, abnormal runs only: `plan()` decides protection for all VPCs of a region before `apply()` deletes, so after a region aborted mid-teardown (connectivity error) the Cleaner path has already logged the `Tags and notags not present` warning for VPCs `main` never reached. Results, SDK calls per region, summary lines and errors are identical; the adapter path (`VPC.delete()`) is identical including log order. With a real boto3 `Vpc` the protection check raises `TypeError` on the first VPC (BUG-012), so no deletion precedes it in either path.
   - Cleaner path across several regions lists every region before deleting (as the other AWS cleaners), so a listing error in a later region is raised before earlier regions are deleted, whereas `main` had deleted them.
   - Dry-run `apply()` does nothing and logs nothing (`plan()` already logged the dry-run summary).
-  - 9 new quirks are in `docs/refactor/bugs/pending/AWS-1.md` (the main ones: no age gate or default-VPC guard, so an empty `filter_tags` selects every VPC of every region; and `--resource vpc` running the AWS `VPC` class on every cloud without a `self.cloud` check). BUG-012 and BUG-021 are kept as is.
+  - 13 new quirks are in `docs/refactor/bugs/pending/AWS-1.md` (4 added by round 2) (the main ones: no age gate or default-VPC guard, so an empty `filter_tags` selects every VPC of every region; and `--resource vpc` running the AWS `VPC` class on every cloud without a `self.cloud` check). BUG-012 and BUG-021 are kept as is.
   - `docs/refactor/bugs/README.md` and `docs/refactor/bugs/pending/README.md` were added only because ARCH-002 requires a README in every directory with files; other lanes will add the same two files, so expect an add/add conflict to resolve at integration (keep either).
 - **Core changes needed.** None.
 - **`FILTER_VARIANTS.md` change needed (not edited).** In the `aws/vpc.py` row, add that since AWS-1 protection is evaluated through `policy.exception_tags_any` / `policy.notags_all` per tag on the Vpc resource (still raising `TypeError` for a real Vpc, BUG-012), cite `main` lines `:94-127`, `:167`, and that the oracle is `tests/legacy/aws_vpc.txt`. The "VPC passes a resource object" note in section 6 stays true.
@@ -66,3 +66,46 @@ Scope reviewed: `git diff 9b5c85a..HEAD` (`crc/aws/vpc.py`, `crc/aws/vpc_api.py`
 Test count: 2703 before AWS-1 (`9b5c85a`), 3005 after (+302).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 9b5c85a..HEAD` (both commits, including round 1's fixes), checked against `git show main:crc/aws/vpc.py`, `git show main:crc.py`, `crc/core/policy.py`, `crc/core/engine.py`, `CLEANUP_SAFETY.md`, `ARCHITECTURE.md` and `REVIEW_CHECKLIST.md`.
+
+### Round 1 fixes assessment
+
+- **SDK `Vpc` out of `Candidate.extra`**: correct. The handles moved to `VpcCleaner._vpcs` (keyed by `(region, vpc_id)`, cleared at the start of `plan()`, popped in plan order by `apply_region()`), so duplicate ids in one region still pair with the right object. `crc.core.engine` calls `plan()` and `apply()` on the same instance (`crc/core/engine.py:99-100`), so the state is always there. No behaviour change: same SDK calls, logs and results; the test was strengthened (`dict(candidate.extra) == {"protected": False}`), not weakened.
+- **Citations in `docs/refactor/bugs/pending/AWS-1.md`**: correct. `git show main:crc.py` has `def delete_vpc` at `:929`, `vpc.delete()` at `:939`, `for cloud in clouds` at `:1532`, `for resource in resources` at `:1544` and the `vpc` branch at `:1586-1587`; `_get_filter`'s body is `main:crc/aws/vpc.py:86-92`. Every other row's line range was re-checked against `main` and is right.
+
+### Independent review
+
+- **Parity (adapter path)**: `VPC.delete()` matches `main:crc/aws/vpc.py:144-252` call for call: filter before regions, per region `boto3.client` then `boto3.resource`, listing, `extend` before the dry-run check, protection check, then the eleven teardown steps and the 5-attempt `delete_vpc` loop in `main`'s order, the same `CONNECTIVITY_ERRORS` scope and the same summary lines. `should_skip()` equals `main:crc/aws/vpc.py:102-127`: `policy.exception_tags_any({k: v}, spec)` is `k in spec and (not spec[k] or v in spec[k])`, evaluated per tag with the same early return and `KeyError`s; `policy.notags_all(all_tags, notags or {})` gives `False` for empty or `None` notags (`crc/core/policy.py:151-156`), as `main`'s `if self.notags:` does. `delete()` no longer routes through `self._get_filter()` / `self._should_skip_vpc()`, but nothing patches or overrides them (`git grep` finds only the parity tests calling them directly).
+- **Cleaner path**: `plan()` is read-only (listing and protection only; ARCH-005 passes). The two documented differences (protection decided for a whole region up front; all regions listed before any delete) are real and are the only ones I found; the harness relaxes exactly those and nothing else. The Cleaner path creates the boto3 client twice per region (once in `plan()`, discarded, once in `apply()`), which is not an API call.
+- **Safety**: no age gate weakened (there is none on `main`), no fail-open parsing introduced, dry run makes no mutating call in either path, connectivity errors still skip the region and `describe_regions` errors still raise (SAF-001, SAF-004). No safety test touched.
+- **Tests**: the adapter parity test asserts exact equality of calls, error, ids, count, logs and stdout for 90 cases; quirk checks assert the quirk on the oracle and on the new code; the oracle is byte-identical to `main` (`diff` empty). The focused tests assert outcomes; `test_plan_in_dry_run_does_not_evaluate_protection` is meaningful (with an untagged fake an evaluated check would raise `TypeError`).
+- **Architecture and typing**: no SDK object crosses the boundary; boto3 is behind Protocols in `crc/aws/vpc_api.py`; the only `cast` is the deliberate BUG-012 one; ratchet lines for `crc/aws/vpc.py` / `crc.aws.vpc` removed with nothing added; ruff limits not raised; ARCH-002 symbol list in sync.
+
+### BLOCKING (fixed)
+
+1. **Misattributed safety citations in `crc/aws/README.md`** (VPC bullet under Safety Invariants): it cited SAF-006 (`Service.is_old({})` is True, `CLEANUP_SAFETY.md:46-47`) for "never runs in a dry run" and for the missing age gate, and SAF-003 (AWS disk per-volume error handling, `CLEANUP_SAFETY.md:29-32`) for "every listed VPC is recorded as deleted". The VPC module uses neither `is_old` nor per-resource error handling. Removed the three wrong references; the BUG-012 and pending-file references stay.
+2. **Quirks missed by round 1** (existing code on `main`, not fixed, added to `docs/refactor/bugs/pending/AWS-1.md`): instances in a selected VPC are terminated with no check of the instance itself (`main:crc/aws/vpc.py:188-191`, medium, deletes what it should keep); NAT / egress-only / VPN / transit gateway dependencies and requester-managed interfaces are not handled (`:170-226`, `:225`, low); the default DHCP step's `if` is dead and the custom DHCP options set leaks (`:170-173`, low); "after 5 retries" for 5 attempts (`:238-240`, low, BUG-044 shape). Also clarified the pending file header (rows cite `crc.py` too) and updated the quirk count in the Coding summary.
+
+### NIT (left)
+
+- `VpcCleaner.apply()` depends on `plan()` having been called on the same instance (`crc/aws/vpc.py:260`); an `apply()` with a plan from another instance raises `KeyError`. Fine for the engine, worth a docstring line when the engine wiring rung lands.
+- `VpcCleaner.apply()` in dry run returns the planned ids as `succeeded` (`crc/aws/vpc.py:203-204`, round 1's NIT); unreachable from the engine.
+- `tests/test_aws_vpc.py:104`: unused `caplog` parameter in `test_plan_in_dry_run_does_not_evaluate_protection`.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check` (after the fixes):
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed |
+| `mypy` (`crc`, `tests`) | Success: no issues found in 86 source files |
+| `lint-imports` | Contracts: 5 kept, 0 broken |
+| `pytest -q` | 3005 passed |
+
+Test count: 3005 (unchanged by round 2; 2703 before AWS-1).
+
+ROUND 2 VERDICT: APPROVE
