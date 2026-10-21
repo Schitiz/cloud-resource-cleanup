@@ -15,7 +15,9 @@ and its frozen DTOs), `crc.core.registry` (decorator registration by cloud and k
 `crc.core.report` (the report model that reproduces what `crc.py` sends to Slack and
 InfluxDB). `crc.core.engine` runs the registered cleaners of a selection and
 `crc.core.selection` holds the `--cloud` / `--resource` expansion and opt-in gates of
-`crc.py main()`. Nothing is registered or wired yet.
+`crc.py main()`. Nothing is registered or wired yet; the Slack and Influx notifiers that
+implement the engine's `Notifier` protocol live in `crc.notify` (R3) and `crc.py` already
+sends its notifications through them.
 
 ## Public API
 
@@ -146,7 +148,7 @@ Engine (module engine.py). Orchestration only; Slack and Influx senders are inje
 - `MAX_AGE` can still shorten a floor inside `is_old`, including to zero (SAF-010).
   Never add another place where it shortens a floor set by another flag.
 - This package never imports `crc.aws`, `crc.azu`, `crc.gcp`, `crc.oci`,
-  `crc.notifications`, `crc.service` or any cloud, Slack or Influx SDK
+  `crc.notifications`, `crc.notify`, `crc.service` or any cloud, Slack or Influx SDK
   (import-linter contracts in `pyproject.toml`).
 - Log messages are part of the behaviour; keep them identical.
 - `Cleaner.plan()` never mutates cloud state, since `--dry_run` is `plan()` without `apply()`

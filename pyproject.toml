@@ -49,7 +49,6 @@ extend-exclude = [
     "crc/gcp/ip.py",
     "crc/gcp/spot_vm.py",
     "crc/gcp/vm.py",
-    "crc/notifications.py",
     "crc/oci/__init__.py",
     "crc/oci/_base.py",
     "crc/oci/connectivity.py",
@@ -116,7 +115,6 @@ module = [
     "crc.gcp.ip",
     "crc.gcp.spot_vm",
     "crc.gcp.vm",
-    "crc.notifications",
     "crc.oci",
     "crc.oci._base",
     "crc.oci.connectivity",
@@ -169,3 +167,21 @@ forbidden_modules = [
     "slack_sdk",
     "influxdb_client",
 ]
+
+[[tool.importlinter.contracts]]
+name = "Notify never imports cloud packages or services"
+type = "forbidden"
+source_modules = ["crc.notify"]
+forbidden_modules = [
+    "crc.aws",
+    "crc.azu",
+    "crc.gcp",
+    "crc.oci",
+    "crc.service",
+]
+
+[[tool.importlinter.contracts]]
+name = "Core never imports notify"
+type = "forbidden"
+source_modules = ["crc.core"]
+forbidden_modules = ["crc.notify"]

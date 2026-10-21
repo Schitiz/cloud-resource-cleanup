@@ -20,6 +20,10 @@ age rows therefore cite `main`'s `crc/service.py`.
    cosmetic. Risk is critical, high, medium or low. "Exists on main" is yes only after a check
    of `main`.
 
+From R3 the notification quirks (BUG-028 to BUG-034, BUG-041, BUG-042) live in `crc/notify/slack.py`
+and `crc/notify/influx.py`; `crc.py` still holds the duplicate definition and the `"#" + channel`
+prefix is applied by `SlackNotifier.post`. The `Location on main` column keeps citing `crc.py`.
+
 Related: `docs/refactor/FILTER_VARIANTS.md` (how each module filters, section 7 open items),
 `CLEANUP_SAFETY.md` (SAF IDs), `docs/refactor/STATUS.md` (rung log).
 
@@ -65,10 +69,12 @@ Related: `docs/refactor/FILTER_VARIANTS.md` (how each module filters, section 7 
 | BUG-038 | `clouds == "all"` is always False after `clouds` became a list, so the scan list comes from the dead else branch | `crc.py:1439` | yes | cosmetic | low | R2b | open |
 | BUG-039 | An `--operation_type` other than `delete` or `stop` silently does nothing for `vm` (unreachable via argparse `choices`) | `crc.py:1576-1584` | yes | cosmetic | low | R2b | open |
 | BUG-040 | `--cloud all --resource snapshot` runs the AWS `Snapshot(age_days=90).delete()` once per cloud (4 times): the snapshot branch sits inside `for cloud in clouds` and ignores `cloud`; later passes repeat the AWS scan and the dry-run message | `crc.py:39`, `:1532`, `:1544`, `:1629-1643` | yes | cosmetic | low | R2c round 2 | open |
+| BUG-041 | When `usergroups_list` fails, `get_user_groups_list` returns the string `"not_found"`; `ping_on_slack` iterates it as a list of groups, so the first owner without a Slack user raises `TypeError: string indices must be integers` and the remaining owners are not pinged | `crc.py:224-228`, `:245`, `:258-259` | yes | run fails | low | R3 | open |
+| BUG-042 | In `ping_on_slack`, `conversations_open` and the `response["channel"]["id"]` read are outside the `try`, so a failure there aborts the whole disk notification and the run (the post itself is guarded) | `crc.py:296-299` (the `try` starts at `:301`) | yes | run fails | low | R3 | open |
 
 ## Counts
 
-40 rows: critical 2, high 7, medium 9, low 22. All open.
+42 rows: critical 2, high 7, medium 9, low 24. All open.
 
 ## Notes
 

@@ -7,6 +7,10 @@ credentials; SDK clients are mocked. Layout:
 
 - `test_core_*.py`: pure tests of `crc/core` (age, policy, cleaner, registry, report, selection, engine).
   Some compare against `crc.py` itself, loaded under another module name.
+- `test_notify_slack.py`, `test_notify_influx.py`: `crc/notify` with fake clients asserting the exact calls.
+  `test_notify_parity.py` runs the same inputs through `legacy_crc_notify_reference.txt` (a frozen
+  copy of the old `crc.py` Slack and Influx methods, not a Python module), the current `crc.py` and
+  the notifiers.
 - `test_aws_*.py`, `test_azu_*.py`, `test_gcp_*.py`, `test_oci_*.py`: mocked tests of the legacy
   cloud modules, several of them locked by `SAF-LOCK`.
 - `archtest/`: mechanical architecture checks (see `tests/archtest/README.md`).
