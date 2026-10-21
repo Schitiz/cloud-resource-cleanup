@@ -81,3 +81,37 @@ None.
 Test count: 4681 before GCP-4 (`e7926e2`), 5042 on `050c45b`, 5043 after Round 1 (+362 total: 354 in `tests/test_gcp_spot_instances_parity.py`, 8 in `tests/test_gcp_spot_instances.py`).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff e7926e2..HEAD` (both commits), re-read against `git show main:crc/gcp/spot_vm.py`, `crc/core/policy.py`, `crc/core/age.py`, `crc/core/engine.py`, `CLEANUP_SAFETY.md` (SAF-039, SAF-044) and the review checklist.
+
+### Round 1 fixes assessment
+
+Round 1 changed only docs and one quirk assertion: the row 4 and row 11 citations in `docs/refactor/bugs/pending/GCP-4.md` (verified: `main:crc/gcp/spot_vm.py:346-354` is the `with` / zones / `InstancesClient()` / `zone_obj["name"]` block; `:176-192`, `:274-306`, `:316-318`, `:379-407` are the dry-run disk path), the new bare-name row (`:401` appends `instance.name`), and a `same-name-two-zones` quirk check. No code or existing test changed, nothing was weakened. Correct.
+
+### Independent review
+
+- Parity: every filter, log line, SDK call and order in `instances.py`, `disks.py`, `operations.py`, `cleaner.py` and `adapter.py` matches `main:crc/gcp/spot_vm.py:63-430`. Checked the non-obvious equivalences: `policy.should_skip_by_tags` / `filter_tags_all_keys` reproduce `key in labels and (not value or labels[key] in value)`; `policy.effective_age` is `retention_age or age`; `core_age.validated_retention_age(..., key or "")` returns `None` for a `None` key as `Service.validated_retention_age` does; `clock().astimezone(created.tzinfo)` with the default naive `datetime.now` equals `datetime.now(tz=created.tzinfo)`; `ExitStack` closes the discovery service before the summary and an exception still skips the summary, as the `with` on main does; `InstancesClient()` is built right after the zones listing, also for an empty listing.
+- Safety: SAF-039 (disks only after the zone operation is DONE without error), SAF-041 (fail closed custom age, positive `age`), SAF-044 (disk label check), SAF-045 hold. `plan()` makes no mutating call; the dry-run disk GETs are reads. `engine.py:100` never calls `apply()` in a dry run, so the dry-run summary is logged once (by `plan()`).
+- Tests: the parity table compares ordered SDK calls, results, logs and errors against the oracle (byte-identical to main); unit tests assert outcomes and call order; no vacuous, skipped or xfail'd test.
+- Typing / ratchet: only the `spot_vm` lines were removed from both lists in `pyproject.toml`; no new override; no unjustified `type: ignore`.
+
+### BLOCKING (fixed)
+
+- Lane rule: `crc/gcp/README.md` renumbered the shared `## Extension Rules` list (inserted a Spot VM rule 5, shifting disk to 6 and BUGS to 7), outside the module's `### spot_vm` subsection and a merge-conflict risk with the other GCP lanes. Restored the list to its `e7926e2` text and moved the parity-oracle rule into `### spot_vm`. No behaviour or test change.
+
+### NIT (left)
+
+- `crc/gcp/README.md` still has one-line edits outside `### spot_vm` (the "Partly refactored" sentence, the `spot_vm/` module bullet, `SpotVM` dropped from the legacy list in `## Public API`). They keep the README accurate; left, but expect a trivial merge with other GCP lanes.
+- `cleaner.py:205-206`: `instance_delete_wait_sec` / `instance_poll_interval_sec` factory options are not validated (a string would fail inside the wait); not reachable from `crc.py` today.
+- Round 1 NITs (`client or ComputeSpotClient()` in `adapter.py:64`; `normalize_tags` turning a non-mapping disk `labels` into `{}` in `instances.py:38`) agreed, both unreachable with real SDK responses.
+- New quirk recorded in `docs/refactor/bugs/pending/GCP-4.md`: a leftover `autoDelete=false` disk is gated only by `exception_labels` / `notags` on its own labels (no own age, `filter_labels` or `users` check), `main:crc/gcp/spot_vm.py:273-306`, `:402-407`.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`: `ruff check .` all passed; `mypy` no issues in 113 source files; `lint-imports` 5 kept, 0 broken; `pytest -q` 5043 passed. After the README fix, the archtest / README tests (`-k "arch or readme"`, 98) pass again.
+
+Test count: 5043 passed (4681 before the rung, +362).
+
+ROUND 2 VERDICT: APPROVE

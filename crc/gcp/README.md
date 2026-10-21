@@ -46,7 +46,7 @@ __init__.py holds only a copyright comment and declares no __all__.
 
 ### spot_vm
 
-`crc/gcp/spot_vm/` (GCP-4) is a subpackage with its own README (public names, safety invariants). `SpotVMCleaner` is registered as `gcp` / `spot_instances` (`build_spot_cleaner`); `SpotVM` is the adapter the CLI calls (`delete()`, `get_deleted`, `delete_count`, `get_deleted_disks`; same constructor plus two optional trailing arguments). It deletes Spot or preemptible VMs (RUNNING, TERMINATED, SUSPENDED) that match `filter_labels` (all keys) and the age gate, skips GKE nodes and managed instance group members, then deletes `autoDelete=false` disks after the instance operation completes (SAF-039, SAF-044, SAF-045). Behaviour is the same as `main`; the parity test is `tests/test_gcp_spot_instances_parity.py`. Quirks are in `docs/refactor/bugs/pending/GCP-4.md`.
+`crc/gcp/spot_vm/` (GCP-4) is a subpackage with its own README (public names, safety invariants). `SpotVMCleaner` is registered as `gcp` / `spot_instances` (`build_spot_cleaner`); `SpotVM` is the adapter the CLI calls (`delete()`, `get_deleted`, `delete_count`, `get_deleted_disks`; same constructor plus two optional trailing arguments). It deletes Spot or preemptible VMs (RUNNING, TERMINATED, SUSPENDED) that match `filter_labels` (all keys) and the age gate, skips GKE nodes and managed instance group members, then deletes `autoDelete=false` disks after the instance operation completes (SAF-039, SAF-044, SAF-045). Behaviour is the same as `main`; any change needs `tests/test_gcp_spot_instances_parity.py` (oracle `tests/legacy/gcp_spot_vm.txt`, a frozen copy of `main`, never edit it) to stay green. Quirks are in `docs/refactor/bugs/pending/GCP-4.md`.
 
 ## Extension Rules
 
@@ -57,6 +57,5 @@ __init__.py holds only a copyright comment and declares no __all__.
 3. Refactoring a module means removing it from the ruff `extend-exclude` and mypy override lists in
    the same change (the legacy ratchet only shrinks), then updating this README and its symbol list.
 4. GCP IP changes need `tests/test_gcp_ip_parity.py` (oracle `tests/legacy/gcp_ip.txt`, a frozen copy of `main`, never edit it) to stay green.
-5. GCP Spot VM changes need `tests/test_gcp_spot_instances_parity.py` (oracle `tests/legacy/gcp_spot_vm.txt`, a frozen copy of `main`, never edit it) to stay green.
-6. GCP disk changes need `tests/test_gcp_disk_parity.py` (oracle `tests/legacy/gcp_disk.txt`, a frozen copy of `main`, never edit it) to stay green.
-7. Record every new bug or quirk in `docs/refactor/BUGS.md` with its `main` file:line.
+5. GCP disk changes need `tests/test_gcp_disk_parity.py` (oracle `tests/legacy/gcp_disk.txt`, a frozen copy of `main`, never edit it) to stay green.
+6. Record every new bug or quirk in `docs/refactor/BUGS.md` with its `main` file:line.
