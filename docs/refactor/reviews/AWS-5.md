@@ -9,7 +9,7 @@ Rung AWS-5: `crc/aws/spot_instance_requests.py` refactored into the subpackage `
   - The wait deadline uses `time.monotonic()` instead of `time.time()` (ARCH-003); recorded as a quirk.
   - Age is checked against `context.now` (adapter: injected UTC clock read per call) instead of `datetime.now()` per request.
   - `apply()` in a dry run makes no call and returns the plan's ids; failures are not returned in `Result.failed` (main only logs them).
-  - 9 quirks in `docs/refactor/bugs/pending/AWS-5.md`.
+  - 10 quirks in `docs/refactor/bugs/pending/AWS-5.md`.
 - **Core changes needed.** None.
 - **`FILTER_VARIANTS.md` change needed (not edited).** In the `aws/spot_instance_requests.py` row: the module is now the subpackage `crc/aws/spot_instance_requests/`; filtering is in `rules.py` (`policy.filter_tags_glob_all_keys`, `policy.exception_tags_any` per tag entry, `policy.notags_all`, `policy.aws_spot_has_sensitive_yb_task`), age in `requests.py` / `volumes.py` (`validated_retention_age` + `is_old`); main line numbers unchanged; oracle `tests/legacy/aws_spot_instance_requests.txt`.
 - **`crc/README.md` / `tests/README.md` / `tests/legacy/README.md` (not edited).** `tests/legacy/README.md` should list `aws_spot_instance_requests.txt` (exact `git show main:crc/aws/spot_instance_requests.py`, run by `tests/test_aws_spot_instance_requests_parity.py`); `tests/README.md` should list `test_aws_spot_instance_requests_parity.py` and `test_aws_spot_instance_requests_cleaner.py`. `crc/README.md` should note the module is now a subpackage.
@@ -40,3 +40,31 @@ Rung AWS-5: `crc/aws/spot_instance_requests.py` refactored into the subpackage `
    - `pytest -q`: **4917 passed**
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+### Round 1 fixes assessment
+
+- **Report shape (`crc/aws/spot_instance_requests/cleaner.py:201-209`, `:229-253`): correct.** `crc.py:334-335` reports `get_deleted` (requests + instances) under `SPOT_INSTANCE_REQUEST` and `volumes_to_delete` separately; `crc.core.engine.run` (`crc/core/engine.py:99-105`) uses `Report.from_plan` in a dry run and `Report.from_result` otherwise, and `crc/core/report.py:56-66` turns every `related` key into a section, so `related={DISK: ...}` with requests + instances as ids is the shape locked by `tests/test_core_report.py:153-166` and `:272-284`. Behaviour of the legacy adapter path is untouched. The test edits replace `"Regions"`/`"Instance"`/`"Volume"` lookups with stricter equality on `succeeded` / `related` plus `Report` payload assertions: strengthened, not weakened. Mutation check: reporting only `spot_requests_to_delete` from `plan()`/`apply()` fails 38 tests.
+- **`SENSITIVE_YB_TASK` on the adapter (`adapter.py:47`): correct.** Same values as `main:crc/aws/spot_instance_requests.py:67-74`, taken from `crc.core.policy.SENSITIVE_YB_TASK`; asserted in `tests/test_aws_spot_instance_requests_cleaner.py`.
+- **Pending bugs table: correct.** Rechecked every row's lines with `git show main:crc/aws/spot_instance_requests.py` (`:210-226`, `:320-326`, `:670-677`, `:773-774`, `:854-862`, `:967-998`, `:1021-1022`, `:1028-1031`, `:1078-1082`, `:1087-1143`); all point at the described code. `Effect` values now follow `docs/refactor/BUGS.md` rule 5.
+
+### New findings
+
+- **NIT (fixed, docs): package README overstated parity of the Cleaner path (`crc/aws/spot_instance_requests/README.md`, Safety Invariants, last bullet).** It said "abnormal runs only" and "every log line [is] the same"; the difference applies to every real run with more than one region, and only the multiset of log lines is equal (this is what `tests/test_aws_spot_instance_requests_parity.py:861-878` asserts). Reworded to match the coding summary and the test.
+- **NEW quirk (recorded, not fixed): non-boto exception from cancel keeps the leftover markers** (`main:crc/aws/spot_instance_requests.py:885-897`, `:899-925`, `:1125-1131`). The refactor keeps it (`cleanup.py:_cancel` catches `ERRORS` only; `cleaner.py:guarded_cleanup` logs). Added to `docs/refactor/bugs/pending/AWS-5.md`; coding summary count updated to 10.
+- **NIT (left): adapter and Cleaner read the clock once per region / per sweep instead of `datetime.now()` per request (`adapter.py:_process_region`, `_sweep_tagged_leftover_volumes`; `cleaner.py` uses `context.now`).** Already listed in the coding summary; an earlier `now` can only keep more, never delete more.
+- **NIT (left): the package `crc.aws.spot_instance_requests` no longer exposes the module-level names `boto3`, `get_all_regions`, `time` of main**, so a `monkeypatch.setattr("crc.aws.spot_instance_requests.get_all_regions", ...)` would now fail loudly. No caller or test in the repo does this; all existing tests pass unchanged.
+
+### Independent review (what I checked)
+
+- Behaviour parity, line by line against main: filter build and server-side filter (`requests.py`, BUG-021), `_get_filtered_requests` order of gates (untagged, cancelled without instance, skip, filter, custom age fail-closed, age), `_should_skip_spot_request` (per-entry exception, notags on the last value per key via `policy.notags_all`), sensitive `yb_task`, `_passes_age_gate` including the naive-datetime path, instance state / DoT=false lookup, tag before cancel, cancel error handling and invalidation, terminate (NotFound/Malformed, `ClientError`, ambiguous re-describe), wait-and-delete loop, retried-request counting, sweep gates (live vs gone request, volume-own protection, invalid sentinel), dry-run preview, region loop and summary warnings. No behaviour difference on the adapter path.
+- CLEANUP_SAFETY.md SAF-026 to SAF-036: order tag, cancel, terminate, wait, delete intact; cancel failure aborts termination and invalidates markers; ambiguous terminate re-check intact; `--age` required and positive (`settings_from_options`, adapter `require_positive_age`); untagged and bad custom age tag kept. `plan()` makes describe calls only (mutating calls live in `leftover.py` / `cleanup.py`, reached from `apply()`).
+- Tests assert outcomes: parity compares ordered SDK calls, ids, volumes, logs and errors against the byte-identical oracle on both paths. Mutation check: making `should_skip` ignore `notags` fails 4 parity cases.
+- Architecture: registered via decorator, collaborators injected (`SpotRuntime`), SDK behind `SpotClient` Protocol, files at most 292 lines, import-linter green. `pyproject.toml` only drops this module's two ratchet lines. `crc/aws/README.md` change is confined to the `### spot_instance_requests` subsection. No forbidden file touched.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`: `ruff check .` all checks passed; `mypy` no issues in 116 source files; `lint-imports` 5 contracts kept, 0 broken; `pytest -q` **4917 passed** (same as round 1, 4681 before the rung).
+
+ROUND 2 VERDICT: APPROVE
