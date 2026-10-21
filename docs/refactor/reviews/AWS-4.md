@@ -74,3 +74,73 @@ Scope reviewed: `git diff e7926e2..HEAD` (`crc/aws/disk/__init__.py`, `crc/aws/d
 Test count: 4681 before AWS-4 (`e7926e2`), 5210 before review, 5212 after review additions (+531).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff e7926e2..HEAD` (4 commits, including round 1's `391cfb7`), compared with `git show main:crc/aws/disk.py`, `AGENTS.md`, `ARCHITECTURE.md`, `docs/refactor/BUGS.md`, `CLEANUP_SAFETY.md` and `.cursor/skills/crc-python-refactor/REVIEW_CHECKLIST.md`.
+
+### Round 1 fixes assessment
+
+- `Disk.SENSITIVE_YB_TASK` restored (`crc/aws/disk/__init__.py:75`): correct. It is `policy.SENSITIVE_YB_TASK` (a `frozenset`) where main has a mutable `set` (`main:crc/aws/disk.py:67-74`). The two are equal, nothing reads or mutates it, and there is no behaviour change.
+- `test_cleaner_protocol_matches_main` (`tests/test_aws_disk_parity.py:990-993`): the guard removal makes the test stronger. All error and single-region cases now assert `calls` and `logs` equality.
+- `test_cleaner_error_path_never_deletes_after_listing_error` (`tests/test_aws_disk_parity.py:1020-1026`): this is no longer vacuous. Dry runs and error cases assert no `delete_volume` call. Live runs assert that every read precedes every delete (`new.calls == reads + deletes`).
+- `yb-task-key-variants` case `f` and its quirk check: correct (duplicate `yb_task` keys collapse to the last value, as `_tag_map` does on main at `:170-171`).
+- `test_second_delete_accumulates_and_count_logs_like_main` and `test_adapter_private_helpers_match_main`: both compare the oracle with the adapter and assert concrete outcomes.
+- Pending rows: the `Effect` values now conform to `BUGS.md`. I spot-checked these rows against `git show main:crc/aws/disk.py`: yb_task first match at `:173-178` and `:236-243`, auth-code skip at `:326-337`, duplicate keys at `:170-171`, `:400` and `crc/service.py:302`, and `disks_to_delete` at `:89` and `:130-133`. All citations are accurate.
+- No round 1 change altered production behaviour or weakened a test.
+
+### Independent review
+
+- **Parity, adapter path.** I traced every decision against main:
+  - Constructor validation order and messages (`settings.py:61-99` vs `main:99-123`, `:135-168`).
+  - Untagged, filter-tag, name-regex, `should_skip` order, exception tags one key at a time, notags, exception regex (`volumes.py:62-122` vs `main:235-271`, `:367-393`).
+  - CreateTime floor and custom age tag (`volumes.py:136-159` vs `main:395-452`).
+  - CloudWatch batching, query ids, paging, merge and fail-closed reasons (`detach.py` vs `main:461-625`).
+  - Labels (`volumes.py:23-34` vs `main:627-637`).
+  - Region error policy (`cleaner.py:115-132` vs `main:324-342`).
+  - Summary lines (`cleaner.py:174-193` vs `main:344-365`).
+
+  The policy helpers I checked (`filter_tags_glob_all_keys`, `exception_tags_any` / `_key_matches`, `notags_all`, `aws_disk_yb_task`, `is_sensitive_yb_task`, `aws_disk_skips_kubernetes`, `aws_disk_creation_floor`, `is_older_than_floor`, `compile_patterns`, `age_to_timedelta`) match main's inline code expression for expression.
+
+  Labels are now computed in `plan_region` (after CloudWatch) instead of inside the delete loop. `volume_label` can only raise on inputs that already raised in `is_candidate` (non-dict tag entries, non-string keys or values), so the per-volume log order cannot diverge.
+- **Oracle.** `diff <(git show main:crc/aws/disk.py) tests/legacy/aws_disk.txt` is empty. `tests/test_aws_disk.py`, `crc.py` and `crc/core/**` are unchanged since `e7926e2`.
+- **Safety.**
+  - `plan()` makes no mutating call (ARCH-005 archtest passes).
+  - The age gate is required, and the floor ignores `MAX_AGE` (SAF-006, SAF-010).
+  - Incomplete or failed CloudWatch answers keep the volume (`detach.py:104-118`, `:162-172`).
+  - Non-connectivity `describe_regions` errors still propagate (SAF-004).
+  - The `aws` + `disk` breaker lives in `crc.py`, which is untouched (SAF-014).
+- **Tests are not vacuous.** I removed `self.had_errors = True` from `DiskCleaner._delete_volume` (`cleaner.py:250`). Nine tests across the parity, cleaner and legacy `tests/test_aws_disk.py` suites failed; I then restored the line.
+- **Architecture, typing and lane.** `import-linter` keeps 5 contracts, and `mypy` strict and `ruff` are clean. Both ratchet lines were removed from `pyproject.toml` and nothing was added. Every file is under 400 lines, and the package README symbol list matches the code. `crc/aws/README.md` adds only `### disk` subsections plus the `disk` bullet.
+
+### BLOCKING (fixed)
+
+None.
+
+### NIT (left)
+
+1. **The coding summary's first open issue is inaccurate for this module.** It claims "a listing error in a later region is raised before earlier regions are deleted". In fact, `region_guard` (`crc/aws/disk/cleaner.py:115-132`) swallows every region error in `plan()`, and only `describe_regions` errors propagate, which happens before any region. The real difference is only the interleaving of delete calls and log lines. `crc/aws/disk/README.md` and the `### disk` safety subsection describe this correctly.
+2. **`Result.failed` holds only `ClientError` delete failures.** A non-`ClientError` delete failure is logged as "failed considering volume" and flagged, but is not added to `Result.failed` (`crc/aws/disk/cleaner.py:165-167`). Main has no `Result`, and the adapter ignores `failed`, so there is no parity impact.
+3. **The CloudWatch window end differs slightly in the Cleaner path.** It is `RunContext.now` (`cleaner.py:221-224`), whereas main reads the clock right before the CloudWatch call (`main:550`). The window therefore shifts by the listing time (seconds). The adapter calls the clock afresh at that point (`__init__.py:160-163`) and matches main.
+4. **`DiskCleaner._clients` keeps per-region EC2 clients for the life of the instance** (`cleaner.py:76`, `:139`, `:159`). This is harmless for one run per instance.
+5. **One test assertion is weak.** `assert len(deletes) >= len(new.deleted)` (`tests/test_aws_disk_parity.py:1026`) adds little, but the ordering assertion before it carries the check.
+6. **Shared docs still name `crc/aws/disk.py`** (`CLEANUP_SAFETY.md:73`, `docs/refactor/FILTER_VARIANTS.md`). These are outside the lane; the coding summary lists the needed changes for the integrator.
+
+### New bugs
+
+One row added to `docs/refactor/bugs/pending/AWS-4.md`. Server-side EC2 tag filters support only `*` and `?`, but the client-side `fnmatchcase` re-check also treats `[...]` as a character class. As a result, a `filter_tags` value containing `[` never matches, and those volumes are kept (`main:crc/aws/disk.py:213-220`, `:273-280`, `:295`; keeps what it should delete, low).
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`:
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed |
+| `mypy` | Success: no issues found in 111 source files |
+| `lint-imports` | Contracts: 5 kept, 0 broken |
+| `pytest -q` | 5212 passed |
+
+Test count: 5212 (4681 before the rung; no change in round 2).
+
+ROUND 2 VERDICT: APPROVE
