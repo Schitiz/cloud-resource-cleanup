@@ -194,12 +194,18 @@ CASES = [
         [key("k1", tags=[*tag_list({"a": "1"}), *tag_list({"a": "2"})])],
         filter_tags={"a": ["1", "2"]},
     ),
+    Case(
+        "filter-non-iterable-second-key-after-mismatch-skips-with-warning",
+        [key("k1", tags=tag_list({"a": "2"}))],
+        filter_tags={"a": ["1"], "b": None},
+    ),
     # tags in the response
     Case("tags-absent-from-response", [key("k1", tags=ABSENT)]),
     Case("tags-none", [key("k1", tags=None)]),
     Case("tags-none-with-filter", [key("k1", tags=None)], filter_tags={"a": ["1"]}),
     Case("tag-without-value", [key("k1", tags=[{"TagKey": "a"}])]),
     Case("tag-without-key", [key("k1", tags=[{"TagValue": "a"}])]),
+    Case("tag-unhashable-value-skips", [key("k1", tags=[{"TagKey": "a", "TagValue": ["1"]}])]),
     Case("list-resource-tags-error-skips", [key("k1", tags=client_error("ListResourceTags"))]),
     Case(
         "list-resource-tags-error-on-one-key",
@@ -682,6 +688,7 @@ def test_cleaner_protocol_matches_main(
     assert new.error == old.error
     assert new.stdout == old.stdout
     assert _without_client(new.calls) == _without_client(old.calls)
+    assert all(c == ("client", "kms", "us-west-2") for c in new.calls if c[0] == "client")
     assert new.logs == old.logs
     assert new.deleted == old.deleted
     if case.fails_in_plan:
@@ -701,6 +708,14 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
     ("filter-empty-value-list-adds-no-constraint", lambda o: o.deleted == ["k1", "k2"]),
     ("filter-repeated-tag-key-keeps-every-value", lambda o: o.deleted == ["k1"]),
     ("filter-repeated-tag-key-both-values", lambda o: o.deleted == ["k1"]),
+    (
+        "filter-non-iterable-second-key-after-mismatch-skips-with-warning",
+        lambda o: o.deleted == [] and ("KEY SKIPPED k1" in [m for _, _, m in o.logs]),
+    ),
+    (
+        "tag-unhashable-value-skips",
+        lambda o: o.deleted == [] and ("KEY SKIPPED k1" in [m for _, _, m in o.logs]),
+    ),
     ("filter-string-value-iterates-characters", lambda o: o.deleted == ["k1"]),
     ("exception-set-tagged-key-keyerror-skips", lambda o: o.deleted == ["k2"]),
     ("exception-set-untagged-key-proceeds", lambda o: o.deleted == ["k1"]),

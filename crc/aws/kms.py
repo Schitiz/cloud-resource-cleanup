@@ -105,16 +105,17 @@ def _log_summary(deleted: Sequence[str], *, dry_run: bool) -> None:
         logging.warning(f"List of AWS KMS (Total: {len(items)}) which will be deleted: {items}")
 
 
-def _has_all_pairs(pairs: Sequence[tuple[str, str]], spec: TagSpec | None) -> bool:
+def _has_all_pairs(response_tags: Iterable[Mapping[str, Any]], spec: TagSpec | None) -> bool:
     # One tag at a time: main compares sets of (key, value) pairs, so a repeated TagKey keeps
     # every one of its values.
+    response_set = {(tag["TagKey"], tag["TagValue"]) for tag in response_tags}
+    filter_set = {(k, v) for k, values in spec.items() for v in values} if spec else set()
     return all(
         any(
             policy.filter_tags_exact_pairs({key: value}, {wanted_key: [wanted]})
-            for key, value in pairs
+            for key, value in response_set
         )
-        for wanted_key, wanted_values in (spec or {}).items()
-        for wanted in wanted_values
+        for wanted_key, wanted in filter_set
     )
 
 
@@ -202,8 +203,7 @@ class KmsCleaner:
 
     def _select_key(self, client: KmsClient, key_id: str, active: list[str], clock: Clock) -> None:
         response_tags = client.list_resource_tags(KeyId=key_id).get("Tags", [])
-        pairs = [(tag["TagKey"], tag["TagValue"]) for tag in response_tags]
-        if not _has_all_pairs(pairs, self._settings.filter_tags):
+        if not _has_all_pairs(response_tags, self._settings.filter_tags):
             return
         if self._should_skip(response_tags):
             return

@@ -87,10 +87,11 @@ Related: `docs/refactor/FILTER_VARIANTS.md` (how each module filters, section 7 
 | BUG-056 | AWS KMS key with several policy statements naming `kms_user` is added to `active_keys` once per statement, so `schedule_key_deletion` is called twice for it; the second call fails on a key already pending deletion (`KMSInvalidStateException`), nothing catches it, and the run aborts before `get_deleted` is filled | `crc/aws/kms.py:174-180`, `:188-192` | yes | run fails | low | R4c | open |
 | BUG-057 | AWS KMS scheduling is not atomic and has no per-key error handling: a `schedule_key_deletion` error aborts the run after earlier keys were scheduled, but `kms_keys_to_delete.extend` runs only after the loop, so those keys are missing from `get_deleted`, Slack and InfluxDB and no summary line is logged | `crc/aws/kms.py:188-196` | yes | cosmetic | low | R4c | open |
 | BUG-058 | AWS KMS logs the warning `Exception tags and not present` for every key when `exception_tags` is empty or `None` (the message is also garbled), flooding the log of a normal run | `crc/aws/kms.py:84-86`, called `:147` | yes | cosmetic | low | R4c | open |
+| BUG-059 | AWS KMS cleanup is hard-coded to `us-west-2` (`get_all_regions` is imported and never called), so KMS keys in every other region are ignored | `crc/aws/kms.py:10`, `:21`, `:113` | yes | keeps what it should delete | low | R4c | open |
 
 ## Counts
 
-54 rows: critical 2, high 7, medium 11, low 34. All open.
+59 rows: critical 2, high 7, medium 12, low 38. All open.
 
 ## Notes
 
