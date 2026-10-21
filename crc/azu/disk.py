@@ -227,11 +227,11 @@ class Disk(Service):
         self,
         resource_group: str,
         dry_run: bool,
-        filter_tags: dict[str, list[str]],
-        exception_tags: dict[str, list[str]],
-        age: dict[str, int],
-        custom_age_tag_key: str,
-        notags: dict[str, list[str]],
+        filter_tags: TagSpec | None,
+        exception_tags: TagSpec | None,
+        age: AgeSpec | None,
+        custom_age_tag_key: str | None,
+        notags: TagSpec | None,
     ) -> None:
         """
         Initialize the Disk management class.

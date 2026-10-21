@@ -454,6 +454,7 @@ def test_cleaner_protocol_matches_main(
         return
     assert _only(new.calls, "begin_delete") == _only(old.calls, "begin_delete")
     if case.error_phase == "apply":
+        assert _groups(new.logs)[1:] == _groups(old.logs)[1:]
         return
     assert new.deleted == old.deleted
     assert new.count == old.count
