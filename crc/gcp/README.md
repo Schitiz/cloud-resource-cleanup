@@ -4,7 +4,7 @@
 
 Legacy GCP cleaners (google-cloud-compute). They delete or stop leftover instances, disks and addresses.
 
-**Partly refactored.** `ip.py` (GCP-1) and `disk.py` (GCP-2) are `Cleaner`s (no behaviour change); every other module is legacy, not yet refactored, and the same as on `main`. Any change must follow `ARCHITECTURE.md` and the refactor rung for this package in `docs/refactor/PLAN.md` (Rung R4+), with `make check` green.
+**Partly refactored.** `ip.py` (GCP-1), `disk.py` (GCP-2) and `vm.py` (GCP-3) are `Cleaner`s (no behaviour change); every other module is legacy, not yet refactored, and the same as on `main`. Any change must follow `ARCHITECTURE.md` and the refactor rung for this package in `docs/refactor/PLAN.md` (Rung R4+), with `make check` green.
 
 Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.md`):
 
@@ -12,12 +12,12 @@ Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.
 - `disk.py`: `DiskCleaner` (registered as `gcp` / `disk`) and the `Disk` adapter: deletes unattached disks by `last_detach_timestamp` (zonal disks of every zone); label any-key filter; `notags`, `name_regex` and `age` are not used
 - `ip.py`: `IpCleaner` (registered as `gcp` / `ip`) and the `IP` adapter: deletes RESERVED addresses (`AddressesClient().delete`); substring name filters, exception filter inverted
 - `spot_vm.py`: `SpotVM`: deletes preemptible or Spot VMs and leftover disks; skips GKE and managed instance group members
-- `vm.py`: `VM`: deletes or stops (`stop`) RUNNING instances by labels
+- `vm.py`: `VmCleaner` (registered as `gcp` / `vm`) and the `VM` adapter: deletes (`delete`) or stops (`stop`) RUNNING instances by labels (all keys), `notags` and exception labels, and age
 
 ## Public API
 
-ip.py and disk.py are refactored, so the names below are synced with this README by ARCH-002. The other
-modules (get_gcp_regions, SpotVM, VM) are legacy; each has delete(), VM also stop().
+ip.py, disk.py and vm.py are refactored, so the names below are synced with this README by ARCH-002. The other
+modules (get_gcp_regions, SpotVM) are legacy; each has delete().
 __init__.py holds only a copyright comment and declares no __all__.
 
 - `AddressView`: Protocol of the two address fields read (name, status); tests pass fakes.
@@ -33,6 +33,13 @@ __init__.py holds only a copyright comment and declares no __all__.
 - `DiskCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus zones, plan_zone and apply_disk used by the adapter); plan_zone is a lazy generator so the adapter deletes disk by disk while listing, as main does.
 - `build_disk_cleaner()`: registry factory behind @register("gcp", "disk"); reads project_id (ValueError without it), filter_tags, exception_tags, exception_regex, custom_age_tag_key, detach_age, slack_notify_users and slack_user_label from RunContext.options.
 - `Disk`: adapter crc.py calls (delete(), get_deleted, count, disk_names_to_delete, service_name, service_version, time_format, default_disk_state); the optional 13th and 14th constructor arguments inject a client and a clock (default is the current time). Age, notags, name_regex and the disk_state argument of delete() are accepted and ignored, as on main.
+- `InstanceView`: Protocol of the four instance fields read (status, name, labels, creation_timestamp); tests pass fakes.
+- `GcpVmClient`: Protocol of the Compute Engine calls used (list_zones, list_instances, delete_instance, stop_instance); tests pass fakes.
+- `ComputeVmClient`: the google-api-python-client (zones, deletes, stops) plus google-cloud-compute (instance listing) implementation of `GcpVmClient`; like main it builds the discovery service in list_zones, builds the instances client right after the zones were listed and closes the service at that point, and later deletes and stops still use the closed service object.
+- `VmSettings`: frozen dataclass with the fields main reads (project_id, filter_labels, exception_labels, notags, age, custom_age_tag_key, instance_state).
+- `VmCleaner`: the Cleaner (supports DELETE and STOP, read-only plan, mutating apply, plus zones, plan_zone and apply_instance used by the adapter); plan_zone is a lazy generator so the adapter acts instance by instance while listing, as main does.
+- `build_vm_cleaner()`: registry factory behind @register("gcp", "vm"); reads project_id (ValueError without it), filter_tags, exception_tags, notags, age, custom_age_tag_key and instance_state from RunContext.options; the operation (delete or stop) is the RunContext operation.
+- `VM`: adapter crc.py calls (delete(instance_state), stop(), get_deleted, delete_count, get_stopped, stopped_count, instance_names_to_delete, instance_names_to_stop, service_name, service_version, default_instance_state, time_format); the optional eighth and ninth constructor arguments inject a client and a clock (default is the current time). Both lists accumulate over calls, as on main.
 
 ## Safety Invariants
 
@@ -42,6 +49,7 @@ __init__.py holds only a copyright comment and declares no __all__.
 - `GCP_Disk` uses `--detach_age`, never `--age` (SAF-021, SAF-022); Spot VMs skip GKE and instance group members (SAF-045).
 - GCP IP (GCP-1): `plan()` only calls `RegionsClient().list` and `AddressesClient().list`; `AddressesClient().delete` is called from `apply_region()` only and never in a dry run. There is no age gate and no tag filter, so the name filter is the only protection: an empty `filter_regex` selects every RESERVED address (`policy.filter_substring_matches`), and the exception filter is inverted (`policy.gcp_ip_exception_excludes`, BUG-001). No SAF ID is specific to this module. Region and address listing errors and delete errors propagate unchanged (nothing is isolated or skipped, there is no connectivity fallback); a delete error loses the record of the addresses of that region already deleted. `IP.delete()` keeps the call order of `main` (per region: list, filter, deletes); the registered Cleaner lists every region first, then deletes. Quirks are in `docs/refactor/bugs/pending/GCP-1.md`.
 - GCP disk (GCP-2): `plan()` only calls `service.zones().list().execute()` and `DisksClient().list`; `service.disks().delete().execute()` is called from `apply_disk()` only and never in a dry run (ARCH-005). A disk is deleted only when it is unattached (`users` empty), has a `last_detach_timestamp`, is not excluded by `exception_regex` (`policy.exception_regex_match_matches`, `re.match`) or `exception_labels` (`policy.exception_tags_any`), matches `filter_labels` (`policy.filter_tags_any_key`; empty matches all, an unlabelled disk fails an active filter) and is at least as old as the custom age label or else `detach_age` (`policy.effective_age`, `core_age.is_old`, `MAX_AGE` still applies). The age gate is `--detach_age` only (SAF-021, SAF-022): `age` is never read, so `--age` cannot protect a disk; `notags` and `name_regex` are never applied; an empty `detach_age` matches every unattached disk with a detach timestamp; the custom age label is fail open (`get_retention_age`, BUG-004). The clock comes from `RunContext.now` (Cleaner) or the injected `clock` (adapter), never read inside the cleaner. A failed delete is logged (`Error occurred while deleting disk ...`) and skipped, not reported as failed, and not recorded. Zone, disk listing, timestamp parse, regex and `MAX_AGE` errors propagate unchanged (nothing is isolated, no connectivity fallback). `Disk.delete()` keeps the call order of `main` (per zone: list, filter, delete, record, disk by disk); the registered Cleaner lists and filters every zone first, then deletes, so an error while listing a later zone stops before any delete. Quirks are in `docs/refactor/bugs/pending/GCP-2.md`.
+- GCP VM (GCP-3): `plan()` only calls `service.zones().list().execute()` and `InstancesClient().list`; `service.instances().delete()` and `.stop()` (`.execute()`) are called from `apply_instance()` only and never in a dry run (ARCH-005). An instance is acted on only when its status is in `instance_state` (default `RUNNING`, `policy.state_in`), it is not excluded by `exception_labels` (any key) or `notags` (all keys) (`policy.should_skip_by_tags`), carries every `filter_labels` key (`policy.filter_tags_all_keys`; empty matches all, an unlabelled instance fails an active filter) and is at least as old as the custom age label or else `age` (`policy.effective_age`, `core_age.is_old`, `MAX_AGE` still applies). The custom age label is fail open (`get_retention_age`, BUG-004). The clock comes from `RunContext.now` (Cleaner) or the injected `clock` (adapter), never read inside the cleaner. A failed delete or stop is logged (`Error occurred while delete instance ...`) and skipped, not reported as failed, and not recorded. Zone and instance listing, timestamp parse and `MAX_AGE` errors propagate unchanged (nothing is isolated, no connectivity fallback, no region listing). `VM.delete()` and `VM.stop()` keep the call order of `main` (per zone: list, filter, act, record, instance by instance); the registered Cleaner lists and filters every zone first, then acts, so an error while listing a later zone stops before any delete. Quirks are in `docs/refactor/bugs/pending/GCP-3.md`.
 - Do not call real cloud APIs in tests; mock every SDK client.
 
 ## Extension Rules
@@ -54,4 +62,5 @@ __init__.py holds only a copyright comment and declares no __all__.
    the same change (the legacy ratchet only shrinks), then updating this README and its symbol list.
 4. GCP IP changes need `tests/test_gcp_ip_parity.py` (oracle `tests/legacy/gcp_ip.txt`, a frozen copy of `main`, never edit it) to stay green.
 5. GCP disk changes need `tests/test_gcp_disk_parity.py` (oracle `tests/legacy/gcp_disk.txt`, a frozen copy of `main`, never edit it) to stay green.
-6. Record every new bug or quirk in `docs/refactor/BUGS.md` with its `main` file:line.
+6. GCP VM changes need `tests/test_gcp_vm_parity.py` (oracle `tests/legacy/gcp_vm.txt`, a frozen copy of `main`, never edit it) to stay green.
+7. Record every new bug or quirk in `docs/refactor/BUGS.md` with its `main` file:line.
