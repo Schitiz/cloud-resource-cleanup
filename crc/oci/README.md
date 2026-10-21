@@ -4,11 +4,11 @@
 
 OCI cleaners (oci SDK). They delete or stop leftover instances and volumes across regions.
 
-**Partly refactored.** `disk.py` (rung OCI-1) is a `Cleaner` registered as `oci` / `disk` (no behaviour change); `vm.py` (rung OCI-2) is a `Cleaner` registered as `oci` / `vm` (no behaviour change); `spot_vm/` (rung OCI-3) is a subpackage with a `Cleaner` registered as `oci` / `spot_instances` (no behaviour change; see its README); the shared helpers `_base.py`, `connectivity.py` and `__init__.py` (rung PL-OCI) are strict-clean (no behaviour change). Any change must follow `ARCHITECTURE.md` and the refactor rung for this package in `docs/refactor/PLAN.md` (Rung R4+), with `make check` green.
+**Partly refactored.** `disk.py` (rung OCI-1) is a `Cleaner` registered as `oci` / `disk` (no behaviour change); `vm.py` (rung OCI-2) is a `Cleaner` registered as `oci` / `vm` (no behaviour change); `spot_vm/` (rung OCI-3) is a subpackage with a `Cleaner` registered as `oci` / `spot_instances` (no behaviour change; see its README); the shared helpers `connectivity.py` and `__init__.py` (rung PL-OCI) are strict-clean (no behaviour change); `_base.py` is typed and parity-tested but stays legacy because it reads `os.environ`, which ARCH-003 bans in non-legacy cloud modules. Any change must follow `ARCHITECTURE.md` and the refactor rung for this package in `docs/refactor/PLAN.md` (Rung R4+), with `make check` green.
 
 Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.md`):
 
-- `_base.py` (refactored, rung PL-OCI): `Base`: API signing key config from `OCI_PRIVATE_KEY_CONTENT` / `OCI_PRIVATE_KEY_FILE`, identity, compute and block storage clients cached per region, region and availability domain lookup
+- `_base.py` (legacy; typed and parity-tested in rung PL-OCI, kept on the ratchet for its environment read): `Base`: API signing key config from `OCI_PRIVATE_KEY_CONTENT` / `OCI_PRIVATE_KEY_FILE`, identity, compute and block storage clients cached per region, region and availability domain lookup
 - `connectivity.py` (refactored, rung PL-OCI): `CONNECTIVITY_ERRORS` and `log_skipped_region`
 - `disk.py`: `DiskCleaner` (registered as `oci` / `disk`) and the `Disk` adapter: deletes available block and boot volumes not attached (`delete_volume`, `delete_boot_volume`); freeform tag any-key filter
 - `disk_api.py`: the typed Protocols of the OCI calls the disk cleaner uses and their SDK implementation
@@ -19,7 +19,7 @@ Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.
 ## Public API
 
 disk.py and disk_api.py are refactored, so the names below are synced with this README by
-ARCH-002. vm.py and vm_api.py are refactored too, and so are the shared helpers _base.py, connectivity.py and __init__.py (rung PL-OCI): no module of this package is legacy. The spot_vm subpackage has its own README and symbol list. The package __init__.py holds only a copyright comment and declares
+ARCH-002. vm.py and vm_api.py are refactored too, and so are the shared helpers connectivity.py and __init__.py (rung PL-OCI). _base.py (Base) is legacy: it reads the private key environment variables, which ARCH-003 bans in non-legacy cloud modules. The spot_vm subpackage has its own README and symbol list. The package __init__.py holds only a copyright comment and declares
 no __all__.
 
 - `SdkVolume`: Protocol of the attributes read from an OCI volume or boot volume.
@@ -33,7 +33,6 @@ no __all__.
 - `DiskCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus list_region, attached_volume_ids, attached_boot_volume_ids, decide and remove used by the adapter).
 - `build_disk_cleaner()`: registry factory behind @register("oci", "disk"); reads filter_tags, exception_tags, notags, age and custom_age_tag_key from RunContext.options.
 - `Disk`: adapter crc.py calls (delete(), get_deleted, count, disk_names_to_delete); subclasses Service and Base; decides and deletes volume by volume in the order of main.
-- `Base`: shared OCI base class (subclassed by the Disk, VM and SpotVM adapters): builds the API signing key config in the constructor (raises KeyError when neither key variable is set), caches one compute, block storage and identity client per region (get_compute_client, get_blockstorage_client, get_regional_identity_client, get_identity_client), lists the subscribed regions with the home region fallback (get_all_regions) and the availability domains of a region (get_availability_domains); the SDK clients it returns are untyped.
 - `log_skipped_region()`: logs the warning that a region (or one call in it) was skipped for a connectivity error; used with CONNECTIVITY_ERRORS, the tuple of the three SDK errors (ConnectTimeout, RequestException, ServiceError) that skip a region.
 - `SdkInstance`: Protocol of the attributes read from an OCI compute instance.
 - `ComputeApi`: Protocol of the three OCI calls the VM cleaner uses (list instances, terminate instance, stop instance); tests pass fakes.

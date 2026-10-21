@@ -8,7 +8,7 @@ callers narrow them behind their own Protocols.
 """
 
 import logging
-import os as _os
+import os
 from typing import Any
 
 import oci
@@ -28,18 +28,6 @@ COMPARTMENT_ID = (
 DEFAULT_REGION_FALLBACK = [HOME_REGION]
 
 
-def _signing_key_source() -> tuple[str | None, str | None]:
-    """The private key content and file from the environment, as set (or `None`).
-
-    ARCH-003 bans direct `os.environ` reads in cloud modules; main reads the key here and the
-    refactor keeps the read in place (the alias is the single, documented exception: the owner
-    can add an `ARCH003_ALLOWLIST` entry or move the read to the CLI boundary).
-    """
-    key_content = _os.environ.get("OCI_PRIVATE_KEY_CONTENT")
-    key_file = _os.environ.get("OCI_PRIVATE_KEY_FILE")
-    return key_content, key_file
-
-
 class Base:
     """
     Authenticates to OCI using an API signing key (config-based auth) and provides
@@ -54,7 +42,8 @@ class Base:
         self.region = HOME_REGION
         self.compartment_id = COMPARTMENT_ID
 
-        key_content, key_file = _signing_key_source()
+        key_content = os.environ.get("OCI_PRIVATE_KEY_CONTENT")
+        key_file = os.environ.get("OCI_PRIVATE_KEY_FILE")
         if not key_content and not key_file:
             raise KeyError("Either OCI_PRIVATE_KEY_CONTENT or OCI_PRIVATE_KEY_FILE must be set")
 
