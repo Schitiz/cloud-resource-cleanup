@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 from botocore.exceptions import ClientError, ConnectTimeoutError, EndpointConnectionError
 
-from crc.aws.snapshot import Snapshot, SnapshotRuntime
+from crc.aws.snapshot import Snapshot, SnapshotCleaner, SnapshotRuntime, build_snapshot_cleaner
 from crc.core import registry
 from crc.core.cleaner import Operation, RunContext
 
@@ -632,5 +632,87 @@ def test_cases_cover_both_dry_run_and_real_runs() -> None:
 def test_factory_defaults_age_days_to_ninety() -> None:
     ctx = RunContext(dry_run=True, operation=Operation.DELETE, options={}, now=NOW)
     cleaner = registry.get("aws", "snapshot")(ctx)
+    assert isinstance(cleaner, SnapshotCleaner)
+    assert registry.get("aws", "snapshot") is build_snapshot_cleaner
+    assert (cleaner.cloud, cleaner.kind) == ("aws", "snapshot")
     assert cleaner.supports(Operation.DELETE)
     assert not cleaner.supports(Operation.STOP)
+
+
+def _protected_outcome(
+    obj: Any, tags: Any, snap_id: str, caplog: pytest.LogCaptureFixture
+) -> tuple[str, Any, list[tuple[str, int, str]]]:
+    caplog.clear()
+    try:
+        return ("ok", obj._is_protected(tags, snap_id), _logs(caplog))
+    except Exception as e:
+        return (type(e).__name__, str(e), _logs(caplog))
+
+
+@pytest.mark.parametrize(
+    ("tags", "exception_tags"),
+    [
+        (None, {"keep": []}),
+        ([], {"keep": []}),
+        ([tag("keep")], None),
+        ([tag("keep")], {}),
+        ([tag("keep")], {"keep": []}),
+        ([tag("env", "prod")], {"env": ["prod"]}),
+        ([tag("env", "dev")], {"env": ["prod"]}),
+        ([tag("env", "pro")], {"env": "production"}),
+        ([tag("b"), tag("a")], {"a": [], "b": []}),
+        ([tag("env", "prod"), tag("env", "dev")], {"env": ["prod"]}),
+        ([{"Key": "k"}], {"keep": []}),
+        ([{"Value": "v"}], {"keep": []}),
+        ({"keep": "x"}, {"keep": []}),
+        ([tag("keep")], ["keep"]),
+    ],
+)
+def test_is_protected_matches_main(
+    tags: Any,
+    exception_tags: Any,
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr("crc.service.init_logging", lambda *args, **kwargs: None)
+    old = _load_oracle().Snapshot(False, 90, exception_tags)
+    new = Snapshot(False, 90, exception_tags)
+    assert _protected_outcome(new, tags, "snap-1", caplog) == _protected_outcome(
+        old, tags, "snap-1", caplog
+    )
+
+
+def _ami_outcome(obj: Any, ec2: Any) -> tuple[str, Any]:
+    try:
+        return ("ok", obj._get_snapshots_used_by_amis(ec2))
+    except Exception as e:
+        return (type(e).__name__, str(e))
+
+
+@pytest.mark.parametrize(
+    "images",
+    [
+        [],
+        [image("s1"), image("s2", "s3")],
+        [{"ImageId": "ami-1"}],
+        [{"BlockDeviceMappings": [{"DeviceName": "/dev/xvda"}]}],
+        [image(None), image("")],
+        [{"BlockDeviceMappings": [{"Ebs": None}]}],
+        {},
+    ],
+)
+def test_get_snapshots_used_by_amis_matches_main(
+    images: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("crc.service.init_logging", lambda *args, **kwargs: None)
+    case = Case("ami-helper", {"us-west-2": Region([], images)})
+    old = _load_oracle().Snapshot(False, 90, None)
+    new = Snapshot(False, 90, None)
+    old_aws = FakeAws(case)
+    new_aws = FakeAws(case)
+    assert _ami_outcome(new, FakeEc2(new_aws, "us-west-2")) == _ami_outcome(
+        old, FakeEc2(old_aws, "us-west-2")
+    )
+    assert new_aws.calls == old_aws.calls
+
