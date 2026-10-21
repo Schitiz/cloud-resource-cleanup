@@ -73,5 +73,5 @@ plain `dict`, as on `main`.
    table of `tests/test_cli_args_parity.py`, and only in a rung that allows a new flag.
 2. Keep each file under 400 lines and each function within the ruff limits; split by group of
    flags or by responsibility (notify, vm, resources), not by line count.
-3. `args.py`, `validate.py`, `inputs.py` and `clients.py` import no cloud package, no `crc.notify`, no SDK; the adapter and
-   notifier imports live in `notify.py`, `vm_ops.py` and `resource_ops.py` only.
+3. `args.py`, `validate.py`, `constants.py` and `inputs.py` import no cloud package, no `crc.notify`, no SDK; the SDK client, adapter and
+   notifier imports live in `clients.py`, `notify.py`, `vm_ops.py`, `resource_ops.py`, `scan.py` and `dispatch.py` only.
