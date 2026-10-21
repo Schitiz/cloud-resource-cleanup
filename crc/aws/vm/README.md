@@ -34,8 +34,8 @@ Modules, one per responsibility:
 
 ## Safety Invariants
 
-- `plan()` only calls `describe_instances` and `describe_network_interfaces`; `terminate_instances` and `stop_instances` are called from `apply()` / `apply_region()` (and `VM.delete()` / `VM.stop()` through them) only and never in a dry run (SAF-006, SAF-007).
-- The age gate is the attach time of the first network interface against `--age` or the fail-open custom age tag (`core.age.is_old`, `policy.effective_age`); an empty age matches every instance and `MAX_AGE` can shorten it (SAF-006 to SAF-010, SAF-009).
+- `plan()` only calls `describe_instances` and `describe_network_interfaces`; `terminate_instances` and `stop_instances` are called from `apply()` / `apply_region()` (and `VM.delete()` / `VM.stop()` through them) only and never in a dry run.
+- The age gate is the attach time of the first network interface against `--age` or the fail-open custom age tag (`core.age.is_old`, `policy.effective_age`); an empty age matches every instance and `MAX_AGE` can shorten it (SAF-006 to SAF-010, BUG-004, BUG-213).
 - Fail closed: any error while judging one instance is logged and keeps it; exception tags (any key) and notags skip an instance; an instance without a `Tags` key or `Name` tag is kept. Termination and stop errors are isolated per instance.
 - Region errors: a `describe_instances` connectivity error skips the region (SAF-001); `describe_regions` falls back to the static list on a connectivity error only and every other error propagates (SAF-004).
 - `VM.delete()` keeps the call and log order of main (per region: client, describe, per-instance decision, then the calls); the Cleaner path lists every region before it mutates.
