@@ -46,7 +46,6 @@ extend-exclude = [
     "crc/oci/__init__.py",
     "crc/oci/_base.py",
     "crc/oci/connectivity.py",
-    "crc/oci/disk.py",
     "crc/oci/spot_vm.py",
     "crc/oci/vm.py",
     "crc/service.py",
@@ -106,7 +105,6 @@ module = [
     "crc.oci",
     "crc.oci._base",
     "crc.oci.connectivity",
-    "crc.oci.disk",
     "crc.oci.spot_vm",
     "crc.oci.vm",
     "crc.service",
@@ -123,6 +121,10 @@ ignore_errors = true
 # SDKs without stubs or py.typed: only the SDK, never a repository module.
 [[tool.mypy.overrides]]
 module = ["boto3", "boto3.*", "botocore", "botocore.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["oci", "oci.*"]
 ignore_missing_imports = true
 
 [tool.importlinter]
