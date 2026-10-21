@@ -75,6 +75,14 @@ __init__.py holds only a copyright comment and declares no __all__.
 - `build_vpc_cleaner()`: registry factory behind @register("aws", "vpc"); reads filter_tags, exception_tags and notags from RunContext.options.
 - `VPC`: adapter crc.py calls (delete(), get_deleted, delete_count, vpc_ids_to_delete, get_vpc_ids); runs the cleaner region by region, VPC by VPC, in the order of main.
 
+### spot_instance_requests
+
+Refactored in AWS-5 into the subpackage crc/aws/spot_instance_requests/ (its own README lists the names). The old import path still works: crc.py imports SpotInstanceRequests, a thin adapter over the registered Cleaner (cloud aws, kind spot_instance_requests) with the same constructor, delete(), get_deleted, delete_count, spot_requests_to_delete, instance_ids_to_delete and volumes_to_delete.
+
+Safety Invariants: plan() only describes (a dry run is plan() alone and also performs the reads of the real path); tag, cancel, terminate, wait and delete happen in apply() in the order of CLEANUP_SAFETY.md (SAF-028 to SAF-033). Cancel before terminate; a failed tag or cancel aborts; leftover volumes are protected by their own exception, notags and sensitive yb_task tags; untagged requests and bad custom age tags are kept. Quirks: BUG-004, BUG-021, BUG-022 and docs/refactor/bugs/pending/AWS-5.md.
+
+Extension Rules: changes need tests/test_aws_spot_instance_requests_parity.py (oracle tests/legacy/aws_spot_instance_requests.txt, a frozen copy of main, never edit it), tests/test_aws_spot_instance_requests_cleaner.py and tests/test_aws_spot_instance_requests.py to stay green.
+
 ## Safety Invariants
 
 - Authoritative text: `CLEANUP_SAFETY.md`. Applicable IDs: SAF-006 to SAF-013 (age gates, shared by all clouds), SAF-001, SAF-003, SAF-004, SAF-014, SAF-015, SAF-016, SAF-017 to SAF-020, SAF-025, SAF-026 to SAF-037.
