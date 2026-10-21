@@ -876,6 +876,7 @@ def _has_error(o: Outcome) -> bool:
 
 QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
     ("mixed", lambda o: o.deleted == ["old-a", "old-b"]),
+    ("same-name-two-zones", lambda o: o.deleted == ["dup", "dup"]),
     (
         "mixed-dry-run",
         lambda o: not _calls_named(o, "instances.delete") and o.deleted == ["old-a", "old-b"],
