@@ -36,7 +36,7 @@ no __all__.
 
 - Authoritative text: `CLEANUP_SAFETY.md`. Applicable IDs: SAF-006 to SAF-013 (age gates, shared by all clouds), SAF-037, SAF-040, SAF-041, SAF-043, SAF-044, SAF-045, SAF-046.
 - Filtering per module: `docs/refactor/FILTER_VARIANTS.md` sections 5 (OCI), 6 and 7.
-- Known bugs and quirks (do not fix outside a behaviour-fix rung): `docs/refactor/BUGS.md` rows `BUG-004`; new OCI disk quirks are queued in `docs/refactor/bugs/pending/OCI-1.md` and `docs/refactor/bugs/pending/ST-OCI-DISK.md`, VM quirks in `docs/refactor/bugs/pending/OCI-2.md`.
+- Known bugs and quirks (do not fix outside a behaviour-fix rung): `docs/refactor/BUGS.md` rows `BUG-004`; new OCI disk quirks are queued in `docs/refactor/bugs/pending/ST-OCI-DISK.md` (the OCI-1 ones are folded into `BUGS.md`), VM quirks in `docs/refactor/bugs/pending/OCI-2.md`.
 - OCI disk (SAF-006 to SAF-013): see `crc/oci/disk/README.md`.
 - OCI VM (SAF-006 to SAF-013): `plan()` only lists and decides (ARCH-005); `apply()` is the only caller of `terminate_instance` / `stop_instance`; only instances in an allowed state (`RUNNING` by default) are candidates; `filter_tags` needs every key (`FILTER_VARIANTS.md`); an empty age matches every instance (SAF-006) and `MAX_AGE` can shorten the age (SAF-010); the age of an instance with a custom age tag fails open to `--age` (SAF-009, BUG-004). A failed terminate or stop is logged and skipped, never raised, as on main; list and region errors are not isolated per instance (connectivity errors skip the region, other errors propagate). New VM quirks are queued in `docs/refactor/bugs/pending/OCI-2.md`.
 - OCI Spot VMs skip OKE and instance pool members (SAF-045); `--resource spot_instances` needs an explicit `--cloud oci` (SAF-037).
