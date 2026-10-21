@@ -38,3 +38,32 @@ Rung PL-CORE: `crc/service.py`, `crc/utils.py`, `crc/__init__.py` and `tests/__i
 - `pytest -q`: **8063 passed**
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+### Round 1 fixes assessment
+
+- **`crc/README.md` revert: correct.** `git diff ef1f718..HEAD -- crc/README.md` is empty; the invented `SAF-LOG-001` / `SAF-AGE-001` IDs are gone and the integrator notes sit under `## Coding summary`.
+- **Pending-row citations: correct.** Checked every location in `docs/refactor/bugs/pending/PL-CORE.md` against `git show main:crc/utils.py` (52 lines) and `git show main:crc/service.py` (318 lines): `utils.py:11`, `:21-22`, `:31-34`, `:38-39`, `:43-48`, `:50-52` and `service.py:19`, `:28-29`, `:145-178`, `:222-225`, `:238-239`, `:250`, `:257`, `:268-278`, `:306`, `:314` all point at the described code. The `warn` / `info` / `basicConfig` / `basic_format` corrections are right (`WARN` = 30, `BASICCONFIG` missing, `BASIC_FORMAT` is a string so `setLevel` raises `ValueError`).
+- **Added tests: correct and not weakened.** `basic_format` case, `test_init_logging_repeated_calls_accumulate_handlers_parity` and `test_init_logging_invalid_levels_raise_expected_error_type` (`tests/test_crc_utils_parity.py:107-271`) compare oracle and new outcomes and also assert concrete values (4 handlers, error type). No existing assertion changed. No production code changed in round 1.
+
+### New findings
+
+- **BLOCKING (fixed): wrong `notset` effect in pending row 2 (`docs/refactor/bugs/pending/PL-CORE.md:9`).** Round 1's rewrite said `NOTSET` makes the root logger "delegate to `WARNING`". The root logger has no parent: at level 0 `getEffectiveLevel()` is 0 and `isEnabledFor(DEBUG)` is True (checked), so every record reaches the handlers. Reworded the row.
+- **NIT (left): new public aliases are not documented.** `crc/service.py:9-10` adds module-level `AgeSpec` and `Tags`; `crc/README.md` (outside this lane) does not list them. The Coding summary already asks the integrator to add the typed signatures; `ARCH-002` passes.
+- **NIT (left): `Tags` duplicates the core's inline union.** `crc/core/age.py:215`, `:227` spell `dict[str, str] | list[dict[str, str]]` inline; a `Tags` alias belongs in `crc.core.age` next to `AgeSpec` (core change, out of lane).
+- **NIT (left): test name.** `tests/test_crc_utils.py:86` `test_service_class_attributes_and_delegation` asserts only the class attributes; delegation is covered by the parity tests.
+
+### Independent review
+
+- **Parity.** `tests/legacy/crc_service.txt` and `tests/legacy/crc_utils.txt` are byte-identical to `main`. `crc/utils.py` keeps every statement and its order (print before `getattr`, `makedirs` before `FileHandler(mode="w")`, handler levels, noisy loggers, final `logging.info`); only comments, line wrapping and the private `_NOISY_LOGGERS` tuple changed. `crc/service.py` changes are annotations and one docstring line; every method still delegates to `crc.core.age` with the same arguments.
+- **Non-vacuous.** My own mutations: `FileHandler(mode="a")` failed 2 utils parity tests; `is_old(age, current_time, current_time)` failed 168 `is_old` parity tests. Both reverted.
+- **Safety (`CLEANUP_SAFETY.md`).** No age gate, `validated_retention_age` skip path, `MAX_AGE` behaviour or safety test touched; `tests/archtest/` and `.github/` unchanged.
+- **Architecture and typing.** import-linter 5 kept / 0 broken; ratchet only shrank (4 ruff lines, 4 mypy module lines removed, nothing added); no `# type: ignore` or `# noqa`. `Any` on `_parse_literal` / `get_retention_age` matches `crc/core/age.py:207`, `:227` and the real return type (any literal, BUG-182).
+- **Lane.** Only lane files, their tests and oracles, the pending-bug file, this review and `pyproject.toml` ratchet lines changed in `ef1f718..HEAD`.
+
+### Gate results
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`: `ruff check .` passed, `mypy` passed, `lint-imports` 5 kept / 0 broken, `pytest -q` **8063 passed**.
+
+ROUND 2 VERDICT: APPROVE
