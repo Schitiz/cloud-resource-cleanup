@@ -1,6 +1,6 @@
 ## Coding summary
 
-Rung ST-AWS-VM: status DONE (implemented, `make check` green, pushed to `refactor/lane-aws-vm`; round 1 reviewed: APPROVE). Pure move, no behaviour change.
+Rung ST-AWS-VM: status DONE (implemented, `make check` green, pushed to `refactor/lane-aws-vm`; round 1 reviewed: APPROVE; round 2 reviewed: APPROVE after a README citation fix). Pure move, no behaviour change.
 
 - **Move (`git mv`, history follows).** `crc/aws/vm.py` -> `crc/aws/vm/adapter.py` (`VM`, `VmRuntime`), `crc/aws/vm_cleaner.py` -> `crc/aws/vm/cleaner.py`, `crc/aws/vm_api.py` -> `crc/aws/vm/client.py`, `crc/aws/vm_scan.py` -> `crc/aws/vm/scan.py`. New `crc/aws/vm/__init__.py` re-exports every public name of the four old modules (`__all__`), so `from crc.aws.vm import VM` (`crc.py`, `crc/cli/vm_ops.py`) keeps working unchanged. Only import lines and the module docstrings that named the old paths changed inside the moved files.
 - **Import sites updated.** `tests/test_aws_vm.py` and `tests/test_aws_vm_parity.py`: `crc.aws.vm_cleaner` -> `crc.aws.vm.cleaner` (import lines only, no assertion). No other file in `crc/`, `crc.py` or `tests/` imported the old sibling paths; none of the five hash-locked tests or `tests/legacy/**` does, so no shim module was needed.
@@ -52,3 +52,40 @@ Scope reviewed: `git diff -M d109ee5..HEAD` (`crc/aws/vm/__init__.py`, `crc/aws/
 Test count: 42213 passed on base (`d109ee5`), 42213 passed on `HEAD` (+0, unchanged).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff -M d109ee5..HEAD` (the move commit `fa4f16d` and round 1's `d669302`).
+
+### Round 1 fixes assessment
+
+Round 1 made no code or test change (`d669302` touches only this review file), so nothing it did can have changed behaviour or weakened a test. Its verification is correct: `client.py` is `R100`; `adapter.py`, `cleaner.py` and `scan.py` differ only in import lines and docstring path names; `tests/test_aws_vm.py:12` and `tests/test_aws_vm_parity.py:22` change only the import line (plus a trailing blank line). Its two NITs stand.
+
+### Independent review
+
+- **Parity / behaviour.** No logic line changed. `from crc.aws.vm import scan as vm_scan` inside `adapter.py` / `cleaner.py` imports the submodule while `crc/aws/vm/__init__.py` is still executing, which is safe (submodule import, not a name from the half-built package). Registration: `@register("aws", "vm")` in `cleaner.py` still runs on `import crc.aws.vm` (via `__init__.py`), `tests/test_aws_vm_parity.py:774` asserts it. No test monkeypatches a moved module attribute (only `boto3.client`, `boto3.session.Session`, `crc.service.init_logging`), so no patch silently became a no-op. `scan.py:31-32` keeps main's name fallback and `.upper()` (`main:crc/aws/vm.py:138`, `:140`).
+- **Safety (CLEANUP_SAFETY.md).** No safety test touched; `safety_lock.json` and `tests/legacy/aws_vm.txt` untouched; `plan()` still read-only (ARCH-005 green).
+- **Architecture.** import-linter 5 kept; archtests green; every file under 400 lines (largest `cleaner.py`, 330). The stale `crc/aws/vm.py` entry in `tests/archtest/legacy_baseline.txt` is harmless: legacy status comes from the ruff `extend-exclude` list (`tests/archtest/_common.py` `load_legacy`), the baseline only bounds ratchet growth.
+- **Tests.** No assertion changed; no vacuous test added.
+
+### Findings
+
+- **BLOCKING (fixed):** `crc/aws/vm/README.md` `## Safety Invariants` cited `SAF-006, SAF-007` for the dry-run / read-only invariant, but those IDs are the empty-age and strict-validation items (`CLEANUP_SAFETY.md:46-50`), and the age-gate bullet listed `SAF-009` twice. Dropped the wrong citation and replaced the duplicate with `BUG-004, BUG-213` (the pre-move `crc/aws/README.md` text cited `SAF-006 to SAF-010, BUG-004`). Docs only.
+- **NIT (left):** the new `crc/aws/vm/README.md` `## Safety Invariants` is shorter than the AWS-3 text it replaced in `crc/aws/README.md`: it no longer states that a dry run of `stop` records ids (BUG-217), that the closing summary is logged by `plan()` in a dry run and by `apply()` otherwise, or that the server-side filters are only state and `tag:key` (BUG-021). The facts remain in `BUGS.md` and `dry_run_names()` under `## Public API`.
+- **NIT (left):** round 1's two NITs (`Clock` / `Decision` aliases not re-exported; stale `legacy_baseline.txt` entry, owner-only file).
+- **New quirk recorded:** `docs/refactor/bugs/pending/ST-AWS-VM.md` (NEW): `find_instances_with_tag` return annotation, upper-cased `state`, and the duplicated-`Name` fallback (`main:crc/aws/vm.py:110`, `:136-141`, `:290-292`, verified with `git show main:crc/aws/vm.py`).
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`:
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed! |
+| `mypy` | Success: no issues found in 197 source files |
+| import-linter | Contracts: 5 kept, 0 broken |
+| `pytest -q` | 42213 passed |
+
+Test count: 42213 passed (same as base `d109ee5` and round 1). After the README fix, ruff, mypy, import-linter and `tests/archtest` + `tests/test_aws_vm*.py` (467 passed) were re-run green.
+
+ROUND 2 VERDICT: APPROVE
