@@ -4,12 +4,12 @@
 
 OCI cleaners (oci SDK). They delete or stop leftover instances and volumes across regions.
 
-**Partly refactored.** `disk.py` (rung OCI-1) is a `Cleaner` registered as `oci` / `disk` (no behaviour change); `vm.py` (rung OCI-2) is a `Cleaner` registered as `oci` / `vm` (no behaviour change); `spot_vm/` (rung OCI-3) is a subpackage with a `Cleaner` registered as `oci` / `spot_instances` (no behaviour change; see its README). Any change must follow `ARCHITECTURE.md` and the refactor rung for this package in `docs/refactor/PLAN.md` (Rung R4+), with `make check` green.
+**Partly refactored.** `disk.py` (rung OCI-1) is a `Cleaner` registered as `oci` / `disk` (no behaviour change); `vm.py` (rung OCI-2) is a `Cleaner` registered as `oci` / `vm` (no behaviour change); `spot_vm/` (rung OCI-3) is a subpackage with a `Cleaner` registered as `oci` / `spot_instances` (no behaviour change; see its README); the shared helpers `_base.py`, `connectivity.py` and `__init__.py` (rung PL-OCI) are strict-clean (no behaviour change). Any change must follow `ARCHITECTURE.md` and the refactor rung for this package in `docs/refactor/PLAN.md` (Rung R4+), with `make check` green.
 
 Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.md`):
 
-- `_base.py`: `Base`: identity, compute and block storage clients, region and availability domain lookup
-- `connectivity.py`: `log_skipped_region`
+- `_base.py` (refactored, rung PL-OCI): `Base`: API signing key config from `OCI_PRIVATE_KEY_CONTENT` / `OCI_PRIVATE_KEY_FILE`, identity, compute and block storage clients cached per region, region and availability domain lookup
+- `connectivity.py` (refactored, rung PL-OCI): `CONNECTIVITY_ERRORS` and `log_skipped_region`
 - `disk.py`: `DiskCleaner` (registered as `oci` / `disk`) and the `Disk` adapter: deletes available block and boot volumes not attached (`delete_volume`, `delete_boot_volume`); freeform tag any-key filter
 - `disk_api.py`: the typed Protocols of the OCI calls the disk cleaner uses and their SDK implementation
 - `spot_vm/`: the Spot VM cleaner subpackage (`SpotVmCleaner`, the `SpotVM` adapter, the SDK Protocols and the leftover volume handling); terminates preemptible instances and deletes leftover volumes; skips OKE and instance pool members
@@ -19,7 +19,7 @@ Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.
 ## Public API
 
 disk.py and disk_api.py are refactored, so the names below are synced with this README by
-ARCH-002. vm.py and vm_api.py are refactored too. The other modules (Base, log_skipped_region) are legacy. The spot_vm subpackage has its own README and symbol list. The package __init__.py holds only a copyright comment and declares
+ARCH-002. vm.py and vm_api.py are refactored too, and so are the shared helpers _base.py, connectivity.py and __init__.py (rung PL-OCI): no module of this package is legacy. The spot_vm subpackage has its own README and symbol list. The package __init__.py holds only a copyright comment and declares
 no __all__.
 
 - `SdkVolume`: Protocol of the attributes read from an OCI volume or boot volume.
@@ -33,6 +33,8 @@ no __all__.
 - `DiskCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus list_region, attached_volume_ids, attached_boot_volume_ids, decide and remove used by the adapter).
 - `build_disk_cleaner()`: registry factory behind @register("oci", "disk"); reads filter_tags, exception_tags, notags, age and custom_age_tag_key from RunContext.options.
 - `Disk`: adapter crc.py calls (delete(), get_deleted, count, disk_names_to_delete); subclasses Service and Base; decides and deletes volume by volume in the order of main.
+- `Base`: shared OCI base class (subclassed by the Disk, VM and SpotVM adapters): builds the API signing key config in the constructor (raises KeyError when neither key variable is set), caches one compute, block storage and identity client per region (get_compute_client, get_blockstorage_client, get_regional_identity_client, get_identity_client), lists the subscribed regions with the home region fallback (get_all_regions) and the availability domains of a region (get_availability_domains); the SDK clients it returns are untyped.
+- `log_skipped_region()`: logs the warning that a region (or one call in it) was skipped for a connectivity error; used with CONNECTIVITY_ERRORS, the tuple of the three SDK errors (ConnectTimeout, RequestException, ServiceError) that skip a region.
 - `SdkInstance`: Protocol of the attributes read from an OCI compute instance.
 - `ComputeApi`: Protocol of the three OCI calls the VM cleaner uses (list instances, terminate instance, stop instance); tests pass fakes.
 - `OciComputeApi`: `ComputeApi` over the compute client of one region; pages through every result and maps stop to the instance_action call with the STOP action.
@@ -51,6 +53,7 @@ no __all__.
 - OCI disk (SAF-006 to SAF-013): `plan()` only lists and decides (ARCH-005); `apply()` is the only caller of `delete_volume` / `delete_boot_volume`; only `AVAILABLE` volumes that are not `ATTACHED` / `ATTACHING` are candidates; an empty age matches every volume (SAF-006) and `MAX_AGE` can shorten the age (SAF-010); the age of a volume with a custom age tag fails open to `--age` (SAF-009, BUG-004). A failed delete is logged and skipped, never raised, as on main.
 - OCI VM (SAF-006 to SAF-013): `plan()` only lists and decides (ARCH-005); `apply()` is the only caller of `terminate_instance` / `stop_instance`; only instances in an allowed state (`RUNNING` by default) are candidates; `filter_tags` needs every key (`FILTER_VARIANTS.md`); an empty age matches every instance (SAF-006) and `MAX_AGE` can shorten the age (SAF-010); the age of an instance with a custom age tag fails open to `--age` (SAF-009, BUG-004). A failed terminate or stop is logged and skipped, never raised, as on main; list and region errors are not isolated per instance (connectivity errors skip the region, other errors propagate). New VM quirks are queued in `docs/refactor/bugs/pending/OCI-2.md`.
 - OCI Spot VMs skip OKE and instance pool members (SAF-045); `--resource spot_instances` needs an explicit `--cloud oci` (SAF-037).
+- OCI shared helpers (`Base`, `connectivity.py`; no SAF ID names them, the AWS analogues are SAF-001 and SAF-004; parity-tested against `tests/legacy/oci_base.txt` and `tests/legacy/oci_connectivity.txt`): `Base()` fails closed before any SDK call when neither `OCI_PRIVATE_KEY_CONTENT` nor `OCI_PRIVATE_KEY_FILE` is set (KeyError; the content wins when both are set); the compartment, tenancy, user and fingerprint are constants, so only that compartment is ever listed; clients are built once per region and cached; `get_all_regions` falls back to the home region `us-sanjose-1` only when `list_region_subscriptions` raises a connectivity error (`ConnectTimeout`, `RequestException` or any `ServiceError`, so an auth error also takes that path, `BUG-101`, `BUG-107`) and propagates every other error; `get_availability_domains` does not catch anything and caches only on success. New quirks of these modules are queued in `docs/refactor/bugs/pending/PL-OCI.md`.
 - Do not call real cloud APIs in tests; mock every SDK client.
 
 ## Extension Rules
