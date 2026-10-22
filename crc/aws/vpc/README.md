@@ -7,6 +7,7 @@ AWS VPC cleaner (AWS-1, subpackage since ST-AWS-VPC). Tears down and deletes the
 Modules:
 
 - `cleaner.py`: `VpcCleaner` (`plan()` lists and decides protection, `apply()` tears down and deletes), its registry factory, the runtime dataclass and the `VPC` adapter.
+- `teardown.py`: `tear_down()`, the detach and delete steps of everything a VPC owns, in the order of `main` (moved out of `cleaner.py`, no behaviour change).
 - `client.py`: typed Protocols of the boto3 EC2 client, resource and resource objects the VPC teardown walks.
 
 ## Public API
@@ -15,6 +16,7 @@ Modules:
 - `VpcCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus build_filter, list_vpcs, plan_region, apply_region, is_protected, should_skip and delete_vpc used by the adapter).
 - `VpcRuntime`: frozen dataclass with the injected client factory, resource factory and region lister of VPC (no clock: the module has no age gate).
 - `build_vpc_cleaner()`: registry factory behind @register("aws", "vpc"); reads filter_tags, exception_tags and notags from RunContext.options.
+- `tear_down()`: (teardown.py) detaches and deletes the gateways, route tables, instances, endpoints, security groups, peering connections, network ACLs, subnets and interfaces of one VPC, in the order of the original implementation; called by the VPC cleaner before it deletes the VPC.
 - `Deletable`, `Collection`, `InternetGateway`, `RouteTableAssociation`, `RouteTable`, `Instance`, `Subnet`, `SecurityGroup`, `NetworkAcl`, `DhcpOptionsHandle`, `Vpc`, `VpcCollection`: Protocols (client.py) of the boto3 EC2 resource objects the VPC teardown walks; tests pass fakes.
 - `Ec2Resource`, `Ec2Client`: Protocols (client.py) of the boto3 EC2 resource (vpcs.filter, DhcpOptions, VpcPeeringConnection) and the four client calls used (describe_vpc_endpoints, delete_vpc_endpoints, describe_vpc_peering_connections, delete_vpc).
 

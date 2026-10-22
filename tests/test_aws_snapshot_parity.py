@@ -19,6 +19,7 @@ from botocore.exceptions import ClientError, ConnectTimeoutError, EndpointConnec
 from crc.aws.snapshot import Snapshot, SnapshotCleaner, SnapshotRuntime, build_snapshot_cleaner
 from crc.core import registry
 from crc.core.cleaner import Operation, RunContext
+from tests.helpers_log_fix import expected_logs, expected_outcome
 
 ORACLE = Path(__file__).parent / "legacy" / "aws_snapshot.txt"
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=datetime.UTC)
@@ -439,6 +440,9 @@ def debug_logs(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG)
 
 
+LOG_BUGS = {"BUG-359"}
+
+
 @pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
 def test_matches_main(
     case: Case,
@@ -453,7 +457,7 @@ def test_matches_main(
     assert new.error == old.error
     assert new.deleted == old.deleted
     assert new.count == old.count
-    assert new.logs == old.logs
+    assert new.logs == expected_logs(old.logs, LOG_BUGS)
     assert new.stdout == old.stdout
 
 
@@ -490,12 +494,12 @@ def test_cleaner_protocol_matches_main(
     assert new.error == old.error
     assert new.stdout == old.stdout
     assert new_other == old_other
-    assert new_plan_logs == old_plan_logs
+    assert new_plan_logs == expected_logs(old_plan_logs, LOG_BUGS)
     if new.error is None:
         assert new.deleted == old.deleted
         assert new.count == old.count
         assert new_deletes == old_deletes
-        assert new_delete_logs == old_delete_logs
+        assert new_delete_logs == expected_logs(old_delete_logs, LOG_BUGS)
     else:
         assert new_deletes == []
 
@@ -519,12 +523,17 @@ def test_cleaner_protocol_logs_in_order_when_nothing_interleaves(
     new = _run_cleaner(case, monkeypatch, caplog, capsys)
     skip_logs = [r for r in old.logs if r[2].startswith(("Skipping snapshot", "Snap "))]
     if old.error is None and _single_region_error_free_matches_exactly(case) and not skip_logs:
-        assert new.logs == old.logs
+        assert new.logs == expected_logs(old.logs, LOG_BUGS)
         return
     plan_logs, delete_logs = _split_logs(new.logs)
     assert new.logs == plan_logs + delete_logs
     if new.error is not None:
         assert delete_logs == []
+
+
+def _logged(o: Outcome, message: str) -> bool:
+    """Whether the message is logged, at any level (the level moved to DEBUG in LOG-AWS2)."""
+    return any(r[2] == message for r in o.logs)
 
 
 def _deleted(o: Outcome) -> list[str]:
@@ -554,8 +563,8 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
     ("exception-value-case-sensitive", lambda o: o.deleted == ["a"]),
     ("exception-values-none-means-any", lambda o: o.deleted == []),
     ("exception-value-is-string-substring", lambda o: o.deleted == ["b"]),
-    ("exception-first-key-logged", lambda o: ("root", logging.INFO, "Snap a has tag a") in o.logs),
-    ("exception-second-key-logged", lambda o: ("root", logging.INFO, "Snap a has tag b") in o.logs),
+    ("exception-first-key-logged", lambda o: _logged(o, "Snap a has tag a")),
+    ("exception-second-key-logged", lambda o: _logged(o, "Snap a has tag b")),
     ("exception-tags-empty", lambda o: o.deleted == ["a"]),
     ("untagged-deleted", lambda o: o.deleted == ["a", "b"]),
     ("tag-missing-value-raises", lambda o: o.error == ("KeyError", "'Value'") and o.deleted == []),
@@ -577,7 +586,7 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
     (
         "ami-and-protected-logs-protection-only",
         lambda o: (
-            ("root", logging.INFO, "Snap a has tag keep") in o.logs
+            _logged(o, "Snap a has tag keep")
             and not any("used by AMI" in r[2] for r in o.logs)
         ),
     ),
@@ -626,6 +635,7 @@ def test_quirk_is_preserved(
     new = _run(_new, case, monkeypatch, caplog, capsys)
     assert check(old), "oracle no longer shows the quirk"
     assert check(new)
+    assert new.logs == expected_logs(old.logs, LOG_BUGS)
 
 
 def test_cases_cover_both_dry_run_and_real_runs() -> None:
@@ -682,8 +692,8 @@ def test_is_protected_matches_main(
     monkeypatch.setattr("crc.service.init_logging", lambda *args, **kwargs: None)
     old = _load_oracle().Snapshot(False, 90, exception_tags)
     new = Snapshot(False, 90, exception_tags)
-    assert _protected_outcome(new, tags, "snap-1", caplog) == _protected_outcome(
-        old, tags, "snap-1", caplog
+    assert _protected_outcome(new, tags, "snap-1", caplog) == expected_outcome(
+        _protected_outcome(old, tags, "snap-1", caplog), LOG_BUGS
     )
 
 
@@ -720,3 +730,27 @@ def test_get_snapshots_used_by_amis_matches_main(
     )
     assert new_aws.calls == old_aws.calls
 
+
+SNAPSHOT_LOG_CASES = ["ami-uses-snapshot", "exception-first-key-logged", "mixed-decisions"]
+
+
+@pytest.mark.parametrize("case_id", SNAPSHOT_LOG_CASES)
+def test_snapshot_skip_lines_are_debug(
+    case_id: str,
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """BUG-359: the oracle logs one INFO line per snapshot used by an AMI (or tagged); the new
+    code logs the same text at DEBUG and nothing else about the outcome changes."""
+    case = next(c for c in CASES if c.id == case_id)
+    old = _run(_legacy, case, monkeypatch, caplog, capsys)
+    new = _run(_new, case, monkeypatch, caplog, capsys)
+    skip_lines = [r for r in old.logs if r[2].startswith(("Skipping snapshot", "Snap "))]
+    assert {r[1] for r in skip_lines} <= {logging.INFO}
+    assert new.calls == old.calls
+    assert new.deleted == old.deleted
+    assert new.logs == expected_logs(old.logs, LOG_BUGS)
+    if skip_lines:
+        assert new.logs != old.logs

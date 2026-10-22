@@ -15,9 +15,10 @@ from typing import Any, Protocol
 
 import boto3
 
+from crc.aws import _regionlog
 from crc.aws._base import get_all_regions
 from crc.aws.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
-from crc.core import policy
+from crc.core import policy, runlog
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext, Skipped
 from crc.core.registry import register
 from crc.service import Service
@@ -64,6 +65,7 @@ class ElasticIpRuntime:
 
 
 def _skip_region(region: str, error: BaseException) -> None:
+    _regionlog.region_skipped(region, error)
     log_skipped_region(region, _SKIP_CONTEXT, error)
 
 
@@ -143,6 +145,7 @@ class ElasticIpCleaner:
     def plan_region(self, client: ElasticIpClient, region: str) -> Plan:
         """List one region and decide. Only unassociated addresses that carry a `Tags` key
         are considered; the public IP is the identity, as on `main`."""
+        started = _regionlog.start()
         addresses = client.describe_addresses()["Addresses"]
         selected: dict[str, str] = {}
         skipped: list[Skipped] = []
@@ -151,14 +154,17 @@ class ElasticIpCleaner:
                 continue
             tags = eip["Tags"]
             if self._should_skip(tags):
+                runlog.current().skip("exception_tag")
                 skipped.append(Skipped(id=eip.get("PublicIp", ""), reason="matches exception_tags"))
                 continue
             if not self._select_on_filter(eip, tags, selected):
+                runlog.current().skip("no_filter_match")
                 skipped.append(Skipped(id=eip.get("PublicIp", ""), reason="no filter_tags match"))
         candidates = tuple(
             Candidate(id=ip, name=ip, region=region, extra={_ALLOCATION_ID: allocation_id})
             for ip, allocation_id in selected.items()
         )
+        _regionlog.region_done(region, len(addresses), len(candidates), started)
         return Plan(candidates=candidates, skipped=tuple(skipped))
 
     def apply_region(
@@ -166,10 +172,18 @@ class ElasticIpCleaner:
     ) -> list[str]:
         """Release `candidates` one by one and return their ids (also in a dry run, where
         nothing is released). The caller records the ids only once the whole region is done."""
-        if not dry_run:
-            for candidate in candidates:
+        run = runlog.current()
+        for candidate in candidates:
+            if dry_run:
+                run.action("would_delete", candidate.region, candidate.id, candidate.name)
+                continue
+            try:
                 client.release_address(AllocationId=candidate.extra[_ALLOCATION_ID])
-                logging.info(f"Deleted IP: {candidate.id}")
+            except Exception as e:
+                run.fail(candidate.region, candidate.id, e)
+                raise
+            logging.info(f"Deleted IP: {candidate.id}")
+            run.action("deleted", candidate.region, candidate.id, candidate.name)
         return [candidate.id for candidate in candidates]
 
     def should_skip(self, tags: Sequence[Mapping[str, Any]]) -> bool:

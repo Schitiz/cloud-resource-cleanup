@@ -16,10 +16,11 @@ from typing import Any, Protocol
 
 import boto3
 
+from crc.aws import _regionlog
 from crc.aws._base import get_all_regions
 from crc.aws.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
 from crc.core import age as core_age
-from crc.core import policy
+from crc.core import policy, runlog
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext, Skipped
 from crc.core.registry import register
 from crc.service import Service
@@ -66,6 +67,7 @@ class KeyPairRuntime:
 
 
 def _skip_region(region: str, error: BaseException) -> None:
+    _regionlog.region_skipped(region, error)
     log_skipped_region(region, _SKIP_CONTEXT, error)
 
 
@@ -141,6 +143,7 @@ class KeyPairCleaner:
 
     def plan_region(self, client: KeyPairClient, region: str, now: datetime.datetime) -> Plan:
         """List one region and decide. `now` is compared with each `CreateTime`."""
+        started = _regionlog.start()
         keypairs = client.describe_key_pairs()
         selected: dict[str, Candidate] = {}
         order: set[str] = set()
@@ -156,6 +159,7 @@ class KeyPairCleaner:
                 selected[name] = Candidate(id=name, name=name, region=region, launch_time=created)
             else:
                 skipped.append(Skipped(id=name, reason=reason, name=name))
+        _regionlog.region_done(region, len(keypairs["KeyPairs"]), len(selected), started)
         return Plan(candidates=tuple(selected[name] for name in order), skipped=tuple(skipped))
 
     def apply_region(
@@ -168,10 +172,18 @@ class KeyPairCleaner:
     ) -> None:
         """Delete `candidates` one by one, appending each name to `deleted` as it is done
         (also in a dry run, where nothing is deleted)."""
+        run = runlog.current()
         for candidate in candidates:
-            if not dry_run:
-                response = client.delete_key_pair(KeyName=candidate.id)
+            if dry_run:
+                run.action("would_delete", candidate.region, candidate.id, candidate.name)
+            else:
+                try:
+                    response = client.delete_key_pair(KeyName=candidate.id)
+                except Exception as e:
+                    run.fail(candidate.region, candidate.id, e)
+                    raise
                 logging.info(f"Deleted keypair: {candidate.id} with response: {response}")
+                run.action("deleted", candidate.region, candidate.id, candidate.name)
             deleted.append(candidate.id)
 
     def _skip_reason(
@@ -182,11 +194,14 @@ class KeyPairCleaner:
         if matches_name and not matches_exception:
             if core_age.is_old(self._age or {}, now, created):
                 return None
-            logging.info(f"Keypair {name} is not old enough to be deleted.")
+            logging.debug(f"Keypair {name} is not old enough to be deleted.")
+            runlog.current().skip("too_young")
             return "not older than age"
         if matches_exception:
-            logging.info(f"Keypair {name} is in exception_regex {self._exception_regex}.")
+            logging.debug(f"Keypair {name} is in exception_regex {self._exception_regex}.")
+            runlog.current().skip("exception_regex")
             return "matches exception_regex"
+        runlog.current().skip("name_regex_mismatch")
         return "does not match name_regex"
 
 

@@ -16,10 +16,12 @@ from typing import Any, cast
 
 import boto3
 
+from crc.aws import _regionlog
 from crc.aws._base import get_all_regions
 from crc.aws.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
 from crc.aws.vpc.client import Ec2Client, Ec2Resource, Vpc
-from crc.core import policy
+from crc.aws.vpc.teardown import tear_down
+from crc.core import policy, runlog
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext, Skipped
 from crc.core.registry import register
 from crc.service import Service
@@ -63,6 +65,7 @@ class VpcRuntime:
 
 
 def _skip_region(region: str, error: BaseException) -> None:
+    _regionlog.region_skipped(region, error)
     log_skipped_region(region, _SKIP_CONTEXT, error)
 
 
@@ -75,77 +78,22 @@ def _log_summary(deleted: Sequence[str], *, dry_run: bool) -> None:
         logging.warning(f"List of AWS VPCs deleted: {items}")
 
 
-def _detach_default_dhcp_options(ec2: Ec2Resource, vpc: Vpc) -> None:
-    dhcp_options_default = ec2.DhcpOptions("default")
-    if dhcp_options_default:
-        dhcp_options_default.associate_with_vpc(VpcId=vpc.id)
-
-
-def _delete_gateways(vpc: Vpc) -> None:
-    for gw in vpc.internet_gateways.all():
-        vpc.detach_internet_gateway(InternetGatewayId=gw.id)
-        gw.delete()
-
-
-def _delete_route_tables(vpc: Vpc) -> None:
-    for rt in vpc.route_tables.all():
-        for rta in rt.associations:
-            if not rta.main:
-                rta.delete()
-        if not rt.associations:
-            rt.delete()
-
-
-def _terminate_instances(vpc: Vpc) -> None:
-    for subnet in vpc.subnets.all():
-        for instance in subnet.instances.all():
-            instance.terminate()
-
-
-def _delete_endpoints(client: Ec2Client, vpc: Vpc) -> None:
-    for ep in client.describe_vpc_endpoints(Filters=[{"Name": "vpc-id", "Values": [vpc.id]}])[
-        "VpcEndpoints"
-    ]:
-        client.delete_vpc_endpoints(VpcEndpointIds=[ep["VpcEndpointId"]])
-
-
-def _delete_security_groups(vpc: Vpc) -> None:
-    for sg in vpc.security_groups.all():
-        if sg.group_name != "default":
-            sg.delete()
-
-
-def _delete_peering_connections(client: Ec2Client, ec2: Ec2Resource, vpc: Vpc) -> None:
-    peering = client.describe_vpc_peering_connections(
-        Filters=[{"Name": "requester-vpc-info.vpc-id", "Values": [vpc.id]}]
-    )
-    for vpcpeer in peering["VpcPeeringConnections"]:
-        ec2.VpcPeeringConnection(vpcpeer["VpcPeeringConnectionId"]).delete()
-
-
-def _delete_network_acls(vpc: Vpc) -> None:
-    for netacl in vpc.network_acls.all():
-        if not netacl.is_default:
-            netacl.delete()
-
-
-def _delete_subnets(vpc: Vpc) -> None:
-    for subnet in vpc.subnets.all():
-        for interface in subnet.network_interfaces.all():
-            interface.delete()
-        subnet.delete()
-
-
-def _delete_vpc_with_retries(client: Ec2Client, vpc: Vpc) -> None:
+def _delete_vpc_with_retries(client: Ec2Client, vpc: Vpc, region: str | None = None) -> None:
+    run = runlog.current()
+    last_error: Exception | None = None
     for _ in range(_DELETE_RETRIES):
         try:
             client.delete_vpc(VpcId=vpc.id)
             break
         except Exception as e:
+            last_error = e
             logging.error(e)
             logging.error(f"Failed deleting VPC {vpc.id}. Retrying...")
     else:
         logging.error(f"Failed to Delete VPC {vpc.id} after {_DELETE_RETRIES} retries")
+        run.fail(region, vpc.id, last_error or "delete_vpc failed")
+        return
+    run.action("deleted", region, vpc.id)
 
 
 class VpcCleaner:
@@ -201,6 +149,8 @@ class VpcCleaner:
         """Tear down and delete the planned VPCs, region by region (nothing in a dry run)."""
         ids = [candidate.id for candidate in plan.candidates]
         if context.dry_run:
+            for candidate in plan.candidates:
+                runlog.current().action("would_delete", candidate.region, candidate.id)
             return Result(succeeded=tuple(ids))
         by_region: dict[str, list[Candidate]] = {}
         for candidate in plan.candidates:
@@ -238,6 +188,7 @@ class VpcCleaner:
         dry_run: bool,
     ) -> Plan:
         """List one region; unless `dry_run`, also decide which VPCs are protected."""
+        started = _regionlog.start()
         vpcs = self.list_vpcs(ec2, vpc_filter)
         ids = [vpc.id for vpc in vpcs]
         candidates: list[Candidate] = []
@@ -249,7 +200,9 @@ class VpcCleaner:
                 Candidate(id=vpc_id, name=vpc_id, region=region, extra={_PROTECTED: protected})
             )
             if protected:
+                runlog.current().skip("protected")
                 skipped.append(Skipped(id=vpc_id, reason="matches exception_tags or notags"))
+        _regionlog.region_done(region, len(ids), len(ids) - len(skipped), started)
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
 
     def apply_region(
@@ -260,7 +213,7 @@ class VpcCleaner:
             vpc = self._vpcs[(candidate.region, candidate.id)].pop(0)
             if candidate.extra[_PROTECTED]:
                 continue
-            self.delete_vpc(client, ec2, vpc)
+            self.delete_vpc(client, ec2, vpc, region=candidate.region)
 
     def is_protected(self, vpc: Vpc) -> bool:
         """BUG-012: main hands the boto3 Vpc resource to a function that iterates tags, so with
@@ -283,18 +236,16 @@ class VpcCleaner:
             all_tags[key] = value
         return policy.notags_all(all_tags, self._notags or {})
 
-    def delete_vpc(self, client: Ec2Client, ec2: Ec2Resource, vpc: Vpc) -> None:
+    def delete_vpc(
+        self, client: Ec2Client, ec2: Ec2Resource, vpc: Vpc, *, region: str | None = None
+    ) -> None:
         """Detach and delete everything the VPC owns, in the order of main, then the VPC."""
-        _detach_default_dhcp_options(ec2, vpc)
-        _delete_gateways(vpc)
-        _delete_route_tables(vpc)
-        _terminate_instances(vpc)
-        _delete_endpoints(client, vpc)
-        _delete_security_groups(vpc)
-        _delete_peering_connections(client, ec2, vpc)
-        _delete_network_acls(vpc)
-        _delete_subnets(vpc)
-        _delete_vpc_with_retries(client, vpc)
+        try:
+            tear_down(client, ec2, vpc)
+        except Exception as e:
+            runlog.current().fail(region, vpc.id, e)
+            raise
+        _delete_vpc_with_retries(client, vpc, region)
 
 
 @register("aws", "vpc")
@@ -376,18 +327,27 @@ class VPC(Service):
         runtime = self._runtime
         cleaner = self._cleaner()
         vpc_filter = cleaner.build_filter()
+        run = runlog.current()
         for region in runtime.list_regions():
+            started = _regionlog.start()
             try:
                 client = runtime.client_factory(region)
                 ec2 = runtime.resource_factory(region)
                 vpcs = cleaner.list_vpcs(ec2, vpc_filter)
                 self.vpc_ids_to_delete.extend(self.get_vpc_ids(vpcs))
                 if self.dry_run:
+                    for vpc in vpcs:
+                        run.action("would_delete", region, vpc.id)
+                    _regionlog.region_done(region, len(vpcs), len(vpcs), started)
                     continue
+                selected = 0
                 for vpc in vpcs:
                     if cleaner.is_protected(vpc):
+                        run.skip("protected")
                         continue
-                    cleaner.delete_vpc(client, ec2, vpc)
+                    selected += 1
+                    cleaner.delete_vpc(client, ec2, vpc, region=region)
+                _regionlog.region_done(region, len(vpcs), selected, started)
             except CONNECTIVITY_ERRORS as e:
                 _skip_region(region, e)
         _log_summary(self.vpc_ids_to_delete, dry_run=self.dry_run)

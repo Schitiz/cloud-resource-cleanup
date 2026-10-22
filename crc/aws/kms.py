@@ -18,9 +18,10 @@ from typing import Any, Protocol
 
 import boto3
 
+from crc.aws import _regionlog
 from crc.aws.connectivity import CONNECTIVITY_ERRORS
 from crc.core import age as core_age
-from crc.core import policy
+from crc.core import policy, runlog
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext, Skipped
 from crc.core.registry import register
 from crc.service import Service
@@ -29,6 +30,12 @@ _SERVICE_NAME = "kms"
 _DEFAULT_REGION = "us-west-2"
 _POLICY_NAME = "default"
 _UNREACHABLE = "region unreachable"
+_NOT_OURS = "not_ours"
+_UNREADABLE = "unreadable"
+
+
+class _NotOursError(Exception):
+    """The key policy has no AWS principal to compare with `kms_user`: not one of ours."""
 
 TagSpec = Mapping[str, Sequence[str]]
 Clock = Callable[[], datetime.datetime]
@@ -105,6 +112,12 @@ def _log_summary(deleted: Sequence[str], *, dry_run: bool) -> None:
         logging.warning(f"List of AWS KMS (Total: {len(items)}) which will be deleted: {items}")
 
 
+def _log_would_delete(key_ids: Sequence[str]) -> None:
+    run = runlog.current()
+    for key_id in key_ids:
+        run.action("would_delete", _DEFAULT_REGION, key_id)
+
+
 def _has_all_pairs(response_tags: Iterable[Mapping[str, Any]], spec: TagSpec | None) -> bool:
     # One tag at a time: main compares sets of (key, value) pairs, so a repeated TagKey keeps
     # every one of its values.
@@ -152,6 +165,8 @@ class KmsCleaner:
         ids = [c.id for c in plan.candidates]
         if ids and not context.dry_run:
             self.schedule(self._client_factory(_DEFAULT_REGION), ids)
+        elif context.dry_run:
+            _log_would_delete(ids)
         _log_summary(ids, dry_run=context.dry_run)
         return Result(succeeded=tuple(ids))
 
@@ -164,6 +179,7 @@ class KmsCleaner:
             for page in paginator.paginate():
                 kms_keys.extend(page["Keys"])
         except CONNECTIVITY_ERRORS as e:
+            _regionlog.region_skipped(_DEFAULT_REGION, e)
             logging.warning(
                 "KMS cleanup skipped — cannot reach region %s (%s): %s",
                 _DEFAULT_REGION,
@@ -177,12 +193,15 @@ class KmsCleaner:
         """Decide every key. Any error on one key skips that key (a bare `except:` on `main`),
         and a key found for the user before the error stays selected."""
         logging.info(f"Total keys found = {len(keys)}")
+        started = _regionlog.start()
         active: list[str] = []
         for key in keys:
             try:
                 self._select_key(client, key["KeyId"], active, clock)
-            except BaseException:
-                logging.warning(f"KEY SKIPPED {key['KeyId']}")
+            except BaseException as e:
+                logging.debug(f"KEY SKIPPED {key['KeyId']}")
+                runlog.current().skip(_NOT_OURS if isinstance(e, _NotOursError) else _UNREADABLE)
+        _regionlog.region_done(_DEFAULT_REGION, len(keys), len(active), started)
         logging.info(f"total number of active Jenkins keys = {len(active)}")
         candidates = tuple(
             Candidate(id=key_id, name=key_id, region=_DEFAULT_REGION) for key_id in active
@@ -191,11 +210,17 @@ class KmsCleaner:
 
     def schedule(self, client: KmsClient, key_ids: Sequence[str]) -> None:
         """Schedule `key_ids` one by one; the first error propagates."""
+        run = runlog.current()
         for cmk_id in key_ids:
-            client.schedule_key_deletion(
-                KeyId=cmk_id, PendingWindowInDays=self._settings.kms_pending_window
-            )
+            try:
+                client.schedule_key_deletion(
+                    KeyId=cmk_id, PendingWindowInDays=self._settings.kms_pending_window
+                )
+            except Exception as e:
+                run.fail(_DEFAULT_REGION, cmk_id, e)
+                raise
             logging.info(f"CMK - {cmk_id} Deleted from AWS console")
+            run.action("deleted", _DEFAULT_REGION, cmk_id)
 
     def should_skip(self, tags: Sequence[Mapping[str, Any]]) -> bool:
         """Exception tags decision for one key (see `_should_skip`)."""
@@ -206,6 +231,7 @@ class KmsCleaner:
         if not _has_all_pairs(response_tags, self._settings.filter_tags):
             return
         if self._should_skip(response_tags):
+            runlog.current().skip("exception_tag")
             return
         metadata = client.describe_key(KeyId=key_id)
         key_state = metadata["KeyMetadata"]["KeyState"]
@@ -228,7 +254,10 @@ class KmsCleaner:
     def _select_for_user(self, client: KmsClient, key_id: str, active: list[str]) -> None:
         document = client.get_key_policy(KeyId=key_id, PolicyName=_POLICY_NAME)["Policy"]
         for statement in json.loads(document)["Statement"]:
-            user_arn = statement["Principal"]["AWS"]
+            try:
+                user_arn = statement["Principal"]["AWS"]
+            except (KeyError, TypeError) as e:
+                raise _NotOursError from e
             if user_arn == self._settings.kms_user:
                 logging.info(f"Key {key_id} found with user {user_arn}")
                 active.append(key_id)
@@ -329,7 +358,9 @@ class Kms(Service):
         client, keys = opened
         plan = cleaner.plan_keys(client, keys, self._runtime.clock)
         active = [c.id for c in plan.candidates]
-        if not self.dry_run:
+        if self.dry_run:
+            _log_would_delete(active)
+        else:
             cleaner.schedule(client, active)
         self.kms_keys_to_delete.extend(active)
         _log_summary(self.kms_keys_to_delete, dry_run=self.dry_run)

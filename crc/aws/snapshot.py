@@ -18,9 +18,10 @@ from typing import Any, Protocol
 
 import boto3
 
+from crc.aws import _regionlog
 from crc.aws._base import get_all_regions
 from crc.aws.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
-from crc.core import policy
+from crc.core import policy, runlog
 from crc.core.cleaner import (
     Candidate,
     Cleaner,
@@ -85,6 +86,7 @@ class SnapshotRuntime:
 
 
 def _skip_region(region: str, error: BaseException) -> None:
+    _regionlog.region_skipped(region, error)
     log_skipped_region(region, _SKIP_CONTEXT, error)
 
 
@@ -96,7 +98,7 @@ def _is_protected(tags: Any, snap_id: str, exception_tags: Any) -> bool:
     tag_map = {t["Key"]: t["Value"] for t in tags}
     for key, values in exception_tags.items():
         if policy.exception_tags_any(tag_map, {key: values}):
-            logging.info(f"Snap {snap_id} has tag {key}")
+            logging.debug(f"Snap {snap_id} has tag {key}")
             return True
     return False
 
@@ -144,6 +146,7 @@ class SnapshotCleaner:
         candidates: list[Candidate] = []
         skipped: list[Skipped] = []
         for region in self._list_regions():
+            started = _regionlog.start()
             try:
                 client = self._client_factory(region)
                 decisions = list(self.iter_region(client, region, context.now))
@@ -151,11 +154,14 @@ class SnapshotCleaner:
                 _skip_region(region, e)
                 continue
             self._clients[region] = client
+            selected = 0
             for decision in decisions:
                 if isinstance(decision, Candidate):
                     candidates.append(decision)
+                    selected += 1
                 else:
                     skipped.append(decision)
+            _regionlog.region_done(region, len(decisions), selected, started)
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
 
     def apply(self, plan: Plan, context: RunContext) -> Result:
@@ -173,7 +179,9 @@ class SnapshotCleaner:
                 _skip_region(region, e)
                 continue
             for candidate in items:
-                failure = self.delete_one(client, candidate.id, dry_run=context.dry_run)
+                failure = self.delete_one(
+                    client, candidate.id, dry_run=context.dry_run, region=region
+                )
                 if failure is None:
                     deleted.append(candidate.id)
                 else:
@@ -190,16 +198,22 @@ class SnapshotCleaner:
         for snap in snapshots:
             yield self._decide(snap, region, now, used_by_amis)
 
-    def delete_one(self, client: SnapshotClient, snap_id: str, *, dry_run: bool) -> Failure | None:
+    def delete_one(
+        self, client: SnapshotClient, snap_id: str, *, dry_run: bool, region: str | None = None
+    ) -> Failure | None:
         """Delete one snapshot (nothing in a dry run). Any error is logged and returned."""
+        run = runlog.current()
         if dry_run:
+            run.action("would_delete", region, snap_id)
             return None
         try:
             client.delete_snapshot(SnapshotId=snap_id)
             logging.info(f"Deleted snapshot {snap_id}")
         except Exception as e:
             logging.error(f"Failed to delete snapshot {snap_id}: {e}")
+            run.fail(region, snap_id, e)
             return Failure(id=snap_id, error=str(e))
+        run.action("deleted", region, snap_id)
         return None
 
     def is_protected(self, tags: Any, snap_id: str) -> bool:
@@ -212,11 +226,14 @@ class SnapshotCleaner:
         snap_id = snap["SnapshotId"]
         start_time = snap["StartTime"]
         if not policy.snapshot_old_enough(start_time, now, self._age_days):
+            runlog.current().skip("too_young")
             return Skipped(id=snap_id, reason="newer than age_days")
         if self.is_protected(snap.get("Tags"), snap_id):
+            runlog.current().skip("exception_tag")
             return Skipped(id=snap_id, reason="has an exception tag")
         if snap_id in used:
-            logging.info(f"Skipping snapshot {snap_id}, used by AMI")
+            logging.debug(f"Skipping snapshot {snap_id}, used by AMI")
+            runlog.current().skip("used_by_ami")
             return Skipped(id=snap_id, reason="used by AMI")
         return Candidate(id=snap_id, region=region, launch_time=start_time)
 
@@ -287,13 +304,20 @@ class Snapshot(Service):
         now = runtime.clock()
         cleaner.check_age(now)
         for region in runtime.list_regions():
+            started = _regionlog.start()
             try:
                 client = runtime.client_factory(region)
+                scanned = selected = 0
                 for decision in cleaner.iter_region(client, region, now):
+                    scanned += 1
                     if not isinstance(decision, Candidate):
                         continue
-                    failure = cleaner.delete_one(client, decision.id, dry_run=self.dry_run)
+                    selected += 1
+                    failure = cleaner.delete_one(
+                        client, decision.id, dry_run=self.dry_run, region=region
+                    )
                     if failure is None:
                         self.deleted_snapshots.append(decision.id)
+                _regionlog.region_done(region, scanned, selected, started)
             except CONNECTIVITY_ERRORS as e:
                 _skip_region(region, e)

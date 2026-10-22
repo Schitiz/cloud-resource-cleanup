@@ -19,11 +19,22 @@ _AGE_CHECK_PATTERNS = (
     re.compile(r"^The resource is not older than the threshold specified in the age argument$"),
     re.compile(r"^No tags provided to search for custom_age_tag_key\.$"),
     re.compile(r"^Searching for custom_age_tag_key: "),
+    re.compile(r"^Keypair .+ is not old enough to be deleted\.$"),
+    re.compile(r"^Keypair .+ is in exception_regex "),
+)
+_KMS_SKIP_PATTERNS = (re.compile(r"^KEY SKIPPED "),)
+_SNAPSHOT_SKIP_PATTERNS = (
+    re.compile(r"^Skipping snapshot .+, used by AMI$"),
+    re.compile(r"^Snap .+ has tag "),
 )
 
 
 def _is_age_check(message: str) -> bool:
     return any(pattern.search(message) for pattern in _AGE_CHECK_PATTERNS)
+
+
+def _matches(patterns: tuple[re.Pattern[str], ...], message: str) -> bool:
+    return any(pattern.search(message) for pattern in patterns)
 
 
 def _with_level(record: LogRecordKey, level: int) -> LogRecordKey:
@@ -41,8 +52,29 @@ def _bug_356(records: list[LogRecordKey]) -> list[LogRecordKey]:
     ]
 
 
+def _to_debug(
+    records: list[LogRecordKey], patterns: tuple[re.Pattern[str], ...]
+) -> list[LogRecordKey]:
+    return [
+        _with_level(record, logging.DEBUG) if _matches(patterns, str(record[-1])) else record
+        for record in records
+    ]
+
+
+def _bug_357(records: list[LogRecordKey]) -> list[LogRecordKey]:
+    """BUG-357: the AWS KMS ``KEY SKIPPED <id>`` warnings become DEBUG, text unchanged."""
+    return _to_debug(records, _KMS_SKIP_PATTERNS)
+
+
+def _bug_359(records: list[LogRecordKey]) -> list[LogRecordKey]:
+    """BUG-359: the per-snapshot skip lines (used by AMI, exception tag) become DEBUG."""
+    return _to_debug(records, _SNAPSHOT_SKIP_PATTERNS)
+
+
 RULES: dict[str, Callable[[list[LogRecordKey]], list[LogRecordKey]]] = {
     "BUG-356": _bug_356,
+    "BUG-357": _bug_357,
+    "BUG-359": _bug_359,
 }
 
 
