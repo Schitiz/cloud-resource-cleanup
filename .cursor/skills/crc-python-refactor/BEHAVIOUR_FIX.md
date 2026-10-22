@@ -67,7 +67,7 @@ If a fix needs one of them changed, or needs a new `SAF-NNN` invariant in
 
 ## 5. Docs and records
 
-- Set the `Status` of each fixed row in `docs/refactor/BUGS.md` to `fixed (<rung>)`;
+- Set the `Status` of each fixed row in `docs/refactor/BUGS.md` to `fixed in <rung>` (as `BUGS.md` says);
   keep the row.
 - Update the Safety Invariants of the README that owned the bug and, if destructive
   behaviour changed, `CLEANUP_SAFETY.md` (CODEOWNERS file: the PLAN.md entry must

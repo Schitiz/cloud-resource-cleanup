@@ -27,9 +27,10 @@ crc/aws|azu|gcp|oci/      one module per resource, registered by decorator
 - `crc.core` never imports a cloud package or a cloud SDK (`boto3`, `azure`,
   `google`, `oci`). Policy and age logic are pure functions on plain data.
 - Notifiers (`crc.notify`) consume the report model only.
-- Enforced by import-linter (`lint-imports`, config in `pyproject.toml`). Today
-  the independence contract for the four cloud packages is active. The core
-  layer contract is a commented TODO until `crc/core` exists.
+- Enforced by import-linter (`lint-imports`, config in `pyproject.toml`): the four
+  cloud packages are independent, `crc.core` imports no cloud package, service,
+  notify module or cloud/telemetry SDK, and `crc.notify` imports no cloud package
+  or service.
 
 ## Cleaner contract
 
