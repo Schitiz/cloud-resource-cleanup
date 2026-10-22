@@ -42,7 +42,7 @@ DAY = datetime.timedelta(days=1)
 HOUR = datetime.timedelta(hours=1)
 KEEP = {"keep": ["true"]}
 
-BUGS = {"BUG-356", "BUG-358"}  # log-only divergences of the LOG-AZU rung
+BUGS = {"BUG-356"}  # log-only divergences of the LOG-AZU rung
 
 
 def boom(text: str = "boom") -> Exception:
