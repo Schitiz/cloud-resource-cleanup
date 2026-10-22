@@ -94,3 +94,34 @@ integration.
 6. **`make check`**: ruff, mypy, import-linter (5/5 contracts kept), and `pytest -q` all pass with **42272 passed** (up from 42256 at `7437ac5`).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope `git diff 7437ac5..HEAD` (commits `11e31d2`, `949cce5`).
+
+### Round 1 fixes re-checked
+
+- Out-of-scope formatting revert: confirmed; the diff touches only `crc/aws/{vm,disk,spot_instance_requests}`, their parity tests, `tests/helpers_log_fix.py`, `tests/test_aws_log_fix.py` and this file.
+- Spot `fail()` at `describe_tagged_leftover_volumes()` / `live_spot_request_tags()` and region threading through `volume_ok_to_delete()`, `inspect_instance()`, `wait_volume_available_then_delete()`: present and pinned by `test_spot_volume_and_sweep_failures_carry_region`.
+- VM `id=-` fallback and `__init__` re-exports of `note_dry_run` / `note_region`: present, README in sync.
+
+### Independent checks
+
+1. Behaviour: the only non-log edits are added `runlog.current().*` calls, optional trailing `region` parameters (default `None`, positional order kept) and `time.monotonic()` reads. No condition, return value, SDK call or call order changed; Slack/Influx/CLI/exit codes untouched. Parity tests assert calls, results, errors and stdout unchanged against the live oracles.
+2. Formats: all lines come from `crc.core.runlog` (not edited here); call sites pass kinds in `ACTION_KINDS` and snake_case skip reasons. Unit tests assert exact REGION/ACTION/ERRORS/FAILED/RESULT text and ERROR/INFO levels.
+3. Parity: `tests/legacy/` untouched. Every log divergence goes through `expected_logs(old.logs, FIXED_BUGS)`; the new rules (`_bug_358_aws_vm`, the `_is_skip_line` extension of BUG-356) only lower INFO records to DEBUG, never drop or rewrite text; BUG-361/362 are identity rules (parity runs have no begun run, so no new lines), and the new lines are asserted exactly in `tests/test_aws_log_fix.py`. `oracle != new` is asserted per package (VM BUG-358, disk and spot BUG-356). No global loosening.
+4. Safety lock: `tests/archtest/**` (including `safety_lock.json`) and the locked `test_aws_disk.py` / `test_aws_spot_instance_requests.py` are untouched; `crc/core`, `crc/cli`, BUGS/STATUS/PLAN, AGENTS/ARCHITECTURE/CLEANUP_SAFETY and `.cursor/**` are untouched.
+5. READMEs: `note_region` / `note_dry_run` are listed in `crc/aws/vm/README.md` Public API and the logging invariant is in all three package READMEs.
+6. Gates: `pip install -r requirements.txt -r requirements-dev.txt` then `make check`: ruff, mypy strict, lint-imports, pytest all green, **42272 passed** (42256 at `7437ac5`).
+
+### Findings (all NIT, none blocking)
+
+- NIT `crc/aws/spot_instance_requests/cleanup.py:97-107`: after an ambiguous terminate error, `fail()` is recorded and, when the instance turns out `shutting-down`, an `ACTION deleted` for the same instance follows, so it counts in both `failed` and `done`. This matches the ERROR line on main followed by the instance going into the deleted list; leave it as is, or skip the `fail()` when the state shows the terminate took effect (follow-up, log-only).
+- NIT `crc/aws/disk/cleaner.py:123-125` (via `region_guard` in `apply_region`) and `crc/aws/spot_instance_requests/cleaner.py:257`: a connectivity error in the Cleaner `apply()` phase calls `region_skipped()` for a region that `plan()` already counted with `region()`, so `regions + regions_skipped` can be larger than the number of regions. This is a rare edge case and the counters still match the warning lines.
+- NIT `tests/test_aws_disk_parity.py:1103-1108,1334-1336`: formatting-only edits (lambda wrap, two trailing blank lines removed) left over from the coder commit. They are harmless and in the lane's own file.
+- NIT `tests/test_aws_log_fix.py` is 408 lines. ARCH-004 currently checks `crc/` only (gate green), but splitting the file per cleaner would keep it under the 400-line style.
+- Note: the disk cleaner counts unauthorised/opt-in region skips as `region_skipped` (the contract names connectivity skips only), and the VM missing-Name-tag case is a `fail()` because main logs it at ERROR. Both are documented above and acceptable.
+
+No runlog API gap found; no owner action needed.
+
+ROUND 2 VERDICT: APPROVE
