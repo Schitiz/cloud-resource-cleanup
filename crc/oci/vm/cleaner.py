@@ -26,7 +26,7 @@ from crc.core.cleaner import (
     Skipped,
 )
 from crc.core.registry import register
-from crc.oci import _runlog
+from crc.oci import _logger
 from crc.oci._base import Base
 from crc.oci.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
 from crc.oci.disk.api import RegionLister, regions_of
@@ -124,13 +124,13 @@ class VmCleaner:
         candidates: list[Candidate] = []
         skipped: list[Skipped] = []
         for region in self._list_regions():
-            started = _runlog.region_started()
+            started = _logger.region_started()
             try:
                 api = self._api_factory(region)
                 instances = api.list_instances()
             except CONNECTIVITY_ERRORS as e:
                 log_skipped_region(region, f"list_instances vm {context.operation}", e)
-                _runlog.region_skipped(region, e)
+                _logger.region_skipped(region, e)
                 continue
             selected = 0
             for instance in instances:
@@ -140,7 +140,7 @@ class VmCleaner:
                     selected += 1
                 else:
                     skipped.append(decision)
-            _runlog.region_done(region, len(instances), selected, started)
+            _logger.region_done(region, len(instances), selected, started)
         if context.dry_run:
             _log_for(context.operation, [c.name for c in candidates], dry_run=True)
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
@@ -171,7 +171,7 @@ class VmCleaner:
         check, as `datetime.now()` is on main."""
         reason = self._skip_reason(instance, clock)
         if reason is not None:
-            _runlog.record_skip(SKIP_KEYS[reason])
+            _logger.record_skip(SKIP_KEYS[reason])
             return Skipped(id=instance.id, reason=reason, name=instance.display_name)
         return Candidate(
             id=instance.id,
@@ -204,14 +204,14 @@ class VmCleaner:
             done.append(candidate.name)
         except Exception as e:
             logging.error(f"Error occurred while {operation} instance {candidate.name}: {e}")
-            _runlog.record_failure(candidate.region, candidate.id, e)
+            _logger.record_failure(candidate.region, candidate.id, e)
             return Failure(id=candidate.name, error=str(e))
         self._record(candidate, operation, dry_run=dry_run)
         return None
 
     @staticmethod
     def _record(candidate: Candidate, operation: Operation, *, dry_run: bool) -> None:
-        _runlog.record_action(
+        _logger.record_action(
             operation,
             dry_run=dry_run,
             region=candidate.region,

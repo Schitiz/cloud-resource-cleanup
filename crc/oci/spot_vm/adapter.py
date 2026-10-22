@@ -14,7 +14,7 @@ from typing import Any, ClassVar
 
 from crc.core import age as core_age
 from crc.core.cleaner import Operation
-from crc.oci import _runlog
+from crc.oci import _logger
 from crc.oci._base import Base
 from crc.oci.spot_vm import decide, leftovers
 from crc.oci.spot_vm.cleaner import SpotVmCleaner, log_instance_error, log_summary
@@ -152,7 +152,7 @@ class SpotVM(Service, Base):
                 blockstorage_client, volume_id, self.volumes_to_delete, self._region
             )
         if len(self.volumes_to_delete) > before:
-            _runlog.record_action(
+            _logger.record_action(
                 Operation.DELETE,
                 dry_run=self.dry_run,
                 region=self._region,
@@ -173,7 +173,7 @@ class SpotVM(Service, Base):
             self._pager(),
         )
         for region in list_regions():
-            started = _runlog.region_started()
+            started = _logger.region_started()
             listed = cleaner.list_region(region)
             if listed is None:
                 continue
@@ -184,8 +184,8 @@ class SpotVM(Service, Base):
                     selected += self._process(clients, instance, runtime.clock, region)
                 except Exception as e:
                     log_instance_error(getattr(instance, "display_name", "?"), e)
-                    _runlog.record_failure(region, getattr(instance, "id", "?"), e)
-            _runlog.region_done(region, len(instances), selected, started)
+                    _logger.record_failure(region, getattr(instance, "id", "?"), e)
+            _logger.region_done(region, len(instances), selected, started)
 
         log_summary(self.instance_names_to_delete, self.volumes_to_delete, dry_run=self.dry_run)
 
@@ -216,7 +216,7 @@ class SpotVM(Service, Base):
                     instance.display_name,
                 )
         self.instance_names_to_delete.append(instance.display_name)
-        _runlog.record_action(
+        _logger.record_action(
             Operation.DELETE,
             dry_run=self.dry_run,
             region=region,

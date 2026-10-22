@@ -14,7 +14,7 @@ from typing import cast
 
 from crc.core import age as core_age
 from crc.core import policy
-from crc.oci import _runlog
+from crc.oci import _logger
 from crc.oci.spot_vm.client import SdkInstance
 
 DEFAULT_INSTANCE_STATES = ("RUNNING", "STOPPED")
@@ -107,7 +107,7 @@ def skip_reason(settings: SpotVmSettings, instance: SdkInstance, clock: Clock) -
     )
     for reason, applies in kept_when:
         if applies():
-            _runlog.record_skip(SKIP_KEYS[reason])
+            _logger.record_skip(SKIP_KEYS[reason])
             return reason
     return None
 

@@ -1,4 +1,4 @@
-"""LOG-OCI: the OCI cleaners report to `crc.core.runlog` (REGION, ACTION, SKIPPED, FAILED,
+"""LOG-OCI: the OCI cleaners report to `crc.core.logger` (REGION, ACTION, SKIPPED, FAILED,
 RESULT) and move per-resource diagnostics to DEBUG. Exact lines of an attached run."""
 
 import datetime
@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 from oci.exceptions import ConnectTimeout
 
-from crc.core import runlog
+from crc.core import logger
 from crc.core.cleaner import Operation, RunContext
 from crc.oci.disk import Disk, DiskCleaner, DiskRuntime, DiskSettings
 from crc.oci.spot_vm import SpotVM, SpotVmCleaner, SpotVmRuntime
@@ -35,9 +35,9 @@ class Clock:
 @pytest.fixture(autouse=True)
 def _env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setenv("OCI_PRIVATE_KEY_CONTENT", "not-a-key")
-    runlog.finish()
+    logger.finish()
     yield
-    runlog.finish()
+    logger.finish()
 
 
 def _lines(caplog: pytest.LogCaptureFixture, *prefixes: str) -> list[tuple[int, str]]:
@@ -47,7 +47,7 @@ def _lines(caplog: pytest.LogCaptureFixture, *prefixes: str) -> list[tuple[int, 
 
 
 def _begin(resource: str, *, dry_run: bool, operation: str = "delete") -> None:
-    runlog.begin("oci", resource, operation, dry_run, {"age": AGE}, clock=Clock())
+    logger.begin("oci", resource, operation, dry_run, {"age": AGE}, clock=Clock())
 
 
 def _timeout() -> Exception:
@@ -115,7 +115,7 @@ def test_vm_adapter_reports_regions_actions_skips_and_result(
     _begin("vm", dry_run=dry_run, operation=operation)
     vm = _vm(_vm_runtime({"r1": VmApi(VM_INSTANCES), "r2": VmApi([])}), dry_run=dry_run)
     getattr(vm, operation)()
-    runlog.finish()
+    logger.finish()
     assert _lines(caplog, "REGION", "ACTION", "SKIPPED", "ERRORS", "FAILED", "RESULT") == [
         (logging.INFO, f"ACTION {kind} cloud=oci resource=vm region=r1 id=a name=name-a"),
         (logging.INFO, "REGION cloud=oci resource=vm region=r1 scanned=4 selected=1 seconds=0"),
@@ -139,7 +139,7 @@ def test_vm_adapter_counts_a_skipped_region_and_a_failed_terminate(
     _begin("vm", dry_run=False)
     apis = {"r1": _timeout(), "r2": VmApi([inst("a"), inst("b")], {"a": RuntimeError("denied")})}
     _vm(_vm_runtime(apis), dry_run=False).delete()
-    runlog.finish()
+    logger.finish()
     assert _lines(caplog, "Region ", "Error occurred") == [
         (
             logging.WARNING,
@@ -180,7 +180,7 @@ def test_vm_cleaner_plan_and_dry_run_apply_report(caplog: pytest.LogCaptureFixtu
     )
     context = RunContext(dry_run=True, operation=Operation.DELETE, options={}, now=NOW)
     cleaner.apply(cleaner.plan(context), context)
-    runlog.finish()
+    logger.finish()
     assert _lines(caplog, "ACTION", "REGION") == [
         (logging.INFO, "REGION cloud=oci resource=vm region=r1 scanned=4 selected=1 seconds=0"),
         (logging.INFO, "ACTION would_delete cloud=oci resource=vm region=r1 id=a name=name-a"),
@@ -255,7 +255,7 @@ def test_disk_adapter_reports_regions_actions_skips_and_result(
     _begin("disk", dry_run=dry_run)
     api = DiskApi(DISKS, [vol("boot")], attached=["att"])
     _disk({"r1": api, "r2": _timeout()}, dry_run=dry_run).delete()
-    runlog.finish()
+    logger.finish()
     assert _lines(caplog, "ACTION", "REGION", "SKIPPED", "ERRORS", "RESULT") == [
         (logging.INFO, f"ACTION {kind} cloud=oci resource=disk region=r1 id=a name=name-a"),
         (logging.INFO, f"ACTION {kind} cloud=oci resource=disk region=r1 id=boot name=name-boot"),
@@ -278,7 +278,7 @@ def test_disk_failed_delete_is_listed_at_the_end(caplog: pytest.LogCaptureFixtur
     _begin("disk", dry_run=False)
     api = DiskApi([vol("a"), vol("b")], failing={"a": RuntimeError("busy")})
     _disk({"r1": api}, dry_run=False).delete()
-    runlog.finish()
+    logger.finish()
     assert _lines(caplog, "ERRORS", "FAILED", "RESULT") == [
         (logging.ERROR, "ERRORS count=1"),
         (logging.ERROR, "FAILED cloud=oci resource=disk region=r1 id=a error=RuntimeError: busy"),
@@ -304,7 +304,7 @@ def test_disk_cleaner_plan_reports_region_and_skipped_region(
 
     cleaner = DiskCleaner(factory, lambda: list(apis), DiskSettings(FILTER, age=AGE))
     cleaner.plan(RunContext(dry_run=True, operation=Operation.DELETE, options={}, now=NOW))
-    runlog.finish()
+    logger.finish()
     assert _lines(caplog, "REGION", "RESULT") == [
         (logging.INFO, "REGION cloud=oci resource=disk region=r1 scanned=4 selected=2 seconds=0"),
         (
@@ -382,7 +382,7 @@ def test_spot_vm_adapter_reports_instance_and_volume_actions(
     )
     client.volume_tags = {"v-a": {}}
     _spot(client, dry_run=dry_run).delete()
-    runlog.finish()
+    logger.finish()
     done = 0 if dry_run else 2
     assert _lines(caplog, "ACTION", "REGION", "SKIPPED", "RESULT") == [
         (
@@ -414,7 +414,7 @@ def test_spot_vm_protected_leftover_volume_is_debug_and_counted(
     spot = _spot(client, dry_run=False)
     spot.exception_tags = {"keep": ["1"]}
     spot.delete()
-    runlog.finish()
+    logger.finish()
     assert _lines(caplog, "Skipping leftover") == [
         (logging.DEBUG, "Skipping leftover volume v-a: exception_tags/notags")
     ]
@@ -432,7 +432,7 @@ def test_spot_vm_attachment_failure_is_a_listed_failure(caplog: pytest.LogCaptur
     client = SpotClient([spot_inst("a")])
     client.fail_attachments = True
     _spot(client, dry_run=False).delete()
-    runlog.finish()
+    logger.finish()
     assert _lines(caplog, "ERRORS", "FAILED", "RESULT") == [
         (logging.ERROR, "ERRORS count=1"),
         (
@@ -463,7 +463,7 @@ def test_spot_vm_cleaner_plan_apply_reports(
     )
     context = RunContext(dry_run=dry_run, operation=Operation.DELETE, options={}, now=NOW)
     cleaner.apply(cleaner.plan(context), context)
-    runlog.finish()
+    logger.finish()
     assert _lines(caplog, "ACTION", "REGION") == [
         (
             logging.INFO,

@@ -75,8 +75,8 @@ def _bug_358(records: list[LogRecordKey]) -> list[LogRecordKey]:
 
 def _inserted_lines_only(records: list[LogRecordKey]) -> list[LogRecordKey]:
     """BUG-361 and BUG-362 only add RUN START/REGION/ACTION/SKIPPED/ERRORS/FAILED/RESULT lines
-    in an attached run (`runlog.begin`). A parity run is unattached, so the oracle list is
-    unchanged; the new lines are asserted exactly in the runlog unit tests, never dropped here."""
+    in an attached run (`logger.begin`). A parity run is unattached, so the oracle list is
+    unchanged; the new lines are asserted exactly in the logger unit tests, never dropped here."""
     return list(records)
 
 

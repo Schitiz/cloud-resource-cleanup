@@ -11,7 +11,7 @@ from collections.abc import Sequence
 
 from crc.core import age as core_age
 from crc.core.cleaner import Candidate
-from crc.oci import _runlog
+from crc.oci import _logger
 from crc.oci._base import Base
 from crc.oci.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
 from crc.oci.disk.api import SdkVolume, VolumeApi, api_for, regions_of
@@ -96,13 +96,13 @@ class Disk(Service, Base):
             ),
         )
         for region in list_regions():
-            started = _runlog.region_started()
+            started = _logger.region_started()
             try:
                 api = api_factory(region)
                 volumes, boot_volumes = cleaner.list_region(api)
             except CONNECTIVITY_ERRORS as e:
                 log_skipped_region(region, _LIST_CONTEXT, e)
-                _runlog.region_skipped(region, e)
+                _logger.region_skipped(region, e)
                 continue
             attached = cleaner.attached_volume_ids(api, region)
             selected = self._process(cleaner, api, volumes, attached, KIND_DISK, region)
@@ -110,7 +110,7 @@ class Disk(Service, Base):
             selected += self._process(
                 cleaner, api, boot_volumes, attached_boot, KIND_BOOT_DISK, region
             )
-            _runlog.region_done(region, len(volumes) + len(boot_volumes), selected, started)
+            _logger.region_done(region, len(volumes) + len(boot_volumes), selected, started)
         _log_summary(self.disk_names_to_delete, dry_run=self.dry_run)
 
     def _process(

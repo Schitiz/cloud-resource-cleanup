@@ -11,7 +11,7 @@ from typing import ClassVar
 
 from crc.core import age as core_age
 from crc.core.cleaner import Candidate, Operation
-from crc.oci import _runlog
+from crc.oci import _logger
 from crc.oci._base import Base
 from crc.oci.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
 from crc.oci.disk.api import RegionLister, regions_of
@@ -128,13 +128,13 @@ class VM(Service, Base):
             else self.instance_names_to_stop
         )
         for region in list_regions():
-            started = _runlog.region_started()
+            started = _logger.region_started()
             try:
                 api = api_factory(region)
                 instances = api.list_instances()
             except CONNECTIVITY_ERRORS as e:
                 log_skipped_region(region, f"list_instances vm {operation}", e)
-                _runlog.region_skipped(region, e)
+                _logger.region_skipped(region, e)
                 continue
             selected = 0
             for instance in instances:
@@ -142,7 +142,7 @@ class VM(Service, Base):
                 if isinstance(decision, Candidate):
                     selected += 1
                     cleaner.act(api, decision, operation, names, dry_run=self.dry_run)
-            _runlog.region_done(region, len(instances), selected, started)
+            _logger.region_done(region, len(instances), selected, started)
         _log_summary(
             operation,
             self.instance_names_to_delete,

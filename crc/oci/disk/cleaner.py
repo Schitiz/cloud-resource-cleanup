@@ -27,7 +27,7 @@ from crc.core.cleaner import (
     Skipped,
 )
 from crc.core.registry import register
-from crc.oci import _runlog
+from crc.oci import _logger
 from crc.oci._base import Base
 from crc.oci.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
 from crc.oci.disk.api import (
@@ -126,14 +126,14 @@ class DiskCleaner:
         candidates: list[Candidate] = []
         skipped: list[Skipped] = []
         for region in self._list_regions():
-            started = _runlog.region_started()
+            started = _logger.region_started()
             before = len(candidates)
             try:
                 api = self._api_factory(region)
                 volumes, boot_volumes = self.list_region(api)
             except CONNECTIVITY_ERRORS as e:
                 log_skipped_region(region, _LIST_CONTEXT, e)
-                _runlog.region_skipped(region, e)
+                _logger.region_skipped(region, e)
                 continue
             attached = self.attached_volume_ids(api, region)
             self._decide_all(volumes, attached, KIND_DISK, region, context.now, candidates, skipped)
@@ -147,7 +147,7 @@ class DiskCleaner:
                 candidates,
                 skipped,
             )
-            _runlog.region_done(
+            _logger.region_done(
                 region, len(volumes) + len(boot_volumes), len(candidates) - before, started
             )
         if context.dry_run:
@@ -214,7 +214,7 @@ class DiskCleaner:
         """State, attachment, tag and age checks common to block and boot volumes."""
         reason = self._skip_reason(volume, attached_ids, now)
         if reason is not None:
-            _runlog.record_skip(SKIP_KEYS[reason])
+            _logger.record_skip(SKIP_KEYS[reason])
             return Skipped(id=volume.id, reason=reason, name=volume.display_name)
         return Candidate(
             id=volume.id,
@@ -242,9 +242,9 @@ class DiskCleaner:
             deleted.append(candidate.name)
         except Exception as e:
             logging.error(f"Error occurred while deleting {kind} {candidate.name}: {e}")
-            _runlog.record_failure(candidate.region, candidate.id, e)
+            _logger.record_failure(candidate.region, candidate.id, e)
             return Failure(id=candidate.name, error=str(e))
-        _runlog.record_action(
+        _logger.record_action(
             Operation.DELETE,
             dry_run=dry_run,
             region=candidate.region,

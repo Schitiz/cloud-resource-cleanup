@@ -24,7 +24,7 @@ from crc.core.cleaner import (
     Skipped,
 )
 from crc.core.registry import register
-from crc.oci import _runlog
+from crc.oci import _logger
 from crc.oci._base import Base
 from crc.oci.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
 from crc.oci.spot_vm import leftovers
@@ -88,7 +88,7 @@ class SpotVmCleaner:
         candidates: list[Candidate] = []
         skipped: list[Skipped] = []
         for region in self._list_regions():
-            started = _runlog.region_started()
+            started = _logger.region_started()
             listed = self.list_region(region)
             if listed is None:
                 continue
@@ -103,8 +103,8 @@ class SpotVmCleaner:
                         candidates.append(self._checked(clients, decision, context.dry_run))
                 except Exception as e:
                     log_instance_error(getattr(instance, "display_name", "?"), e)
-                    _runlog.record_failure(region, getattr(instance, "id", "?"), e)
-            _runlog.region_done(region, len(instances), len(candidates) - before, started)
+                    _logger.record_failure(region, getattr(instance, "id", "?"), e)
+            _logger.region_done(region, len(instances), len(candidates) - before, started)
         if context.dry_run:
             volumes = [v for c in candidates for v in c.extra["volumes"]]
             log_summary([c.name for c in candidates], volumes, dry_run=True)
@@ -122,7 +122,7 @@ class SpotVmCleaner:
         if context.dry_run:
             volumes = [v for c in plan.candidates for v in c.extra["volumes"]]
             for candidate in plan.candidates:
-                _runlog.record_action(
+                _logger.record_action(
                     Operation.DELETE,
                     dry_run=True,
                     region=candidate.region,
@@ -130,7 +130,7 @@ class SpotVmCleaner:
                     name=candidate.name,
                 )
                 for volume_id in candidate.extra["volumes"]:
-                    _runlog.record_action(
+                    _logger.record_action(
                         Operation.DELETE,
                         dry_run=True,
                         region=candidate.region,
@@ -147,7 +147,7 @@ class SpotVmCleaner:
                 self.terminate(clients, candidate, done, deleted)
             except Exception as e:
                 log_instance_error(candidate.name, e)
-                _runlog.record_failure(candidate.region, candidate.id, e)
+                _logger.record_failure(candidate.region, candidate.id, e)
                 failed.append(Failure(id=candidate.id, error=str(e)))
         log_summary(done, deleted, dry_run=False)
         return Result(
@@ -163,11 +163,11 @@ class SpotVmCleaner:
             ).data
         except CONNECTIVITY_ERRORS as e:
             log_skipped_region(region, "list_instances spot/preemptible cleanup", e)
-            _runlog.region_skipped(region, e)
+            _logger.region_skipped(region, e)
             return None
         except Exception as e:
             logging.error("Region %s: failed listing instances: %s", region, e)
-            _runlog.record_failure(region, "-", e)
+            _logger.record_failure(region, "-", e)
             return None
         self._clients[region] = clients
         return clients, instances
@@ -219,7 +219,7 @@ class SpotVmCleaner:
                 candidate.name,
             )
         done.append(candidate.name)
-        _runlog.record_action(
+        _logger.record_action(
             Operation.DELETE,
             dry_run=False,
             region=candidate.region,
@@ -233,7 +233,7 @@ class SpotVmCleaner:
                 before = len(deleted)
                 leftovers.delete_leftover(clients.block, volume_id, deleted, candidate.region)
                 if len(deleted) > before:
-                    _runlog.record_action(
+                    _logger.record_action(
                         Operation.DELETE,
                         dry_run=False,
                         region=candidate.region,
