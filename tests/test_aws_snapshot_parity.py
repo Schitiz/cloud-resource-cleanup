@@ -20,6 +20,7 @@ from crc.aws.snapshot import Snapshot, SnapshotCleaner, SnapshotRuntime, build_s
 from crc.core import registry
 from crc.core.cleaner import Operation, RunContext
 from tests.helpers_log_fix import expected_logs, expected_outcome
+from tests.log_fix_aws_misc import RULES
 
 ORACLE = Path(__file__).parent / "legacy" / "aws_snapshot.txt"
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=datetime.UTC)
@@ -457,7 +458,7 @@ def test_matches_main(
     assert new.error == old.error
     assert new.deleted == old.deleted
     assert new.count == old.count
-    assert new.logs == expected_logs(old.logs, LOG_BUGS)
+    assert new.logs == expected_logs(old.logs, LOG_BUGS, rules=RULES)
     assert new.stdout == old.stdout
 
 
@@ -494,12 +495,12 @@ def test_cleaner_protocol_matches_main(
     assert new.error == old.error
     assert new.stdout == old.stdout
     assert new_other == old_other
-    assert new_plan_logs == expected_logs(old_plan_logs, LOG_BUGS)
+    assert new_plan_logs == expected_logs(old_plan_logs, LOG_BUGS, rules=RULES)
     if new.error is None:
         assert new.deleted == old.deleted
         assert new.count == old.count
         assert new_deletes == old_deletes
-        assert new_delete_logs == expected_logs(old_delete_logs, LOG_BUGS)
+        assert new_delete_logs == expected_logs(old_delete_logs, LOG_BUGS, rules=RULES)
     else:
         assert new_deletes == []
 
@@ -523,7 +524,7 @@ def test_cleaner_protocol_logs_in_order_when_nothing_interleaves(
     new = _run_cleaner(case, monkeypatch, caplog, capsys)
     skip_logs = [r for r in old.logs if r[2].startswith(("Skipping snapshot", "Snap "))]
     if old.error is None and _single_region_error_free_matches_exactly(case) and not skip_logs:
-        assert new.logs == expected_logs(old.logs, LOG_BUGS)
+        assert new.logs == expected_logs(old.logs, LOG_BUGS, rules=RULES)
         return
     plan_logs, delete_logs = _split_logs(new.logs)
     assert new.logs == plan_logs + delete_logs
@@ -635,7 +636,7 @@ def test_quirk_is_preserved(
     new = _run(_new, case, monkeypatch, caplog, capsys)
     assert check(old), "oracle no longer shows the quirk"
     assert check(new)
-    assert new.logs == expected_logs(old.logs, LOG_BUGS)
+    assert new.logs == expected_logs(old.logs, LOG_BUGS, rules=RULES)
 
 
 def test_cases_cover_both_dry_run_and_real_runs() -> None:
@@ -693,7 +694,7 @@ def test_is_protected_matches_main(
     old = _load_oracle().Snapshot(False, 90, exception_tags)
     new = Snapshot(False, 90, exception_tags)
     assert _protected_outcome(new, tags, "snap-1", caplog) == expected_outcome(
-        _protected_outcome(old, tags, "snap-1", caplog), LOG_BUGS
+        _protected_outcome(old, tags, "snap-1", caplog), LOG_BUGS, rules=RULES
     )
 
 
@@ -751,6 +752,6 @@ def test_snapshot_skip_lines_are_debug(
     assert {r[1] for r in skip_lines} <= {logging.INFO}
     assert new.calls == old.calls
     assert new.deleted == old.deleted
-    assert new.logs == expected_logs(old.logs, LOG_BUGS)
+    assert new.logs == expected_logs(old.logs, LOG_BUGS, rules=RULES)
     if skip_lines:
         assert new.logs != old.logs

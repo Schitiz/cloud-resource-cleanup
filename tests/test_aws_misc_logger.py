@@ -507,22 +507,3 @@ def test_unattached_run_logs_nothing_extra(caplog: pytest.LogCaptureFixture) -> 
     text = "\n".join(r.getMessage() for r in caplog.records)
     assert not any(word in text for word in ("REGION ", "ACTION ", "RESULT ", "SKIPPED "))
 
-
-def test_expected_logs_rules_only_change_levels() -> None:
-    from tests.helpers_log_fix import expected_logs
-
-    oracle = [
-        ("root", logging.WARNING, "KEY SKIPPED k1"),
-        ("root", logging.INFO, "Skipping snapshot s1, used by AMI"),
-        ("root", logging.INFO, "Snap s2 has tag keep"),
-        ("root", logging.WARNING, "List of AWS KMS deleted: []"),
-    ]
-    rewritten = expected_logs(oracle, {"BUG-357", "BUG-359"})
-    assert [r[2] for r in rewritten] == [r[2] for r in oracle]
-    assert [r[1] for r in rewritten] == [
-        logging.DEBUG,
-        logging.DEBUG,
-        logging.DEBUG,
-        logging.WARNING,
-    ]
-    assert expected_logs(oracle, {"BUG-357"})[1] == oracle[1]

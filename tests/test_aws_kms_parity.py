@@ -24,6 +24,7 @@ from crc.aws.kms import Kms, KmsCleaner, KmsRuntime, build_kms_cleaner
 from crc.core.cleaner import Cleaner, Operation, RunContext
 from crc.core.registry import get
 from tests.helpers_log_fix import expected_logs
+from tests.log_fix_aws_misc import RULES
 
 ORACLE = Path(__file__).parent / "legacy" / "aws_kms.txt"
 UTC = datetime.UTC
@@ -636,7 +637,7 @@ def test_matches_main(
     assert new.calls == old.calls
     assert new.error == old.error
     assert new.deleted == old.deleted
-    assert new.logs == expected_logs(old.logs, LOG_BUGS)
+    assert new.logs == expected_logs(old.logs, LOG_BUGS, rules=RULES)
     assert new.stdout == old.stdout
 
 
@@ -693,7 +694,7 @@ def test_cleaner_protocol_matches_main(
     assert new.stdout == old.stdout
     assert _without_client(new.calls) == _without_client(old.calls)
     assert all(c == ("client", "kms", "us-west-2") for c in new.calls if c[0] == "client")
-    assert new.logs == expected_logs(old.logs, LOG_BUGS)
+    assert new.logs == expected_logs(old.logs, LOG_BUGS, rules=RULES)
     assert new.deleted == old.deleted
     if case.fails_in_plan:
         assert not [c for c in new.calls if c[0] == "schedule_key_deletion"]

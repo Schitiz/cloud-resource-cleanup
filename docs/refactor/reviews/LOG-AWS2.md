@@ -163,3 +163,14 @@ the fix):
   `make check` exit 0
 
 ROUND 2 VERDICT: APPROVE
+
+## Rule move
+
+The lane rules (BUG-357, BUG-359 and the keypair skip-line patterns of BUG-356) moved from
+`tests/helpers_log_fix.py` to `tests/log_fix_aws_misc.py` (`RULES = {**helpers_log_fix.RULES, ...}`,
+with the lane's own `BUG-356` entry applying the core rule and then the keypair patterns), after
+`logging/core` (`7c27986`) made `expected_logs` / `expected_outcome` take `rules`. The KMS, snapshot
+and keypair parity tests pass `rules=RULES`; `tests/helpers_log_fix.py` and
+`tests/test_log_fix_helpers.py` are identical to `origin/logging/core`, so lane branches no longer
+conflict there. The rewriter unit test moved to `tests/test_log_fix_aws_misc.py` (plus tests for the
+BUG-356 extension). No production code changed.
