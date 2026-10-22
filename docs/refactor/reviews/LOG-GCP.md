@@ -54,3 +54,56 @@ Left / notes:
 - No locked safety test asserts these log levels (`test_gcp_spot_vm.py` has no log assertion);
   none was touched. No `## Owner action` needed.
 - The runlog API had everything needed; nothing was worked around. `crc/core` and `crc/cli` untouched.
+
+## Round 1 (Argon)
+
+Scope reviewed: `git diff 7437ac5..HEAD` (`crc/gcp/_scan.py`, `crc/gcp/disk.py`, `crc/gcp/ip.py`,
+`crc/gcp/vm.py`, `crc/gcp/spot_vm/{adapter,cleaner,disks,instances,README.md}`, `crc/gcp/README.md`,
+`docs/refactor/reviews/LOG-GCP.md`, `tests/helpers_log_fix.py`, `tests/test_log_fix_helpers_gcp.py`,
+`tests/test_gcp_runlog.py`, `tests/test_gcp_{disk,ip,vm,spot_instances}_parity.py`) against
+`docs/refactor/LOGGING.md`, `crc/core/runlog.py`, and `tests/legacy/gcp_{disk,ip,vm,spot_vm}.txt`.
+
+### 1. Contract & Behaviour Verification
+
+- **Selection, call order, and side effects unchanged**:
+  - `crc/gcp/disk.py`, `crc/gcp/vm.py`, `crc/gcp/ip.py`, and `crc/gcp/spot_vm/*` preserve the exact filter order, short-circuit evaluation, SDK calls, SDK call order, result lists/groupings, Slack/Influx inputs, CLI flags, and exception propagation of the pre-LOG code and `main` oracles.
+  - Per-resource label dumps (`crc/gcp/disk.py:280`, `crc/gcp/vm.py:269`), IP address dumps (`crc/gcp/ip.py:147`), and Spot leftover-disk label skip messages (`crc/gcp/spot_vm/disks.py:95`) are moved from `logging.info` to `logging.debug` with identical message text (`BUG-358`).
+  - Existing summary lines (`List of GCP ...`, `number of GCP ...`, `No GCP ...`) and inline error logs remain untouched at their existing levels.
+- **RunLog integration (`BUG-360`, `BUG-361`, `BUG-362`)**:
+  - `ZoneScan` (`crc/gcp/_scan.py:12-25`) uses `time.monotonic()` and calls `runlog.current().region(region, scanned, selected, seconds)` once per zone/region after listing completes across all four cleaners (`disk`, `vm`, `ip`, `spot_instances`).
+  - `SpotVMCleaner._list` (`crc/gcp/spot_vm/cleaner.py:82-88`) calls `runlog.current().region_skipped(zone, e)` when zone instance listing fails and emits no `REGION` line for that failed zone.
+  - `ACTION` lines (`would_delete`, `deleted`, `would_stop`, `stopped`) are emitted once per acted-on (or dry-run) candidate in both adapter (`Disk`, `VM`, `IP`, `SpotVM`) and `Cleaner` (`plan` in dry-run, `apply` in real run) execution paths.
+  - Skipped resources are counted via `runlog.current().skip(reason)` with snake_case reasons (`state`, `exception_tag`, `exception_regex`, `filter_mismatch`, `attached`, `never_detached`, `too_young`, `not_spot`, `managed_or_gke`, `disk_exception_tag`).
+  - Per-resource errors in `disk.py:254`, `vm.py:244`, `ip.py:184` (recorded before re-raising), `spot_vm/cleaner.py:51,208`, and `spot_vm/disks.py:92,119,124` call `runlog.current().fail(...)` while preserving inline error logging.
+
+### 2. Parity, Safety Locks & Scope Guardrails
+
+- Oracles in `tests/legacy/gcp_{disk,ip,vm,spot_vm}.txt` are untouched (`git diff 7437ac5..HEAD -- tests/legacy/` is empty).
+- `tests/helpers_log_fix.py` adds `_bug_358` to `RULES["BUG-358"]`, changing only `INFO` raw dict/address dumps and the Spot leftover-disk skip line to `DEBUG` without dropping or altering message text.
+- All four parity test modules assert `new.logs == expected_logs(old.logs, {"BUG-358"})`, keep all non-log assertions (`calls`, `deleted`/`stopped`/`disks`, `count`, `stdout`, `error`) exact against the oracle, and include an explicit `old.logs != new.logs` test for `BUG-358`.
+- `tests/archtest/safety_lock.json` and all locked safety test files (`tests/test_gcp_spot_vm.py`, etc.) are untouched.
+- `crc/core`, `crc/cli`, other cloud packages, and shared docs (`BUGS.md`, `STATUS.md`, `PLAN.md`) are untouched.
+- `crc/gcp/README.md` and `crc/gcp/spot_vm/README.md` document the new public symbols (`ZoneScan`, `log_action`, `scan_zone`, `reject_reason`) and satisfy `ARCH-002`.
+
+### BLOCKING
+
+None.
+
+### NIT
+
+- In the adapter path (`Disk.delete()`, `VM.delete()`/`stop()`, `SpotVM.delete()`), `plan_zone` / `scan_zone` yields candidates lazily while iterating the zone listing, so per-candidate `ACTION` lines for a zone are logged before `scan.finish()` emits that zone's `REGION` line (whereas `Cleaner.plan()` followed by `Cleaner.apply()` logs all `REGION` lines before `ACTION` lines). This is a direct consequence of preserving `main`'s interleaved list-and-act generator order while needing the full zone iteration to know `scanned` and `selected`.
+
+### Gates
+
+Ran `pip install -r requirements.txt -r requirements-dev.txt` then `make check`:
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed |
+| `mypy` (`crc`, `tests`) | Success: no issues found in 175 source files |
+| `lint-imports` | Contracts: 5 kept, 0 broken |
+| `pytest -q` | 42286 passed |
+
+Test count: 42256 before (`7437ac5`), 42286 after (+30).
+
+VERDICT: APPROVE
