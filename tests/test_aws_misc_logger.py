@@ -20,7 +20,7 @@ from crc.aws.keypairs import KeyPairRuntime, KeyPairs
 from crc.aws.kms import Kms, KmsCleaner, KmsRuntime, KmsSettings
 from crc.aws.snapshot import Snapshot, SnapshotRuntime
 from crc.aws.vpc import VPC, VpcCleaner, VpcRuntime
-from crc.core import runlog
+from crc.core import logger
 from crc.core.cleaner import Operation, RunContext
 from tests import test_aws_elastic_ips as eip_t
 from tests import test_aws_keypairs as kp_t
@@ -49,14 +49,14 @@ def run_lines(caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch)
 
     def begin(resource: str, *, dry_run: bool) -> None:
         operation = "delete"
-        runlog.begin("aws", resource, operation, dry_run, {}, clock=Ticker())
+        logger.begin("aws", resource, operation, dry_run, {}, clock=Ticker())
 
     def lines(level: int = logging.INFO) -> list[str]:
-        runlog.finish()
+        logger.finish()
         return [r.getMessage() for r in caplog.records if r.levelno >= level]
 
     yield begin, lines
-    runlog.finish()
+    logger.finish()
 
 
 def _run_lines(lines: list[str], *prefixes: str) -> list[str]:
@@ -160,12 +160,12 @@ def test_kms_cleaner_apply_reports_deleted() -> None:
         ),
     )
     context = RunContext(dry_run=False, operation=Operation.DELETE, options={}, now=kms_t.NOW)
-    run = runlog.begin("aws", "kms", "delete", False, {}, clock=Ticker())
+    run = logger.begin("aws", "kms", "delete", False, {}, clock=Ticker())
     try:
         cleaner.apply(cleaner.plan(context), context)
         assert run._done == 1
     finally:
-        runlog.finish()
+        logger.finish()
 
 
 def test_kms_unreachable_region_is_counted(run_lines: Any) -> None:

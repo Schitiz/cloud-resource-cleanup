@@ -18,7 +18,7 @@ import boto3
 from crc.aws import _regionlog
 from crc.aws._base import get_all_regions
 from crc.aws.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
-from crc.core import policy, runlog
+from crc.core import logger, policy
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext, Skipped
 from crc.core.registry import register
 from crc.service import Service
@@ -154,11 +154,11 @@ class ElasticIpCleaner:
                 continue
             tags = eip["Tags"]
             if self._should_skip(tags):
-                runlog.current().skip("exception_tag")
+                logger.current().skip("exception_tag")
                 skipped.append(Skipped(id=eip.get("PublicIp", ""), reason="matches exception_tags"))
                 continue
             if not self._select_on_filter(eip, tags, selected):
-                runlog.current().skip("no_filter_match")
+                logger.current().skip("no_filter_match")
                 skipped.append(Skipped(id=eip.get("PublicIp", ""), reason="no filter_tags match"))
         candidates = tuple(
             Candidate(id=ip, name=ip, region=region, extra={_ALLOCATION_ID: allocation_id})
@@ -172,7 +172,7 @@ class ElasticIpCleaner:
     ) -> list[str]:
         """Release `candidates` one by one and return their ids (also in a dry run, where
         nothing is released). The caller records the ids only once the whole region is done."""
-        run = runlog.current()
+        run = logger.current()
         for candidate in candidates:
             if dry_run:
                 run.action("would_delete", candidate.region, candidate.id, candidate.name)

@@ -21,7 +21,7 @@ from crc.aws._base import get_all_regions
 from crc.aws.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
 from crc.aws.vpc.client import Ec2Client, Ec2Resource, Vpc
 from crc.aws.vpc.teardown import tear_down
-from crc.core import policy, runlog
+from crc.core import logger, policy
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext, Skipped
 from crc.core.registry import register
 from crc.service import Service
@@ -79,7 +79,7 @@ def _log_summary(deleted: Sequence[str], *, dry_run: bool) -> None:
 
 
 def _delete_vpc_with_retries(client: Ec2Client, vpc: Vpc, region: str | None = None) -> None:
-    run = runlog.current()
+    run = logger.current()
     last_error: Exception | None = None
     for _ in range(_DELETE_RETRIES):
         try:
@@ -150,7 +150,7 @@ class VpcCleaner:
         ids = [candidate.id for candidate in plan.candidates]
         if context.dry_run:
             for candidate in plan.candidates:
-                runlog.current().action("would_delete", candidate.region, candidate.id)
+                logger.current().action("would_delete", candidate.region, candidate.id)
             return Result(succeeded=tuple(ids))
         by_region: dict[str, list[Candidate]] = {}
         for candidate in plan.candidates:
@@ -200,7 +200,7 @@ class VpcCleaner:
                 Candidate(id=vpc_id, name=vpc_id, region=region, extra={_PROTECTED: protected})
             )
             if protected:
-                runlog.current().skip("protected")
+                logger.current().skip("protected")
                 skipped.append(Skipped(id=vpc_id, reason="matches exception_tags or notags"))
         _regionlog.region_done(region, len(ids), len(ids) - len(skipped), started)
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
@@ -243,7 +243,7 @@ class VpcCleaner:
         try:
             tear_down(client, ec2, vpc)
         except Exception as e:
-            runlog.current().fail(region, vpc.id, e)
+            logger.current().fail(region, vpc.id, e)
             raise
         _delete_vpc_with_retries(client, vpc, region)
 
@@ -327,7 +327,7 @@ class VPC(Service):
         runtime = self._runtime
         cleaner = self._cleaner()
         vpc_filter = cleaner.build_filter()
-        run = runlog.current()
+        run = logger.current()
         for region in runtime.list_regions():
             started = _regionlog.start()
             try:

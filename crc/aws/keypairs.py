@@ -20,7 +20,7 @@ from crc.aws import _regionlog
 from crc.aws._base import get_all_regions
 from crc.aws.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
 from crc.core import age as core_age
-from crc.core import policy, runlog
+from crc.core import logger, policy
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext, Skipped
 from crc.core.registry import register
 from crc.service import Service
@@ -172,7 +172,7 @@ class KeyPairCleaner:
     ) -> None:
         """Delete `candidates` one by one, appending each name to `deleted` as it is done
         (also in a dry run, where nothing is deleted)."""
-        run = runlog.current()
+        run = logger.current()
         for candidate in candidates:
             if dry_run:
                 run.action("would_delete", candidate.region, candidate.id, candidate.name)
@@ -195,13 +195,13 @@ class KeyPairCleaner:
             if core_age.is_old(self._age or {}, now, created):
                 return None
             logging.debug(f"Keypair {name} is not old enough to be deleted.")
-            runlog.current().skip("too_young")
+            logger.current().skip("too_young")
             return "not older than age"
         if matches_exception:
             logging.debug(f"Keypair {name} is in exception_regex {self._exception_regex}.")
-            runlog.current().skip("exception_regex")
+            logger.current().skip("exception_regex")
             return "matches exception_regex"
-        runlog.current().skip("name_regex_mismatch")
+        logger.current().skip("name_regex_mismatch")
         return "does not match name_regex"
 
 

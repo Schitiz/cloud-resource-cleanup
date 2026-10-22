@@ -21,7 +21,7 @@ import boto3
 from crc.aws import _regionlog
 from crc.aws.connectivity import CONNECTIVITY_ERRORS
 from crc.core import age as core_age
-from crc.core import policy, runlog
+from crc.core import logger, policy
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext, Skipped
 from crc.core.registry import register
 from crc.service import Service
@@ -113,7 +113,7 @@ def _log_summary(deleted: Sequence[str], *, dry_run: bool) -> None:
 
 
 def _log_would_delete(key_ids: Sequence[str]) -> None:
-    run = runlog.current()
+    run = logger.current()
     for key_id in key_ids:
         run.action("would_delete", _DEFAULT_REGION, key_id)
 
@@ -203,7 +203,7 @@ class KmsCleaner:
                 logging.debug(f"KEY SKIPPED {key['KeyId']}")
                 # A key appended before the error stays selected: it is not a skip.
                 if len(active) == selected_before:
-                    runlog.current().skip(
+                    logger.current().skip(
                         _NOT_OURS if isinstance(e, _NotOursError) else _UNREADABLE
                     )
         _regionlog.region_done(_DEFAULT_REGION, len(keys), len(active), started)
@@ -215,7 +215,7 @@ class KmsCleaner:
 
     def schedule(self, client: KmsClient, key_ids: Sequence[str]) -> None:
         """Schedule `key_ids` one by one; the first error propagates."""
-        run = runlog.current()
+        run = logger.current()
         for cmk_id in key_ids:
             try:
                 client.schedule_key_deletion(
@@ -236,7 +236,7 @@ class KmsCleaner:
         if not _has_all_pairs(response_tags, self._settings.filter_tags):
             return
         if self._should_skip(response_tags):
-            runlog.current().skip("exception_tag")
+            logger.current().skip("exception_tag")
             return
         metadata = client.describe_key(KeyId=key_id)
         key_state = metadata["KeyMetadata"]["KeyState"]

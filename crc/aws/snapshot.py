@@ -21,7 +21,7 @@ import boto3
 from crc.aws import _regionlog
 from crc.aws._base import get_all_regions
 from crc.aws.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
-from crc.core import policy, runlog
+from crc.core import logger, policy
 from crc.core.cleaner import (
     Candidate,
     Cleaner,
@@ -202,7 +202,7 @@ class SnapshotCleaner:
         self, client: SnapshotClient, snap_id: str, *, dry_run: bool, region: str | None = None
     ) -> Failure | None:
         """Delete one snapshot (nothing in a dry run). Any error is logged and returned."""
-        run = runlog.current()
+        run = logger.current()
         if dry_run:
             run.action("would_delete", region, snap_id)
             return None
@@ -226,14 +226,14 @@ class SnapshotCleaner:
         snap_id = snap["SnapshotId"]
         start_time = snap["StartTime"]
         if not policy.snapshot_old_enough(start_time, now, self._age_days):
-            runlog.current().skip("too_young")
+            logger.current().skip("too_young")
             return Skipped(id=snap_id, reason="newer than age_days")
         if self.is_protected(snap.get("Tags"), snap_id):
-            runlog.current().skip("exception_tag")
+            logger.current().skip("exception_tag")
             return Skipped(id=snap_id, reason="has an exception tag")
         if snap_id in used:
             logging.debug(f"Skipping snapshot {snap_id}, used by AMI")
-            runlog.current().skip("used_by_ami")
+            logger.current().skip("used_by_ami")
             return Skipped(id=snap_id, reason="used by AMI")
         return Candidate(id=snap_id, region=region, launch_time=start_time)
 
