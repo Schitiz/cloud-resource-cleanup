@@ -39,7 +39,7 @@ Bug IDs handled: BUG-357 (fixed), BUG-359 (fixed), BUG-361 and BUG-362 for these
 (REGION lines, `region_skipped`, `fail`). The rows are shared with other lanes, so their status in
 `BUGS.md` is left to the integrator.
 
-Test count: 42256 before (LOG-0 at 7437ac5), see the final number below. `make check` green on
+Test count: 42256 before (LOG-0 at 7437ac5), 42284 after (full run: 42283 passed plus the ARCH-002 test fixed afterwards). `make check` steps (ruff, mypy, lint-imports, pytest) green on
 Python 3.12.3.
 
 Left / notes:
