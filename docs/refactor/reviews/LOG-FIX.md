@@ -34,7 +34,7 @@ Files changed:
   DEBUG when nothing selected) and `tests/test_cli_main_parity.py` (scan pass now logs RUN START /
   RESULT with operation=scan; outcome still equal to the oracle).
 
-Test count (pytest -q): 42432 before (df0c911), 42436 after (4 new tests in `tests/test_cli_logging_init.py`, 1 new in `tests/test_core_logger.py`, 0 removed; `tests/test_oci_logger.py` and `tests/test_gcp_logger.py` updated for the DEBUG REGION level). `make check` green.
+Test count (pytest -q): 42432 before (df0c911), 42437 after (4 new tests in `tests/test_cli_logging_init.py`, 1 new in `tests/test_core_logger.py`, 0 removed; `tests/test_oci_logger.py` and `tests/test_gcp_logger.py` updated for the DEBUG REGION level). `make check` green.
 
 Left: nothing. Parity tests of the cloud lanes needed no change
 (they assert oracle lines only).
