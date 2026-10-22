@@ -656,3 +656,40 @@ def test_crc_py_reexports_the_names_the_contract_needs() -> None:
     for name in names:
         assert hasattr(NEW_MODULE, name), name
         assert hasattr(ORACLE_MODULE, name), name
+
+
+def test_bug_360_main_logs_run_start_and_result_around_each_cleaner_pass(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    single = Case(
+        "single-pass",
+        ("--cloud", "aws", "--resource", "keypair", "--age", '{"days": 1}'),
+    )
+    caplog.clear()
+    oracle_single = run_oracle(single, monkeypatch)
+    oracle_logs = [(r.levelno, r.getMessage()) for r in caplog.records]
+    caplog.clear()
+    new_single = run_new(single, monkeypatch)
+    new_logs = [(r.levelno, r.getMessage()) for r in caplog.records]
+    assert oracle_single.events == new_single.events
+    assert oracle_logs == []
+    assert oracle_logs != new_logs
+    assert new_logs[0] == (
+        logging.INFO,
+        'RUN START cloud=aws resource=keypair operation=delete dry_run=false age={"days":1}',
+    )
+    assert new_logs[1][0] == logging.INFO
+    assert new_logs[1][1].startswith(
+        "RESULT cloud=aws resource=keypair operation=delete dry_run=false "
+        "selected=0 done=0 failed=0 skipped=0 regions=0 regions_skipped=0 duration_s="
+    )
+
+    scan_case = Case("scan-pass", ("--cloud", "aws", "--resource", "vm", "--scan_tag", "k=v"))
+    caplog.clear()
+    run_oracle(scan_case, monkeypatch)
+    assert caplog.records == []
+    caplog.clear()
+    run_new(scan_case, monkeypatch)
+    assert caplog.records == []
+

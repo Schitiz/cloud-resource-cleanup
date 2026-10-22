@@ -45,3 +45,37 @@ Left / notes:
   warning handler returns early (zero counts); the exception still propagates unchanged.
 - No locked safety test asserts these log levels; none was touched.
 - `RunLog.region_skipped` accepts the error for the future; the contract logs nothing for it.
+
+## Round 1 (Argon)
+
+Scope reviewed: `git diff 5f6ddcf..HEAD` on branch `logging/core` (rung `LOG-0`, core lane of the `LOG` behaviour-fix family).
+
+### Checks
+
+1. **Behaviour & scope (`crc/core/age.py`, `crc/core/runlog.py`, `crc/cli/dispatch.py`)**:
+   - Only the five per-resource age-check messages from `main:crc/service.py:231,252,259,263,294,297` in `crc/core/age.py` moved from `INFO`/`WARNING` to `DEBUG` with identical text (`BUG-356`). Other log lines (`Found '<key>' tag`, `Overwriting resource age`, `validated_retention_age` warnings, `parse_literal` errors) are untouched.
+   - `crc/cli/dispatch.py` wraps each cleaner handler invocation in `runlog.begin(...)` / `try ... finally: runlog.finish()`, emitting one `RUN START` / `RESULT` pair per `--cloud` x `--resource` pass and letting exceptions propagate unchanged.
+   - No changes to selection, deletion/stopping, SDK call order, Slack messages, InfluxDB points, CLI flags, exit codes, or cloud package logging.
+2. **Line formats & levels (`crc/core/runlog.py`, `docs/refactor/LOGGING.md`)**:
+   - `RUN START`, `REGION`, `ACTION`, `SKIPPED`, `ERRORS`, `FAILED`, and `RESULT` match the contract's key names, key order, log levels (`INFO` vs `ERROR`), `<region|->` / `<name|->` fallbacks, `<ExceptionType>: <message>` formatting, and compact sorted JSON option serialisation (`json.dumps(sort_keys=True, separators=(",", ":"))`) for the 9 specified option keys in order.
+   - `current()` returns a fresh unattached `RunLog` when no run is active so cleaners and unit tests log nothing extra. Clock is injectable (default `time.monotonic`).
+3. **Parity tests & oracles (`tests/helpers_log_fix.py`, `tests/test_crc_service_is_old_parity.py`, `tests/test_crc_service_parity.py`, `tests/test_cli_main_parity.py`)**:
+   - All frozen oracles under `tests/legacy/` are untouched.
+   - `expected_logs` / `expected_outcome` in `tests/helpers_log_fix.py` rewrites only log levels for `BUG-356` and never drops or alters message text.
+   - Added `test_bug_356_retention_age_lines_differ_from_oracle_and_are_debug` in `tests/test_crc_service_parity.py` so both `crc.service` parity test modules explicitly assert `old[2] != new[2]` on `BUG-356` cases, and added `test_bug_360_main_logs_run_start_and_result_around_each_cleaner_pass` in `tests/test_cli_main_parity.py` to assert `INFO`-level `RUN START` / `RESULT` divergence against the `main()` oracle (`BUG-360`).
+4. **Safety lock**:
+   - `tests/archtest/safety_lock.json` and all five hash-locked safety test files are untouched.
+5. **Docs & READMEs (`docs/refactor/BUGS.md`, `docs/refactor/PLAN.md`, `docs/refactor/LOGGING.md`, `docs/refactor/STATUS.md`, `crc/core/README.md`, `crc/cli/README.md`, `tests/README.md`, `docs/refactor/README.md`)**:
+   - Verified every `main` `file:line` citation in `BUGS.md` (`BUG-356` to `BUG-362`, sorted by risk, counts updated to 362) and `LOGGING.md` against `git show main:<path>`.
+   - `PLAN.md` has the owner-approved `LOG-0`, `LOG-AWS1`, `LOG-AWS2`, `LOG-AZU`, `LOG-GCP`, `LOG-OCI` rows and reference to `docs/refactor/LOGGING.md`.
+   - Updated `docs/refactor/README.md`, `tests/README.md`, and `crc/cli/README.md` to reference `LOGGING.md`, `runlog`, `helpers_log_fix.py`, `test_log_fix_helpers.py`, and `test_cli_runlog.py`.
+
+### Gates & test count
+
+- `python3 -m ruff check .`: passed
+- `python3 -m mypy`: passed (207 source files)
+- `lint-imports`: passed (5 contracts kept, 0 broken)
+- `python3 -m pytest -q`: 42258 passed (42213 before at `5f6ddcf`, 42256 after coder, 42258 after review additions)
+
+VERDICT: APPROVE
+
