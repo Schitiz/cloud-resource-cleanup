@@ -109,3 +109,76 @@ Test count: 42256 passed on base (`7437ac5`), 42272 passed on `HEAD` (+16).
 
 VERDICT: APPROVE
 
+## Round 2 (Opus)
+
+Scope: `git diff 7437ac5..HEAD` against `docs/refactor/LOGGING.md` and `crc/core/runlog.py`.
+Round 1 findings checked first: both NITs are valid; the Spot VM parity one is fixed below, the
+subpackage README one stays a NIT (the invariant is in `crc/azu/README.md`, which is enough for
+ARCH-002 since no public name of `crc/azu/vm` or `crc/azu/spot_vm` was added).
+
+### Independent checks
+
+1. Behaviour: the diff only adds `_runlog` calls, moves `logging.info(disk.tags)` /
+   `logging.info(vm.tags)` and the two "Skipping leftover Spot disk" lines to DEBUG, adds
+   bookkeeping counters, the `record` keyword (default True, only suppresses the ACTION line) and
+   the `process()` return value. No SDK call was added, removed or reordered, no selection branch
+   changed, the summary lines, Slack, Influx, CLI flags and exit codes are untouched. The
+   `ACTION deleted` line of a Spot VM is logged after the delete returns, and no ACTION is logged
+   when a delete raises. Checked plan + apply for double counting in every Cleaner: a dry-run
+   `apply()` either returns early (IP, VM, Spot VM) or passes `record=False` (disk, NIC), so each
+   resource gets exactly one ACTION; skips are counted once per resource (in `decide()`, or in the
+   status check that only one path runs).
+2. Formats: every line goes through `RunLog.region/action/skip/fail`, so key names, order and
+   levels are exactly the contract's. All skip reasons are static strings (no names or states in
+   a slug).
+3. Parity: `tests/legacy/` untouched. `expected_logs` rules only change levels (BUG-358: str of a
+   dict or `None`; BUG-356: anchored `^Skipping leftover Spot disk `), never drop or change text;
+   every non-log field is still compared with `==` to the oracle; each bug has a diverging case
+   (disk and VM repeat-delete cases for BUG-358, the leftover-disk case for BUG-356).
+4. `tests/archtest/safety_lock.json` and the five locked tests are untouched;
+   `tests/test_azu_spot_vm.py` asserts no log level. BUGS.md, STATUS.md, PLAN.md, `crc/core`,
+   `crc/cli`, other cloud packages, AGENTS.md, ARCHITECTURE.md, CLEANUP_SAFETY.md, `.cursor/**`
+   untouched.
+5. ARCH-002: new names documented in `crc/azu/README.md` Public API; files under 400 lines
+   (largest `crc/azu/disk.py`, 318).
+
+### Fixed in this round
+
+- `crc/azu/vm/cleaner.py:207-221` (`VmCleaner.process`): the legacy `VM` adapter left a VM that
+  passed the status check but whose delete or power-off then raised out of REGION `selected`, while
+  `plan()` (and the NIC and Spot VM adapters) count it. `process()` now returns True once the
+  status check passes, even if the action fails. Behaviour unchanged (same calls, same lines).
+  New test `test_vm_failed_delete_counts_as_selected_without_action` in
+  `tests/test_azure_runlog.py`.
+- `tests/test_azure_spot_instances_parity.py:45`: `BUGS = {"BUG-356"}` (spot_vm has no tag dump,
+  so BUG-358 had no diverging case there; stricter now).
+
+### Findings
+
+- BLOCKING: none.
+- NIT (`tests/helpers_log_fix.py:23`): the Spot VM "Skipping leftover Spot disk ..." lines are
+  tagged BUG-356 (age-check lines) and added to `_AGE_CHECK_PATTERNS`. They are "skipping X because
+  Y" lines (contract rule 1), which has no own bug row. Proposed for LOG-0 / the owner: either
+  widen BUG-356's wording in BUGS.md to "per-resource age-check and skip lines", or add a row and
+  move the pattern to its own rule. Level-only and anchored, so not unsafe.
+- NIT (`crc/azu/spot_vm/removal.py:82,121`): leftover-disk skips are counted in the Spot VM
+  SKIPPED lines and in RESULT `skipped=`, so a `resource=spot_instances` run counts disks next to
+  VMs, while leftover disks and NICs get no ACTION line (review notes above). Consistent between
+  dry run and real run, so the comparison pipeline is not affected; proposed: drop these two
+  `skip()` calls in a follow-up if the owner wants `skipped=` to count only VMs.
+- NIT (`crc/azu/_runlog.py:48,53`, runlog API gap not noted by the coder): REGION `seconds` uses
+  `time.monotonic()` directly, not the injectable clock of the current `RunLog` (`_clock` is
+  private). Tests mask `seconds=` with a regex instead. Proposed for LOG-0: a public
+  `RunLog.clock` (or `RunLog.elapsed(since)`), then `_runlog.started/region_done` use it.
+- NIT: in the legacy adapters the REGION line comes after the resource group's ACTION lines; the
+  contract does not fix the order, so this is fine. Noted for readers of the log.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check` on `HEAD`:
+ruff "All checks passed!", mypy "Success: no issues found in 209 source files", lint-imports
+"Contracts: 5 kept, 0 broken", pytest `42273 passed` (round 1: 42272, base 7437ac5: 42256; +1 new
+test this round).
+
+ROUND 2 VERDICT: APPROVE
+
