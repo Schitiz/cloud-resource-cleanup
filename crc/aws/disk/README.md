@@ -46,7 +46,7 @@ Modules, one per responsibility:
 - Fail closed: a missing CreateTime, an invalid custom age tag, an incomplete or failed CloudWatch answer keeps the volume. Attached and Multi-Attach volumes, sensitive `yb_task` values and Kubernetes CSI volumes (without a kubernetes filter) are never deleted; untagged volumes are skipped unless `notags` is set.
 - Region errors: connectivity errors skip the region, `AuthFailure`, `UnauthorizedOperation`, `OptInRequired` and `InvalidClientTokenId` skip it with a warning, every other error is logged and flagged and never raised. `describe_regions` errors (other than connectivity) propagate. Per volume errors are isolated and logged (CLEANUP_SAFETY.md).
 - `Disk.delete()` keeps the call and log order of main (per region: client, listing, CloudWatch, deletes). The Cleaner path lists every region before `apply()` deletes, so delete calls and `Deleted volume` lines come after all listing lines; a dry run is identical because `plan()` also logs the dry-run lines.
-- Log lines, labels (`region/volume-id yb_task=...`) and quirks are those of main; see `docs/refactor/bugs/pending/AWS-4.md`.
+- Log lines, labels (`region/volume-id yb_task=...`) and quirks are those of main; see `docs/refactor/BUGS.md` (`BUG-004`, `BUG-022`, `BUG-282` to `BUG-296`).
 
 ## Extension Rules
 

@@ -6,7 +6,7 @@ Per-rung bug and quirk rows not yet merged into `docs/refactor/BUGS.md` (see `do
 
 ## Public API
 
-- `GCP-1.md`: quirks of the GCP IP cleaner (`crc/gcp/ip.py`).
+- `docs/refactor/BUGS.md` (rows `BUG-001`..`BUG-354`): every pending file was folded into `BUGS.md`.
 
 ## Safety Invariants
 

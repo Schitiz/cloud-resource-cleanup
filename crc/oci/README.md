@@ -27,11 +27,11 @@ no __all__.
 
 - Authoritative text: `CLEANUP_SAFETY.md`. Applicable IDs: SAF-006 to SAF-013 (age gates, shared by all clouds), SAF-037, SAF-040, SAF-041, SAF-043, SAF-044, SAF-045, SAF-046.
 - Filtering per module: `docs/refactor/FILTER_VARIANTS.md` sections 5 (OCI), 6 and 7.
-- Known bugs and quirks (do not fix outside a behaviour-fix rung): `docs/refactor/BUGS.md` rows `BUG-004`; new OCI disk quirks are queued in `docs/refactor/bugs/pending/ST-OCI-DISK.md` (the OCI-1 ones are folded into `BUGS.md`), VM quirks in `docs/refactor/bugs/pending/ST-OCI-VM.md`.
+- Known bugs and quirks (do not fix outside a behaviour-fix rung): `docs/refactor/BUGS.md` rows `BUG-004`, `BUG-096` to `BUG-110`, `BUG-158` to `BUG-171`, `BUG-255` to `BUG-271`, `BUG-308` to `BUG-317`, `BUG-352` to `BUG-354`.
 - OCI disk (SAF-006 to SAF-013): see `crc/oci/disk/README.md`.
-- OCI VM (SAF-006 to SAF-013): see the Safety Invariants of `crc/oci/vm/README.md`. `plan()` only lists and decides (ARCH-005); `apply()` is the only caller of `terminate_instance` / `stop_instance`. VM quirks are queued in `docs/refactor/BUGS.md` (BUG-158 to BUG-171) and `docs/refactor/bugs/pending/ST-OCI-VM.md`.
+- OCI VM (SAF-006 to SAF-013): see the Safety Invariants of `crc/oci/vm/README.md`. `plan()` only lists and decides (ARCH-005); `apply()` is the only caller of `terminate_instance` / `stop_instance`. VM quirks are in `docs/refactor/BUGS.md` (BUG-158 to BUG-171, BUG-352).
 - OCI Spot VMs skip OKE and instance pool members (SAF-045); `--resource spot_instances` needs an explicit `--cloud oci` (SAF-037).
-- OCI shared helpers (`Base`, `connectivity.py`; no SAF ID names them, the AWS analogues are SAF-001 and SAF-004; parity-tested against `tests/legacy/oci_base.txt` and `tests/legacy/oci_connectivity.txt`): `Base()` fails closed before any SDK call when neither `OCI_PRIVATE_KEY_CONTENT` nor `OCI_PRIVATE_KEY_FILE` is set (KeyError; the content wins when both are set); the compartment, tenancy, user and fingerprint are constants, so only that compartment is ever listed; clients are built once per region and cached; `get_all_regions` falls back to the home region `us-sanjose-1` only when `list_region_subscriptions` raises a connectivity error (`ConnectTimeout`, `RequestException` or any `ServiceError`, so an auth error also takes that path, `BUG-101`, `BUG-107`) and propagates every other error; `get_availability_domains` does not catch anything and caches only on success. New quirks of these modules are queued in `docs/refactor/bugs/pending/PL-OCI.md`.
+- OCI shared helpers (`Base`, `connectivity.py`; no SAF ID names them, the AWS analogues are SAF-001 and SAF-004; parity-tested against `tests/legacy/oci_base.txt` and `tests/legacy/oci_connectivity.txt`): `Base()` fails closed before any SDK call when neither `OCI_PRIVATE_KEY_CONTENT` nor `OCI_PRIVATE_KEY_FILE` is set (KeyError; the content wins when both are set); the compartment, tenancy, user and fingerprint are constants, so only that compartment is ever listed; clients are built once per region and cached; `get_all_regions` falls back to the home region `us-sanjose-1` only when `list_region_subscriptions` raises a connectivity error (`ConnectTimeout`, `RequestException` or any `ServiceError`, so an auth error also takes that path, `BUG-101`, `BUG-107`) and propagates every other error; `get_availability_domains` does not catch anything and caches only on success. Quirks of these modules are in `docs/refactor/BUGS.md` (`BUG-308` to `BUG-317`).
 - Do not call real cloud APIs in tests; mock every SDK client.
 
 ## Extension Rules
@@ -40,9 +40,8 @@ no __all__.
    separate rungs (`docs/refactor/PLAN.md`).
 2. New resources go in a new module with the `Cleaner` contract (`ARCHITECTURE.md`, "Add a resource
    cleaner"): a `Cleaner` registered with `@register("oci", ...)`. Follow the `disk/` or `vm/` subpackage: pure policy from `crc.core.policy`,
-   age from `crc.core.age`, SDK calls behind a Protocol in a `*_api.py` module, injected through the
+   age from `crc.core.age`, SDK calls behind a Protocol in a `api.py` or `client.py` module, injected through the
    constructor.
 3. `plan()` of `DiskCleaner` (`disk/`) and `VmCleaner` (`vm/`) stays read-only: every mutating call belongs in `apply()` / `remove()`.
 4. No module of this package is in the legacy ratchet (`pyproject.toml` lists only five hash-locked safety test files); never add one. Update this README and its symbol list with any public change.
-5. Record every new bug or quirk in `docs/refactor/BUGS.md` with its `main` file:line (parallel
-   lanes use `docs/refactor/bugs/pending/`).
+5. Record every new bug or quirk in `docs/refactor/BUGS.md` with its `main` file:line.

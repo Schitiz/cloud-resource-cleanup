@@ -28,10 +28,10 @@ Not synced with ARCH-002: the check skips the modules directly in `crc/` (`packa
 - Dependency rules (import-linter): cloud packages never import each other; `crc.core` never
   imports a cloud package, `crc.notifications`, `crc.service`, `crc.notify` or an SDK; `crc.notify`
   imports `crc.core` only (never a cloud package or `crc.service`).
-- Notification bugs and quirks (`BUG-028` to `BUG-034`, `BUG-041`, `BUG-042`) are listed in
+- Notification bugs and quirks (`BUG-028` to `BUG-034`, `BUG-041` to `BUG-044`) are listed in
   `docs/refactor/BUGS.md`; their behaviour now lives in `crc/notify`, see its README.
-- Known bugs and quirks of these modules: `docs/refactor/BUGS.md` rows `BUG-016`, `BUG-024` to
-  `BUG-027`, `BUG-004` (age handling on `main`: `crc/service.py`).
+- Known bugs and quirks of these modules: `docs/refactor/BUGS.md` rows `BUG-004`, `BUG-016`, `BUG-024` to
+  `BUG-027`, `BUG-327` to `BUG-332` (`crc/service.py` and `crc/utils.py` on `main`).
 - Log messages are part of the behaviour; keep them identical.
 
 ## Extension Rules

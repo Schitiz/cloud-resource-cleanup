@@ -39,7 +39,7 @@ Modules, one per responsibility:
 - Fail closed: any error while judging one instance is logged and keeps it; exception tags (any key) and notags skip an instance; an instance without a `Tags` key or `Name` tag is kept. Termination and stop errors are isolated per instance.
 - Region errors: a `describe_instances` connectivity error skips the region (SAF-001); `describe_regions` falls back to the static list on a connectivity error only and every other error propagates (SAF-004).
 - `VM.delete()` keeps the call and log order of main (per region: client, describe, per-instance decision, then the calls); the Cleaner path lists every region before it mutates.
-- The move into this subpackage changed no behaviour; quirks are in `docs/refactor/BUGS.md` (BUG-004, BUG-020, BUG-021, BUG-213 to BUG-227).
+- The move into this subpackage changed no behaviour; quirks are in `docs/refactor/BUGS.md` (BUG-004, BUG-020, BUG-021, BUG-213 to BUG-227, BUG-351).
 
 ## Extension Rules
 

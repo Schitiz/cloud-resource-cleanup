@@ -39,7 +39,7 @@ Modules (split by responsibility):
 - Age uses `crc.core.age` (`get_retention_age`, fail open, then `is_old`, which still reads `MAX_AGE`); the clock is injected (`RunContext.now`, `VM(clock=...)`). There is no age gate in `__init__` (SAF-011 is not met): an empty age selects every VM that passes the tag and status checks (SAF-006).
 - A VM is acted on only when an allowed state is a substring of `instance_view(...).statuses[1].display_status`; a failing status read keeps the VM (fail closed) and is logged.
 - Per-VM errors (status, delete, power-off) are logged and swallowed, as on main; list errors and age errors propagate.
-- The listing is subscription-wide while status, delete and power-off use the configured resource group (BUG-002); stop is `begin_power_off`, not a deallocate (BUG-003); `statuses[1]` is unchecked (BUG-010). New quirks are in `docs/refactor/bugs/pending/AZ-4.md`.
+- The listing is subscription-wide while status, delete and power-off use the configured resource group (BUG-002); stop is `begin_power_off`, not a deallocate (BUG-003); `statuses[1]` is unchecked (BUG-010). Quirks in `docs/refactor/BUGS.md` (`BUG-198` to `BUG-212`).
 - Do not call real cloud APIs in tests; mock every SDK client.
 
 ## Extension Rules

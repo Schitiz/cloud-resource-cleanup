@@ -60,6 +60,6 @@ This directory exposes no library, only reference text files (listed in the tabl
 
 1. A rung that refactors a module freezes `git show main:<path>` here as `<package>_<module>.txt`,
    adds a parity test next to the other tests and a row to the table above.
-2. Delete an oracle only in the rung that removes the behaviour it pins (a behaviour-fix rung).
+2. Never delete or edit an oracle (`AGENTS.md` rule 5).
 3. A behaviour-fix rung keeps the oracle and marks each diverging parity case with its bug ID
    (`.cursor/skills/crc-python-refactor/BEHAVIOUR_FIX.md`).

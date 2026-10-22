@@ -65,7 +65,7 @@ plain `dict`, as on `main`.
 - `main()` keeps the order of `main` on the main branch: parse flags, read the two tokens, `SLACK_BOT_TOKEN` then `INFLUXDB_TOKEN` errors, stop-only-for-vm, all-needs-all, slack user label, KMS description and user, the list and dict type checks, the Slack client, the InfluxDB field check and client, `MAX_AGE` set, then the scan path (exit) or the loops, then `MAX_AGE` reset. Errors keep their type (`OSError`, which `EnvironmentError` is an alias of) and message.
 - `scan.py` never deletes: it forces `dry_run`, builds `CRC` per cloud and only calls `scan_instances_with_tag`; it always ends in `sys.exit(0)`.
 - The AWS EBS breaker lives in `dispatch._disk`: any `aws` + `disk` pair that is not `--cloud aws --resource disk` raises before a disk call. `CRC`, `Snapshot`, `WebClient`, `InfluxDBClient` and `notify_cleanup` are looked up in `context`, `dispatch`, `clients` and `scan` at call time; `tests/test_cli_main_parity.py` runs the oracle `main()` and this one on recording fakes.
-- Known quirks (kept): `docs/refactor/bugs/pending/CLI-1.md`, `docs/refactor/bugs/pending/CLI-2.md`, `docs/refactor/bugs/pending/CLI-3.md` (rows move to `BUGS.md` at integration).
+- Known quirks (kept): `docs/refactor/BUGS.md` rows `BUG-009`, `BUG-028` to `BUG-044`, `BUG-084`, `BUG-333` to `BUG-350`.
 
 ## Extension Rules
 
