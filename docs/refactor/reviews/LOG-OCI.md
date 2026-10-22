@@ -70,3 +70,78 @@ Left / notes:
 6. **Gates & test count**: `make check` passed (`ruff check .`, `mypy` on 209 source files, `lint-imports` 5/5 contracts kept, `pytest -q`: **42277 passed**).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 7437ac5..HEAD` (commits 1b6b7cd, 3afd9b1, c150e08). No code change in this round.
+
+### Round 1 fix check
+
+- The region threading through `crc/oci/spot_vm/leftovers.py`, `SpotVM._region` (class default
+  `None`) and `SpotVmCleaner.terminate()/apply()` is correct. Live and dry-run leftover-volume
+  ACTION lines and the leftover FAILED lines now carry the instance's region in both the adapter
+  and the Cleaner path. `tests/test_oci_spot_vm.py` hook signatures are unchanged.
+
+### Independent checks
+
+1. **Log-only.** The `crc/` diff touches only `crc/oci/**`. It changes two levels:
+   `logging.info(tags)` becomes `logging.debug(tags)` in `crc/oci/{vm,disk}/cleaner.py`, and
+   "Skipping leftover volume ..." becomes DEBUG in `crc/oci/spot_vm/leftovers.py`. Everything
+   else is a `crc.oci._runlog` call or a local counter. The `_process` return values (now
+   `int`) are only summed for REGION `selected`. No branch, SDK call, call order, Slack or
+   InfluxDB code, CLI flag or exit code changed. `record_skip` runs exactly once per resource:
+   `decide()` / `skip_reason()` have a single caller per path, and
+   `volume_passes_tag_check` runs once per volume per path. A failed call returns before
+   `record_action`, so it is never counted as both done and failed (one exception, NIT 3).
+2. **Formats.** Every line goes through `crc.core.runlog`. The tests assert the exact REGION /
+   ACTION / SKIPPED / ERRORS / FAILED / RESULT strings and levels, and they match the contract.
+   Kinds come from `Operation` and `dry_run` (`deleted`, `would_delete`, `stopped`,
+   `would_stop`). `region_skipped` is called only where a connectivity error skips a whole
+   region.
+3. **Parity.** `tests/legacy/` is untouched. Every OCI parity `logs` comparison goes through
+   `expected_logs(old.logs, BUGS)` with in-scope IDs. The rules only lower levels to DEBUG,
+   never drop a line and never change text. `test_{vm,disk,spot_vm}_diverges_from_oracle`
+   assert oracle != new, identical text and calls, and DEBUG as the only changed level. Calls,
+   results, stdout and errors still compare equal to the oracle. Nothing was loosened globally.
+4. **Safety lock.** `tests/archtest/**`, `safety_lock.json` and the 5 locked tests are untouched.
+   `tests/test_oci_spot_vm.py` does not assert the levels of the changed lines.
+5. **Docs (ARCH-002).** `crc/oci/README.md` lists `_runlog.py` and its helpers under the
+   Public API and adds a logging invariant. No new public name in the subpackages. Protected
+   files (`crc/core`, `crc/cli`, BUGS/STATUS/PLAN, AGENTS, ARCHITECTURE, CLEANUP_SAFETY,
+   `.cursor`) are untouched.
+
+### Findings
+
+- NIT `tests/helpers_log_fix.py:66-73` (`_bug_358`): the rule also lowers the
+  per-resource "Skipping leftover volume ...: exception_tags/notags" line. That is a "skipping
+  X because Y" line (contract item 1), not a tag dump, and none of BUG-356..362 names it.
+  `_bug_358` also applies `_bug_353`, so `{"BUG-358"}` alone covers the BUG-353 lines.
+  Proposal: give the leftover-skip predicate its own rule under an owner-assigned bug ID, or
+  add one sentence to LOGGING.md saying OCI per-resource skip lines fall under BUG-358. Merge
+  note: the AWS, Azure and GCP lanes will also register `"BUG-358"` in `RULES`. The integrator
+  must merge the predicates (OCI `_is_tag_dump` matches any message shaped `{...}`) rather
+  than keep one side.
+- NIT `crc/oci/_runlog.py:16,31,36`: REGION `seconds` uses the module's own `time.monotonic`,
+  not the injectable run clock, because `RunLog` has no public clock accessor (runlog API gap).
+  Tests are still deterministic because the int truncation gives 0. Proposal for a later
+  LOG-0 follow-up: add `RunLog.now()` or let `region()` take a start time.
+- NIT (contract question, carried over): leftover volumes are ACTION lines under
+  `resource=spot_instances`, so RESULT `selected`/`done` count instances plus volumes. A
+  poll failure or timeout after a successful terminate gives both `ACTION deleted` and
+  `FAILED` for the same instance id. Both are defensible. The dry-run comparison pipeline
+  owner should confirm.
+- Environment: `make check` first failed in mypy with `import-untyped` on `google.cloud` /
+  `azure.identity`. The cause was a stale `.mypy_cache`. With a fresh cache
+  (`--cache-dir=/tmp/mypycache`) mypy is clean. This is not a code problem.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt`, then the `make check` steps on
+Python 3.12.3:
+
+- `ruff check .`: all checks passed.
+- `mypy`: no issues in 209 source files (fresh cache).
+- `lint-imports`: 5 kept, 0 broken.
+- `pytest -q`: **42277 passed** (42256 at 7437ac5).
+
+ROUND 2 VERDICT: APPROVE
