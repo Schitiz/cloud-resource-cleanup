@@ -57,3 +57,26 @@ Left / notes:
 - No locked safety test asserts these log levels; none was touched.
 - New bugs found: none beyond BUG-012/015/056 already recorded (VPC lists protected VPCs as selected
   in plan; `ACTION` lines only count VPCs actually deleted or, in a dry run, listed).
+
+## Round 1 (Argon)
+
+Scope reviewed: `git diff 7437ac5..HEAD` (commits `87ba285`, `aac2d93`).
+
+Findings:
+
+- None (0 blocking, 0 nit).
+- Verified (1) behaviour and safety: only log levels and `crc.core.runlog` / `crc.aws._regionlog` calls changed across `crc/aws/{kms,snapshot,keypairs,elastic_ips}.py` and `crc/aws/vpc/{cleaner,teardown}.py`. Selection, deletion, SDK call order, Slack messages, InfluxDB points, CLI flags and exit codes are unchanged. In `kms.py`, the bare `except BaseException` behaviour is preserved (`KEY SKIPPED <id>` moved from `WARNING` to `DEBUG` with identical text, and `skip("not_ours")` vs `skip("unreadable")` distinguished via private `_NotOursError` on missing `Principal.AWS`). In `snapshot.py`, `Skipping snapshot <id>, used by AMI` and `Snap <id> has tag <key>` moved from `INFO` to `DEBUG` with `skip("used_by_ami")` / `skip("exception_tag")` / `skip("too_young")`. In `keypairs.py`, per-keypair skip lines moved from `INFO` to `DEBUG`. `crc/aws/_base.py`, `crc/aws/connectivity.py`, `crc/core`, `crc/cli`, other cloud packages, and `docs/refactor/{BUGS,STATUS,PLAN}.md` are untouched.
+- Verified (2) contract line formats: `REGION`, `ACTION` (`would_delete` / `deleted`), `SKIPPED`, `ERRORS`, `FAILED` and `RESULT` lines match `docs/refactor/LOGGING.md` key names, order and log levels across dry runs, real runs, failures and skipped regions (`tests/test_aws_misc_runlog.py`).
+- Verified (3) parity tests and oracles: `tests/legacy/*.txt` are untouched; `tests/helpers_log_fix.py` adds `BUG-357` and `BUG-359` rules (and extends `BUG-356` for the two per-keypair skip lines) that rewrite log levels only without dropping or altering message text; parity tests assert `new.logs == expected_logs(old.logs, LOG_BUGS)`, `old.logs != new.logs` on diverging cases, and exact equality on all non-log fields.
+- Verified (4) locked safety tests: `tests/archtest/safety_lock.json` and all locked safety test files are untouched.
+- Verified (5) documentation and architecture guardrails: `crc/aws/README.md` and `crc/aws/vpc/README.md` document the new public symbols (`start`, `region_done`, `region_skipped` in `crc/aws/_regionlog.py`; `tear_down` in `crc/aws/vpc/teardown.py`), satisfying ARCH-001..005.
+
+Gates (`pip install -r requirements.txt -r requirements-dev.txt && make check`):
+
+- `ruff check`: passed
+- `mypy`: passed (strict, 121 source files)
+- `lint-imports`: passed (3 contracts kept, 0 broken)
+- `pytest -q`: `42284 passed` (up from 42256 at `7437ac5`)
+
+VERDICT: APPROVE
+
