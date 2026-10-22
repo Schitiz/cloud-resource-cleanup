@@ -1,4 +1,4 @@
-"""LOG-AWS1: runlog lines of the AWS VM, disk and spot instance request cleaners.
+"""LOG-AWS1: logger lines of the AWS VM, disk and spot instance request cleaners.
 
 Each test begins a run with a fixed clock, drives the cleaner (dry run, real run, a failure, a
 connectivity skip) and asserts the exact REGION / ACTION / SKIPPED / ERRORS / FAILED / RESULT
@@ -20,7 +20,7 @@ from crc.aws.spot_instance_requests import SpotRequestCleaner, SpotRuntime
 from crc.aws.spot_instance_requests.model import Waiter
 from crc.aws.vm import VM, VmRuntime
 from crc.aws.vm.cleaner import VmCleaner, VmSettings
-from crc.core import registry, runlog
+from crc.core import logger, registry
 from crc.core.cleaner import Operation, RunContext
 from tests.test_aws_disk_cleaner import FakeCloudWatch, FakeEc2, volume
 from tests.test_aws_spot_instance_requests_parity import (
@@ -46,7 +46,7 @@ PREFIXES = ("RUN START", "REGION", "ACTION", "SKIPPED", "ERRORS", "FAILED", "RES
 def _info_and_clean_run(caplog: pytest.LogCaptureFixture) -> Iterator[None]:
     caplog.set_level(logging.DEBUG)
     yield
-    runlog.finish()
+    logger.finish()
 
 
 def begin(
@@ -56,11 +56,11 @@ def begin(
     dry_run: bool = False,
 ) -> None:
     caplog.clear()
-    runlog.begin("aws", resource, operation, dry_run, {}, clock=lambda: 0.0)
+    logger.begin("aws", resource, operation, dry_run, {}, clock=lambda: 0.0)
 
 
 def lines(caplog: pytest.LogCaptureFixture) -> list[str]:
-    runlog.finish()
+    logger.finish()
     return [r.getMessage() for r in caplog.records if r.getMessage().startswith(PREFIXES)]
 
 

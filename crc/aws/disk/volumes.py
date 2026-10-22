@@ -8,7 +8,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from crc.core import age as core_age
-from crc.core import policy, runlog
+from crc.core import logger, policy
 
 from .settings import DiskSettings, normalize_age
 
@@ -48,7 +48,7 @@ def server_filters(filter_tags: Mapping[str, Sequence[str]]) -> list[dict[str, A
 def _skip(reason: str, template: str, *args: Any) -> None:
     """One resource kept: the line goes to DEBUG, the count to the run's SKIPPED summary."""
     logging.debug(template, *args)
-    runlog.current().skip(reason)
+    logger.current().skip(reason)
 
 
 def _yb_task(tags: Mapping[str, str]) -> str:
@@ -129,10 +129,10 @@ class VolumeFilter:
         tags_by_key = tag_map(tags)
         name = tags_by_key.get("Name") or volume_id
         if not self.matches_filter_tags(tags_by_key):
-            runlog.current().skip("filter_tags")
+            logger.current().skip("filter_tags")
             return False
         if not policy.name_regex_search_matches(settings.name_regex, name):
-            runlog.current().skip("name_regex")
+            logger.current().skip("name_regex")
             return False
         if self.should_skip(tags_by_key, name, volume_id):
             return False
@@ -141,7 +141,7 @@ class VolumeFilter:
     @staticmethod
     def _is_unattached(volume: Volume, volume_id: Any) -> bool:
         if volume.get("State") != "available":
-            runlog.current().skip("state")
+            logger.current().skip("state")
             return False
         if volume.get("Attachments"):
             _skip("attached", "Skipping volume %s: still has attachments", volume_id)
@@ -156,7 +156,7 @@ class VolumeFilter:
         created = volume.get("CreateTime")
         if created is None:
             logging.warning("Skipping volume %s: missing CreateTime", volume_id)
-            runlog.current().skip("no_create_time")
+            logger.current().skip("no_create_time")
             return False
         retention_age = core_age.get_retention_age(
             volume.get("Tags") or [], settings.custom_age_tag_key
@@ -166,7 +166,7 @@ class VolumeFilter:
                 retention_age = normalize_age(retention_age, "custom age tag")
             except ValueError as e:
                 logging.warning("Skipping volume %s: invalid custom age tag: %s", volume_id, e)
-                runlog.current().skip("invalid_age_tag")
+                logger.current().skip("invalid_age_tag")
                 return False
             logging.info("Updating age for volume: %s", volume_id)
         # Always apply a CreateTime floor. Prefer the most restrictive window so a zero/short
@@ -175,9 +175,9 @@ class VolumeFilter:
         floor = policy.aws_disk_creation_floor(settings.age, settings.detach_age, retention_age)
         if not floor:
             logging.warning("Skipping volume %s: no usable CreateTime age floor", volume_id)
-            runlog.current().skip("no_age_floor")
+            logger.current().skip("no_age_floor")
             return False
         if not older_than_floor(created, now, floor):
-            runlog.current().skip("too_young")
+            logger.current().skip("too_young")
             return False
         return True

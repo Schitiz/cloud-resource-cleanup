@@ -20,7 +20,7 @@ from typing import Any, cast
 from botocore.exceptions import ClientError
 
 from crc.aws.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
-from crc.core import policy, runlog
+from crc.core import logger, policy
 from crc.core.cleaner import Candidate, Cleaner, Failure, Operation, Plan, Result, RunContext
 from crc.core.registry import register
 
@@ -122,20 +122,20 @@ class DiskCleaner:
             yield
         except CONNECTIVITY_ERRORS as e:
             log_skipped_region(region, _SKIP_CONTEXT, e)
-            runlog.current().region_skipped(region, e)
+            logger.current().region_skipped(region, e)
         except ClientError as e:
             code = (e.response.get("Error") or {}).get("Code")
             if code in _UNAUTHORISED_CODES:
                 logging.warning("Region %s: skipped EBS disk cleanup (%s)", region, code)
-                runlog.current().region_skipped(region, str(code))
+                logger.current().region_skipped(region, str(code))
                 return
             self.had_errors = True
             logging.error("Region %s: ClientError during EBS disk cleanup: %s", region, e)
-            runlog.current().fail(region, "-", e)
+            logger.current().fail(region, "-", e)
         except Exception as e:
             self.had_errors = True
             logging.error("Region %s: error during EBS disk cleanup: %s", region, e)
-            runlog.current().fail(region, "-", e)
+            logger.current().fail(region, "-", e)
 
     def plan_region(self, region: str, now: datetime.datetime) -> list[Candidate]:
         """One region: list, filter, drop recently attached volumes. Read-only."""
@@ -149,7 +149,7 @@ class DiskCleaner:
                 region, self._list_candidates(client, region, now), now
             )
             candidates = [c for c in (self._to_candidate(region, v) for v in volumes) if c]
-            runlog.current().region(
+            logger.current().region(
                 region, self._scanned, len(candidates), time.monotonic() - started
             )
         return candidates
@@ -159,7 +159,7 @@ class DiskCleaner:
         with self.region_guard(region):
             for candidate in candidates:
                 logging.info("Dry run: would delete available volume %s", candidate.id)
-                runlog.current().action(
+                logger.current().action(
                     "would_delete", region, str(candidate.extra.get("VolumeId"))
                 )
 
@@ -226,7 +226,7 @@ class DiskCleaner:
     def _volume_error(self, template: str, region: str, volume_id: Any, e: Exception) -> None:
         self.had_errors = True
         logging.error(template, region, volume_id, e)
-        runlog.current().fail(region, str(volume_id), e)
+        logger.current().fail(region, str(volume_id), e)
 
     def _drop_recently_attached(
         self, region: str, volumes: list[Volume], now: datetime.datetime
@@ -260,11 +260,11 @@ class DiskCleaner:
         try:
             client.delete_volume(VolumeId=volume_id)
             logging.info("Deleted volume %s", candidate.id)
-            runlog.current().action("deleted", candidate.region, volume_id)
+            logger.current().action("deleted", candidate.region, volume_id)
         except ClientError as e:
             code = (e.response.get("Error") or {}).get("Code")
             logging.error("Failed to delete volume %s (%s): %s", volume_id, code, e)
-            runlog.current().fail(candidate.region, volume_id, e)
+            logger.current().fail(candidate.region, volume_id, e)
             self.had_errors = True
             return Failure(id=str(volume_id), error=str(e))
         return None

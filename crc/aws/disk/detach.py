@@ -12,7 +12,7 @@ import logging
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from crc.core import runlog
+from crc.core import logger
 
 from .client import CLOUDWATCH_ERRORS, CloudWatchClient, CloudWatchFactory
 
@@ -142,7 +142,7 @@ class DetachGuard:
                 len(volumes),
             )
             for _ in volumes:
-                runlog.current().skip("detach_age_zero")
+                logger.current().skip("detach_age_zero")
             return []
         start = end - window
         period = cloudwatch_period(window)
@@ -173,7 +173,7 @@ class DetachGuard:
                 len(batch),
                 e,
             )
-            runlog.current().fail(region, "-", e)
+            logger.current().fail(region, "-", e)
             return []
         results_by_id = merge_metric_results(results)
         kept: list[Volume] = []
@@ -193,9 +193,9 @@ class DetachGuard:
             logging.warning(
                 "Skipping volume %s: %s (detach_age window %s)", volume_id, reason, window
             )
-            runlog.current().skip("cloudwatch_incomplete")
+            logger.current().skip("cloudwatch_incomplete")
         else:
             logging.debug(
                 "Skipping volume %s: %s (detach_age window %s)", volume_id, reason, window
             )
-            runlog.current().skip("recently_attached")
+            logger.current().skip("recently_attached")

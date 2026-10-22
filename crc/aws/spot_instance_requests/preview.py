@@ -12,13 +12,13 @@ from crc.aws.spot_instance_requests.volumes import (
     inspect_instance,
     run_sweep,
 )
-from crc.core import runlog
+from crc.core import logger
 
 
 def _note_would_delete(
     region: str | None, match: RequestMatch, instance_done: bool, volumes: list[str]
 ) -> None:
-    run = runlog.current()
+    run = logger.current()
     run.action("would_delete", region, match.request_id)
     if match.instance_id and not instance_done:
         run.action("would_delete", region, match.instance_id)
@@ -67,7 +67,7 @@ def preview_sweep(
     def act(volume_id: str) -> None:
         if volume_id not in state.volumes_to_delete:
             state.volumes_to_delete.append(volume_id)
-            runlog.current().action("would_delete", region, volume_id)
+            logger.current().action("would_delete", region, volume_id)
         logging.info("Dry run: would delete tagged leftover volume %s in %s", volume_id, region)
 
     run_sweep(settings, client, region, now, act)

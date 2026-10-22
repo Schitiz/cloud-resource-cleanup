@@ -83,7 +83,7 @@ def _bug_358(records: list[LogRecordKey]) -> list[LogRecordKey]:
 
 def _new_lines_only(records: list[LogRecordKey]) -> list[LogRecordKey]:
     """BUG-361 and BUG-362 only add REGION/ACTION/SKIPPED/ERRORS/FAILED/RESULT lines inside a
-    run begun with `runlog.begin`. Parity runs have none, so the oracle list is unchanged; the
+    run begun with `logger.begin`. Parity runs have none, so the oracle list is unchanged; the
     new lines are asserted exactly in the unit tests of each cleaner."""
     return records
 

@@ -21,7 +21,7 @@ Modules, one per responsibility:
 - `boto3_client()`: default client factory of the VM cleaner (boto3.client("ec2", region_name=...)).
 - `all_regions()`: default region lister of the VM cleaner (get_all_regions("ec2", "us-west-2")).
 - `skip_region()`: logs a region skipped for a connectivity error (context "ec2 vm <operation>").
-- `note_region()`: reports a listed and filtered region to the current runlog (REGION line: scanned, selected, seconds).
+- `note_region()`: reports a listed and filtered region to the current logger (REGION line: scanned, selected, seconds).
 - `note_dry_run()`: reports one would_delete or would_stop ACTION per instance a dry run lists.
 - `log_summary()`: the closing warnings of a VM run (no instances, number and list deleted or stopped, or the dry-run list).
 - `dry_run_names()`: what a VM dry run records, names for delete but instance ids for stop (as on main).
@@ -42,7 +42,7 @@ Modules, one per responsibility:
 - Region errors: a `describe_instances` connectivity error skips the region (SAF-001); `describe_regions` falls back to the static list on a connectivity error only and every other error propagates (SAF-004).
 - `VM.delete()` keeps the call and log order of main (per region: client, describe, per-instance decision, then the calls); the Cleaner path lists every region before it mutates.
 - The move into this subpackage changed no behaviour; quirks are in `docs/refactor/BUGS.md` (BUG-004, BUG-020, BUG-021, BUG-213 to BUG-227, BUG-351).
-- Logging (LOG-AWS1, BUG-358/361/362): the raw tag list of each instance is logged at DEBUG; REGION, ACTION (deleted/stopped, would_* in a dry run), skip counts (`no_tags`, `exception_tag`, `too_young`) and failures (processing errors, missing Name tag, failed terminate/stop) go to `crc.core.runlog.current()`; log text of the existing lines is unchanged.
+- Logging (LOG-AWS1, BUG-358/361/362): the raw tag list of each instance is logged at DEBUG; REGION, ACTION (deleted/stopped, would_* in a dry run), skip counts (`no_tags`, `exception_tag`, `too_young`) and failures (processing errors, missing Name tag, failed terminate/stop) go to `crc.core.logger.current()`; log text of the existing lines is unchanged.
 
 ## Extension Rules
 

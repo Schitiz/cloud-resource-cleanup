@@ -11,7 +11,7 @@ from crc.aws.spot_instance_requests.client import SpotClient
 from crc.aws.spot_instance_requests.model import RequestMatch, SpotSettings, TagList
 from crc.aws.spot_instance_requests.rules import matches_filter, should_skip
 from crc.core import age as core_age
-from crc.core import policy, runlog
+from crc.core import logger, policy
 from crc.core.age import AgeSpec
 
 EC2Filters = list[dict[str, Any]]
@@ -74,7 +74,7 @@ def passes_age_gate(
 
 def _kept(reason: str) -> RequestMatch | None:
     """A request that is not cleaned: counted under `reason` in the run's SKIPPED summary."""
-    runlog.current().skip(reason)
+    logger.current().skip(reason)
     return None
 
 
@@ -129,5 +129,5 @@ def filtered_requests(
         except Exception as e:
             logging.error("Error occurred while processing spot request %s: %s", request, e)
             request_id = request.get("SpotInstanceRequestId") if hasattr(request, "get") else None
-            runlog.current().fail(region, str(request_id or "-"), e)
+            logger.current().fail(region, str(request_id or "-"), e)
     return matches

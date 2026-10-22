@@ -21,7 +21,7 @@ from crc.aws.spot_instance_requests.volumes import (
     prefixed_scope_keys_on_volume,
     volume_tag_keys,
 )
-from crc.core import runlog
+from crc.core import logger
 
 ScopeMap = Mapping[str, Sequence[str]]
 
@@ -188,13 +188,13 @@ def wait_volume_available_then_delete(
             if code == "InvalidVolume.NotFound":
                 return "already_gone"
             logging.error("Error waiting/deleting volume %s: %s", volume_id, e)
-            runlog.current().fail(region, volume_id, e)
+            logger.current().fail(region, volume_id, e)
             return None
         except BotoCoreError as e:
             logging.error("Transport error waiting/deleting volume %s: %s", volume_id, e)
-            runlog.current().fail(region, volume_id, e)
+            logger.current().fail(region, volume_id, e)
             return None
         waiter.sleep(settings.poll_interval_sec)
     logging.error("Timed out waiting for volume %s to become available; not deleted", volume_id)
-    runlog.current().fail(region, volume_id, "timed out waiting for the volume to become available")
+    logger.current().fail(region, volume_id, "timed out waiting for the volume to become available")
     return None

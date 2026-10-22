@@ -22,7 +22,7 @@ from crc.aws.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
 from crc.aws.vm import scan as vm_scan
 from crc.aws.vm.client import VmClient
 from crc.core import age as core_age
-from crc.core import policy, runlog
+from crc.core import logger, policy
 from crc.core.age import AgeSpec
 from crc.core.cleaner import (
     Candidate,
@@ -89,7 +89,7 @@ _ACTED = {
 
 def skip_region(region: str, operation: Operation, error: BaseException) -> None:
     log_skipped_region(region, f"ec2 vm {operation.value}", error)
-    runlog.current().region_skipped(region, error)
+    logger.current().region_skipped(region, error)
 
 
 def note_region(
@@ -97,13 +97,13 @@ def note_region(
 ) -> None:
     """The REGION progress line of a region that was listed and filtered."""
     seconds = time.monotonic() - started
-    runlog.current().region(region, len(found) + len(kept), len(found), seconds)
+    logger.current().region(region, len(found) + len(kept), len(found), seconds)
 
 
 def note_dry_run(operation: Operation, candidates: Sequence[Candidate]) -> None:
     """One ACTION would_* line per instance a dry run lists."""
     for candidate in candidates:
-        runlog.current().action(
+        logger.current().action(
             _ACTED[operation, True], candidate.region, candidate.id, candidate.name
         )
 
@@ -245,9 +245,9 @@ class VmCleaner:
 
     @staticmethod
     def _note_skipped(decision: Skipped, region: str) -> None:
-        """Count a kept instance under its runlog reason. Errors were recorded by `_decide`;
+        """Count a kept instance under its logger reason. Errors were recorded by `_decide`;
         the missing Name tag is logged at ERROR, so it is also a failure."""
-        run = runlog.current()
+        run = logger.current()
         if decision.reason == "no Name tag":
             run.fail(region or None, decision.id or "-", "instance doesn't have Name Tag")
         elif decision.reason in _SKIP_REASONS:
@@ -264,12 +264,12 @@ class VmCleaner:
             try:
                 self._call(client, operation, candidate.id)
                 names.append(candidate.name)
-                runlog.current().action(
+                logger.current().action(
                     _ACTED[operation, False], candidate.region, candidate.id, candidate.name
                 )
             except Exception as e:
                 logging.error(f"{_ERROR_TEXT[operation]} {candidate.id}: {e}")
-                runlog.current().fail(candidate.region, candidate.id, e)
+                logger.current().fail(candidate.region, candidate.id, e)
                 failures.append(Failure(id=candidate.id, error=str(e)))
         for name in names:
             logging.info(_DONE_TEXT[operation].format(name))
@@ -312,7 +312,7 @@ class VmCleaner:
             return self._judge(client, inst, (name, region), tags, now)
         except Exception as e:
             logging.error(f"Error occurred while processing {name} instance: {e}")
-            runlog.current().fail(region or None, _safe_id(inst) or "-", e)
+            logger.current().fail(region or None, _safe_id(inst) or "-", e)
             return Skipped(id=_safe_id(inst), reason=f"error: {e}")
 
     def _screen(self, inst: Mapping[str, Any]) -> Skipped | tuple[str, Any]:

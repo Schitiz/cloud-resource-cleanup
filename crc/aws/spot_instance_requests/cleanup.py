@@ -33,7 +33,7 @@ from crc.aws.spot_instance_requests.volumes import (
     instance_state_and_dot_false_volumes,
     run_sweep,
 )
-from crc.core import runlog
+from crc.core import logger
 
 Scope = dict[str, list[str]]
 
@@ -62,7 +62,7 @@ def _cancel(
     try:
         client.cancel_spot_instance_requests(SpotInstanceRequestIds=[match.request_id])
         env.state.spot_requests_to_delete.append(match.request_id)
-        runlog.current().action("deleted", env.region, match.request_id)
+        logger.current().action("deleted", env.region, match.request_id)
         logging.info(
             "Cancelled spot request %s (type=%s) in %s",
             match.request_id,
@@ -70,7 +70,7 @@ def _cancel(
             env.region,
         )
     except ERRORS as e:
-        runlog.current().fail(env.region, match.request_id, e)
+        logger.current().fail(env.region, match.request_id, e)
         logging.error(
             "Failed to cancel spot request %s in %s: %s — not terminating "
             "its instance (persistent requests would relaunch)",
@@ -94,7 +94,7 @@ def _terminate_ambiguous(
         match.request_id,
         error,
     )
-    runlog.current().fail(env.region, instance_id, error)
+    logger.current().fail(env.region, instance_id, error)
     state, _ = instance_state_and_dot_false_volumes(client, instance_id)
     if state in {None, "shutting-down", "terminated"}:
         logging.info(
@@ -104,7 +104,7 @@ def _terminate_ambiguous(
         )
         if state == "shutting-down" and instance_id not in env.state.instance_ids_to_delete:
             env.state.instance_ids_to_delete.append(instance_id)
-            runlog.current().action("deleted", env.region, instance_id)
+            logger.current().action("deleted", env.region, instance_id)
         return True
     logging.error(
         "Instance %s state=%s after ambiguous terminate error; invalidating leftover markers",
@@ -120,7 +120,7 @@ def _terminate_call(
     try:
         client.terminate_instances(InstanceIds=[instance_id])
         env.state.instance_ids_to_delete.append(instance_id)
-        runlog.current().action("deleted", env.region, instance_id)
+        logger.current().action("deleted", env.region, instance_id)
         logging.info(
             "Terminated instance %s for cancelled spot request %s",
             instance_id,
@@ -140,7 +140,7 @@ def _terminate_call(
             match.request_id,
             e,
         )
-        runlog.current().fail(env.region, instance_id, e)
+        logger.current().fail(env.region, instance_id, e)
         return False
     except Exception as e:
         return _terminate_ambiguous(env, client, match, instance_id, e)
@@ -177,7 +177,7 @@ def _delete_leftover_volumes(env: CleanupEnv, client: SpotClient, volumes: list[
         )
         if result == "deleted":
             env.state.volumes_to_delete.append(volume_id)
-            runlog.current().action("deleted", env.region, volume_id)
+            logger.current().action("deleted", env.region, volume_id)
             deleted_any = True
         # already_gone / timeout: tagged volumes remain findable by the sweep
     return deleted_any
@@ -200,7 +200,7 @@ def cleanup_one(env: CleanupEnv, client: SpotClient, match: RequestMatch) -> Non
                 match.request_id,
                 match.instance_id,
             )
-            runlog.current().fail(env.region, match.request_id, "failed to tag leftover volumes")
+            logger.current().fail(env.region, match.request_id, "failed to tag leftover volumes")
             return
         tagged = tagged_or_none
     if not _cancel(env, client, match, inspection, tagged):
@@ -215,7 +215,7 @@ def cleanup_one(env: CleanupEnv, client: SpotClient, match: RequestMatch) -> Non
         return
     if deleted_any or (match.instance_id in env.state.instance_ids_to_delete):
         env.state.spot_requests_to_delete.append(match.request_id)
-        runlog.current().action("deleted", env.region, match.request_id)
+        logger.current().action("deleted", env.region, match.request_id)
 
 
 def sweep_region(env: CleanupEnv, client: SpotClient, now: datetime.datetime) -> None:
@@ -227,6 +227,6 @@ def sweep_region(env: CleanupEnv, client: SpotClient, now: datetime.datetime) ->
         )
         if result == "deleted" and volume_id not in env.state.volumes_to_delete:
             env.state.volumes_to_delete.append(volume_id)
-            runlog.current().action("deleted", env.region, volume_id)
+            logger.current().action("deleted", env.region, volume_id)
 
     run_sweep(env.settings, client, env.region, now, act)

@@ -32,7 +32,7 @@ from crc.aws.spot_instance_requests.rules import (
     tag_map,
     volume_tags_protect,
 )
-from crc.core import runlog
+from crc.core import logger
 
 ERRORS = (ClientError, BotoCoreError)
 LiveLookup = tuple[str, TagList | None, Any]
@@ -86,7 +86,7 @@ def volume_ok_to_delete(
     tags = describe_volume_tag_list(client, volume_id)
     if tags is None:
         logging.error("Skipping leftover volume %s: could not read tags (fail closed)", volume_id)
-        runlog.current().fail(region, volume_id, "could not read volume tags (fail closed)")
+        logger.current().fail(region, volume_id, "could not read volume tags (fail closed)")
         return False
     if volume_tags_protect(settings, own_volume_tags(tags)):
         logging.debug(
@@ -94,7 +94,7 @@ def volume_ok_to_delete(
             "(exception/notags/sensitive yb_task)",
             volume_id,
         )
-        runlog.current().skip("volume_protected")
+        logger.current().skip("volume_protected")
         return False
     return True
 
@@ -172,7 +172,7 @@ def describe_tagged_leftover_volumes(
             volumes.extend(page.get("Volumes") or [])
     except ERRORS as e:
         logging.error("describe_volumes for %s leftovers failed: %s", LEFTOVER_FROM_TAG, e)
-        runlog.current().fail(region, request_id or "-", e)
+        logger.current().fail(region, request_id or "-", e)
     return volumes
 
 
@@ -208,7 +208,7 @@ def inspect_instance(
                 match.request_id,
                 match.instance_id,
             )
-            runlog.current().fail(region, match.request_id, "describe_instances failed")
+            logger.current().fail(region, match.request_id, "describe_instances failed")
             return None
         volumes_from_bdm = bool(leftover_volumes)
     if not leftover_volumes:
@@ -221,7 +221,7 @@ def inspect_instance(
             match.request_id,
             match.instance_id or "none",
         )
-        runlog.current().skip("already_cancelled_done")
+        logger.current().skip("already_cancelled_done")
         return None
     return inspection
 
@@ -238,7 +238,7 @@ def live_spot_request_tags(
         logging.error(
             "describe_spot_instance_requests for %s failed during sweep: %s", request_id, e
         )
-        runlog.current().fail(region, request_id, e)
+        logger.current().fail(region, request_id, e)
         return "error", None, None
     except BotoCoreError as e:
         logging.error(
@@ -246,7 +246,7 @@ def live_spot_request_tags(
             request_id,
             e,
         )
-        runlog.current().fail(region, request_id, e)
+        logger.current().fail(region, request_id, e)
         return "error", None, None
     reqs = resp.get("SpotInstanceRequests") or []
     if not reqs:
@@ -310,11 +310,11 @@ def run_sweep(
                     volume_id,
                     region,
                 )
-                runlog.current().skip("sweep_gates")
+                logger.current().skip("sweep_gates")
                 continue
             act(volume_id)
         except Exception as e:
             logging.error(
                 "Region %s: error sweeping tagged leftover volume %s: %s", region, volume_id, e
             )
-            runlog.current().fail(region, str(volume_id), e)
+            logger.current().fail(region, str(volume_id), e)
