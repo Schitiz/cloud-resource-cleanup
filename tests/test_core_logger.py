@@ -82,6 +82,7 @@ def test_current_without_run_is_fresh_and_logs_nothing(caplog: pytest.LogCapture
     first, second = logger.current(), logger.current()
     assert first is not second
     assert first.attached is False
+    first.hold_header("RUN START cloud=aws resource=vm operation=delete dry_run=false")
     first.region("us-east-1", 3, 1, 2.5)
     first.action("deleted", "us-east-1", "i-1", "n")
     first.skip("too_young")

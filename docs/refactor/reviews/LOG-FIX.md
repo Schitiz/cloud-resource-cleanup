@@ -40,3 +40,45 @@ Left: nothing. Parity tests of the cloud lanes needed no change
 (they assert oracle lines only).
 
 No locked safety test asserts these log levels; no `## Owner action`.
+
+## Round 1 (Argon)
+
+Scope reviewed: `git diff df0c911..HEAD` on branch `logging/fix-handler` (rung `LOG-FIX`).
+
+### Checks
+
+1. **Behaviour & scope (`crc/core/logger.py`, `crc/cli/dispatch.py`, `crc/cli/scan.py`)**:
+   - `crc/core/logger.py` writes all run-log lines through `logging.getLogger("crc.run")` and never calls module-level `logging.*` (`BUG-363`). `begin()` holds the `RUN START` line (`RunLog.hold_header`) until the first run-log line emitted after the root logger has handlers (or `finish()` if the run ends without root handlers), emitting it once before that line.
+   - `crc/cli/dispatch.py` replaces the three pre-cleaner `logging.warning` calls in `_spot_instance_requests` and `_spot_instances` with a module logger `_LOG = logging.getLogger(__name__)`. Verified by grepping `crc/` that no other module-level `logging.*` call can run before `Service.__init__` (`init_logging`) in the CLI path (every cleaner adapter calls `super().__init__()` / `Service.__init__(self)` as the first statement of `__init__`).
+   - `RunLog.region()` logs `REGION` at `logging.DEBUG` when `selected == 0` and `logging.INFO` otherwise; skipped regions still call `region_skipped()` and emit no `REGION` line, and `regions=` in `RESULT` still counts all walked regions.
+   - `crc/cli/scan.py` wraps each cloud pass in `logger.begin(str(cloud), "vm", "scan", bool(context.dry_run), _run_options(options))` / `try ... finally: logger.finish()` (`dry_run` is enforced `True` before the loop).
+   - No changes to what is selected, deleted, or stopped, SDK call order, Slack text, InfluxDB points, CLI flags, or exit codes.
+2. **Line formats & levels (`crc/core/logger.py`, `docs/refactor/LOGGING.md`)**:
+   - `RUN START`, `REGION`, `ACTION`, `SKIPPED`, `ERRORS`, `FAILED`, and `RESULT` formats, key names, key order, and levels match the contract in `docs/refactor/LOGGING.md`.
+   - **Fixed in review**: added `self.attached and` guard in `RunLog._emit_header` (`crc/core/logger.py:94`) so an unattached `RunLog` stays completely silent even if `hold_header` and `finish()` are called on it directly.
+3. **Parity & regression tests (`tests/test_cli_logging_init.py`, `tests/test_cli_main_parity.py`, `tests/test_cli_logger.py`, `tests/test_core_logger.py`, `tests/test_gcp_logger.py`, `tests/test_oci_logger.py`)**:
+   - All frozen oracles under `tests/legacy/` are untouched (`git diff df0c911..HEAD -- tests/legacy/` is empty).
+   - `tests/test_cli_logging_init.py` tests the CLI path starting from a root logger without handlers with a fake cleaner calling `init_logging`, asserting only `FileHandler` and `StreamHandler` (level `INFO`) exist on root afterwards, no line is printed twice, `RUN START` is printed once before `REGION` and `RESULT`, `DEBUG` `REGION` (`selected=0`) and `botocore` `DEBUG` lines go to `crc.log` but not stderr, and a no-handler run still emits `RUN START` then `RESULT`.
+   - Added `test_scan_logs_run_start_and_result_per_cloud` in `tests/test_cli_logger.py` covering multi-cloud `run_scan` `RUN START` / `RESULT` with `operation=scan`.
+4. **Safety lock**:
+   - `tests/archtest/safety_lock.json` and all five hash-locked safety test files are untouched.
+5. **Docs & READMEs (`docs/refactor/BUGS.md`, `docs/refactor/LOGGING.md`, `docs/refactor/PLAN.md`, `docs/refactor/STATUS.md`, `crc/core/README.md`, `crc/cli/README.md`, `tests/README.md`)**:
+   - **Fixed in review**: moved `BUG-363` (`Risk = high`) in `docs/refactor/BUGS.md` from the bottom of the `low` group to the end of the `high` group (right after `BUG-355`) to keep `BUGS.md` sorted by risk per Rule 4, and added exact line citations on branch `logging/fix-handler`.
+   - **Fixed in review**: updated `crc/core/README.md` (`hold_header` and held `RUN START` behaviour), `crc/cli/README.md` (`scan.py` `begin()`/`finish()` wrapping), and `tests/README.md` (`test_cli_logging_init.py`).
+
+### BLOCKING
+
+None (all issues fixed in-scope above).
+
+### NIT
+
+None. No issues in do-not-edit files (`AGENTS.md`, `ARCHITECTURE.md`, `CLEANUP_SAFETY.md`, `docs/refactor/PLAN.md`, `.cursor/**`, `tests/archtest/**`).
+
+### Gates & test count
+
+- `python3 -m ruff check .`: passed
+- `python3 -m mypy`: passed (228 source files)
+- `lint-imports`: passed (5 contracts kept, 0 broken)
+- `python3 -m pytest -q`: 42438 passed (42432 at `df0c911`, 42437 after coder, 42438 after review)
+
+VERDICT: APPROVE

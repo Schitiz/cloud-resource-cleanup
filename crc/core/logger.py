@@ -91,7 +91,7 @@ class RunLog:
         self._emit_header(force=False)
 
     def _emit_header(self, force: bool) -> None:
-        if self._header is not None and (force or logging.getLogger().handlers):
+        if self.attached and self._header is not None and (force or logging.getLogger().handlers):
             line, self._header = self._header, None
             _LOG.log(logging.INFO, line)
 

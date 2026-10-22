@@ -77,6 +77,7 @@ def test_cli_path_with_init_logging_in_cleaner_adds_no_stray_handler(
         init_logging(str(log_file))
         run = logger.current()
         logging.getLogger("botocore").debug("retrying request")
+        run.region("us-east-2", 2, 0, 0.1)
         run.region("us-east-1", 3, 1, 0.2)
         run.action("deleted", "us-east-1", "kp-1", "kp")
 
@@ -94,6 +95,7 @@ def test_cli_path_with_init_logging_in_cleaner_adds_no_stray_handler(
     assert all(count == 1 for count in Counter(lines).values()), lines
     assert not [line for line in lines if re.match(r"^(DEBUG|INFO|WARNING|ERROR):", line)]
     assert not [line for line in lines if "retrying request" in line]
+    assert not [line for line in lines if "region=us-east-2" in line]
     starts = [i for i, line in enumerate(lines) if "RUN START" in line]
     results = [i for i, line in enumerate(lines) if "RESULT cloud=" in line]
     assert len(starts) == 1 and len(results) == 1 and starts[0] < results[0]
@@ -104,6 +106,7 @@ def test_cli_path_with_init_logging_in_cleaner_adds_no_stray_handler(
     assert file_text.count("RUN START") == 1
     assert file_text.count("RESULT cloud=") == 1
     assert "retrying request" in file_text
+    assert "region=us-east-2 scanned=2 selected=0" in file_text
 
 
 def test_run_without_root_handlers_still_emits_header_then_result(
