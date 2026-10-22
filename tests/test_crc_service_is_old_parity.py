@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from tests.helpers_crc_service import both, make_oracle_cls, set_max_age
+from tests.helpers_log_fix import expected_outcome
 
 CREATED = datetime.datetime(2026, 1, 1, 12, 0, 0)
 
@@ -94,7 +95,7 @@ def test_is_old_parity(
     for offset in CREATION_OFFSETS:
         now = CREATED + offset
         old, new = both(oracle_cls, caplog, "is_old", age, now, CREATED)
-        assert new == old
+        assert new == expected_outcome(old, {"BUG-356"})
 
 
 @pytest.mark.parametrize("max_age", [None, "{'days': 1}", "{'hours': 5}"])
@@ -122,7 +123,7 @@ def test_is_old_time_variants_parity(
 ) -> None:
     set_max_age(monkeypatch, max_age)
     old, new = both(oracle_cls, caplog, "is_old", {"days": 1}, now, created)
-    assert new == old
+    assert new == expected_outcome(old, {"BUG-356"})
 
 
 def test_is_old_empty_age_ignores_max_age_without_parsing(
@@ -130,6 +131,19 @@ def test_is_old_empty_age_ignores_max_age_without_parsing(
 ) -> None:
     monkeypatch.setenv("MAX_AGE", "not a literal")
     old, new = both(oracle_cls, caplog, "is_old", {}, CREATED, CREATED)
-    assert new == old
+    assert new == expected_outcome(old, {"BUG-356"})
     assert new[0] == "return"
     assert new[1] is True
+
+
+def test_bug_356_age_lines_differ_from_oracle_and_are_debug(
+    oracle_cls: type, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    set_max_age(monkeypatch, None)
+    now = CREATED + datetime.timedelta(days=2)
+    old, new = both(oracle_cls, caplog, "is_old", {"days": 1}, now, CREATED)
+    assert old[2] != new[2]
+    assert new == expected_outcome(old, {"BUG-356"})
+    assert [level for level, _ in old[2]] == ["INFO", "INFO"]
+    assert [level for level, _ in new[2]] == ["DEBUG", "DEBUG"]
+    assert [text for _, text in new[2]] == [text for _, text in old[2]]

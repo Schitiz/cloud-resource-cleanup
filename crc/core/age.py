@@ -147,7 +147,7 @@ def _apply_max_age_override(age: AgeSpec) -> AgeSpec:
 
 
 def _log_older(amount: float, unit: str, threshold: float) -> None:
-    logging.info(
+    logging.debug(
         f"The resource is {amount} {unit} old and older than the threshold of {threshold} {unit}."
     )
 
@@ -197,10 +197,10 @@ def is_old(
 
     age = _apply_max_age_override(age)
 
-    logging.info(f"Validating resource age with threshold: {age}")
+    logging.debug(f"Validating resource age with threshold: {age}")
     if _meets_threshold(age, current_time - creation_time):
         return True
-    logging.info("The resource is not older than the threshold specified in the age argument")
+    logging.debug("The resource is not older than the threshold specified in the age argument")
     return False
 
 
@@ -234,10 +234,10 @@ def get_retention_age(tags: dict[str, str] | list[dict[str, str]], key: str) -> 
         return None
 
     if not tags:
-        logging.warning("No tags provided to search for custom_age_tag_key.")
+        logging.debug("No tags provided to search for custom_age_tag_key.")
         return None
 
-    logging.info(f"Searching for custom_age_tag_key: {key}")
+    logging.debug(f"Searching for custom_age_tag_key: {key}")
     try:
         value = _find_tag_value(tags, key)
         if value:

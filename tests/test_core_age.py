@@ -268,7 +268,9 @@ def test_get_retention_age_logs(caplog: pytest.LogCaptureFixture) -> None:
     assert messages[8] == "Error retrieving 'a' tag: 'str' object has no attribute 'get'"
     levels = {r.getMessage(): r.levelname for r in caplog.records}
     assert levels["No custom_age_tag_key provided to search for."] == "DEBUG"
-    assert levels["No tags provided to search for custom_age_tag_key."] == "WARNING"
+    assert levels["No tags provided to search for custom_age_tag_key."] == "DEBUG"  # BUG-356
+    assert levels["Searching for custom_age_tag_key: a"] == "DEBUG"  # BUG-356
+    assert levels["Found 'a' tag: 1"] == "INFO"
     assert levels[messages[6]] == "ERROR"
     assert levels[messages[8]] == "ERROR"
 
@@ -360,9 +362,13 @@ def test_is_old_log_messages(
     monkeypatch.delenv("MAX_AGE", raising=False)
     with caplog.at_level(logging.INFO):
         assert is_old({"days": 1}, NOW, _created(days=2)) is True
+    assert caplog.messages == []  # BUG-356: the age-check lines are DEBUG, not INFO
+    with caplog.at_level(logging.DEBUG):
+        assert is_old({"days": 1}, NOW, _created(days=2)) is True
         assert is_old({"hours": 2}, NOW, _created(hours=3)) is True
         assert is_old({"days": 1, "hours": 12}, NOW, _created(days=2)) is True
         assert is_old({"days": 5}, NOW, _created(days=1)) is False
+    assert {r.levelno for r in caplog.records} == {logging.DEBUG}
     assert caplog.messages == [
         "Validating resource age with threshold: {'days': 1}",
         "The resource is 2 days old and older than the threshold of 1 days.",
@@ -416,7 +422,7 @@ def test_is_old_max_age_message_text(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     monkeypatch.setenv("MAX_AGE", "{'hours': 1}")
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.DEBUG):
         assert is_old({"days": 5}, NOW, _created(hours=2)) is True
     assert caplog.messages[0] == (
         "Overwriting resource age: Setting age to the maximum threshold of {'hours': 1}."

@@ -89,10 +89,17 @@ mutation, Azure deletes scoped to the listed resource group, the three Azure VM 
 and an empty `--scan_tag` running the destructive path (BUG-344).
 
 Add each rung here before it starts, as a row with its ID (for example `FIX-1`), the
-bug IDs, and whether it may edit `CLEANUP_SAFETY.md`:
+bug IDs, and whether it may edit `CLEANUP_SAFETY.md`. The LOG rungs change log text and
+levels only; their contract (formats, levels, parity-test rule) is in `docs/refactor/LOGGING.md`:
 
 | Rung | Bugs | May edit CLEANUP_SAFETY.md |
 |------|------|----------------------------|
+| LOG-0 | BUG-356, BUG-360, BUG-362 (runlog plumbing; CLI header/footer) | no |
+| LOG-AWS1 | BUG-358, BUG-361, BUG-362 (aws vm, spot_instance_requests, disk) | no |
+| LOG-AWS2 | BUG-357, BUG-359, BUG-361, BUG-362 (aws kms, snapshot, keypairs, elastic_ips, vpc) | no |
+| LOG-AZU | BUG-358, BUG-361, BUG-362 | no |
+| LOG-GCP | BUG-358, BUG-361, BUG-362 | no |
+| LOG-OCI | BUG-353 (tag dict level only), BUG-358, BUG-361, BUG-362 | no |
 
 Progress is logged in `docs/refactor/STATUS.md`. Reviews go to
 `docs/refactor/reviews/<rung>.md`.
