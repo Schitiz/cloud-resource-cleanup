@@ -180,6 +180,30 @@ def test_kms_unreachable_region_is_counted(run_lines: Any) -> None:
     assert " selected=0 done=0 failed=0 skipped=0 regions=0 regions_skipped=1 " in out[-1]
 
 
+def test_kms_key_selected_before_the_error_is_not_counted_as_skipped(
+    run_lines: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The first statement matches the user, the second has no AWS principal: the key stays
+    selected (KEY SKIPPED is still logged at DEBUG) and is not also counted as skipped."""
+
+    class MatchThenNoPrincipal(kms_t.FakeKms):
+        def get_key_policy(self, *, KeyId: str, PolicyName: str) -> Any:
+            statements = [{"Principal": {"AWS": kms_t.USER}}, {"Principal": "*"}]
+            return {"Policy": json.dumps({"Statement": statements})}
+
+    begin, lines = run_lines
+    begin("kms", dry_run=True)
+    keys = {"k1": kms_t.OLD}
+    runtime = KmsRuntime(lambda region: MatchThenNoPrincipal(keys, []), lambda: kms_t.NOW)
+    Kms(True, None, None, "ci", kms_t.USER, kms_t.WINDOW, {"days": 1}, "", runtime).delete()
+    out = lines()
+    records = [(r.levelno, r.getMessage()) for r in caplog.records]
+    assert (logging.DEBUG, "KEY SKIPPED k1") in records
+    assert "ACTION would_delete cloud=aws resource=kms region=us-west-2 id=k1 name=-" in out
+    assert not _run_lines(out, "SKIPPED")
+    assert " selected=1 done=0 failed=0 skipped=0 regions=1 regions_skipped=0 " in out[-1]
+
+
 # Snapshot ----------------------------------------------------------------------------------
 
 

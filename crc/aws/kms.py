@@ -196,11 +196,16 @@ class KmsCleaner:
         started = _regionlog.start()
         active: list[str] = []
         for key in keys:
+            selected_before = len(active)
             try:
                 self._select_key(client, key["KeyId"], active, clock)
             except BaseException as e:
                 logging.debug(f"KEY SKIPPED {key['KeyId']}")
-                runlog.current().skip(_NOT_OURS if isinstance(e, _NotOursError) else _UNREADABLE)
+                # A key appended before the error stays selected: it is not a skip.
+                if len(active) == selected_before:
+                    runlog.current().skip(
+                        _NOT_OURS if isinstance(e, _NotOursError) else _UNREADABLE
+                    )
         _regionlog.region_done(_DEFAULT_REGION, len(keys), len(active), started)
         logging.info(f"total number of active Jenkins keys = {len(active)}")
         candidates = tuple(
