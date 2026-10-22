@@ -4,12 +4,14 @@
 leftover disks."""
 
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from typing import Any
 
 from crc.core import age as core_age
+from crc.core import runlog
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext
 from crc.core.registry import register
+from crc.gcp._scan import ZoneScan, log_action
 from crc.gcp.spot_vm.client import ComputeSpotClient, GcpSpotClient, InstanceView
 from crc.gcp.spot_vm.disks import (
     disk_label,
@@ -17,7 +19,7 @@ from crc.gcp.spot_vm.disks import (
     non_autodelete_disks,
     remove_leftover_disk,
 )
-from crc.gcp.spot_vm.instances import Clock, is_selected
+from crc.gcp.spot_vm.instances import Clock, reject_reason
 from crc.gcp.spot_vm.operations import wait_operation
 from crc.gcp.spot_vm.settings import (
     DEFAULT_POLL_INTERVAL_SEC,
@@ -44,8 +46,9 @@ def log_summary(instances: list[str], disks: list[str], *, dry_run: bool) -> Non
     )
 
 
-def _log_failure(name: object, error: Exception) -> None:
+def _log_failure(name: object, error: Exception, zone: str) -> None:
     logging.error("Error processing GCP Spot VM %s: %s", name, error)
+    runlog.current().fail(zone, str(name), error)
 
 
 def _leftover(candidate: Candidate) -> tuple[DiskRef, ...]:
@@ -74,17 +77,38 @@ class SpotVMCleaner:
 
     def list_zone(self, zone: str) -> list[InstanceView]:
         """Instances of one zone; a listing error is logged and the zone skipped."""
+        return self._list(zone) or []
+
+    def _list(self, zone: str) -> list[InstanceView] | None:
         try:
             return list(self._client.list_instances(self._settings.project_id, zone))
         except Exception as e:
             logging.error("Zone %s: failed listing GCP instances: %s", zone, e)
-            return []
+            runlog.current().region_skipped(zone, e)
+            return None
+
+    def scan_zone(self, zone: str, clock: Clock) -> Iterator[Candidate]:
+        """List one zone and lazily yield the candidates, then log the REGION line (none for a
+        zone whose listing failed)."""
+        instances = self._list(zone)
+        if instances is None:
+            return
+        scan = ZoneScan(zone)
+        for instance in instances:
+            scan.scanned += 1
+            candidate = self.evaluate(instance, zone, clock)
+            if candidate is not None:
+                scan.selected += 1
+                yield candidate
+        scan.finish()
 
     def evaluate(self, instance: InstanceView, zone: str, clock: Clock) -> Candidate | None:
         """The candidate when the instance passes every filter. Any error is logged and the
         instance is kept."""
         try:
-            if not is_selected(instance, self._settings, clock):
+            reason = reject_reason(instance, self._settings, clock)
+            if reason is not None:
+                runlog.current().skip(reason)
                 return None
             leftover = non_autodelete_disks(instance, self._settings.project_id)
             return Candidate(
@@ -96,7 +120,7 @@ class SpotVMCleaner:
                 extra={LEFTOVER_DISKS: tuple(leftover)},
             )
         except Exception as e:
-            _log_failure(getattr(instance, "name", "?"), e)
+            _log_failure(getattr(instance, "name", "?"), e, zone)
             return None
 
     def plan(self, context: RunContext) -> Plan:
@@ -108,10 +132,7 @@ class SpotVMCleaner:
         try:
             for zone_obj in self.zones():
                 zone = zone_obj["name"]
-                for instance in self.list_zone(zone):
-                    candidate = self.evaluate(instance, zone, lambda: context.now)
-                    if candidate is not None:
-                        candidates.append(candidate)
+                candidates.extend(self.scan_zone(zone, lambda: context.now))
             if context.dry_run:
                 for candidate in candidates:
                     self.preview_instance(candidate, instances, disks)
@@ -141,13 +162,14 @@ class SpotVMCleaner:
         settings = self._settings
         try:
             instances.append(candidate.id)
+            log_action("delete", candidate, dry_run=True)
             disks.extend(
                 disk_label(settings, ref, candidate.region)
                 for ref in _leftover(candidate)
                 if disk_ok_to_delete(self._client, settings, ref, candidate.region)
             )
         except Exception as e:
-            _log_failure(candidate.name, e)
+            _log_failure(candidate.name, e, candidate.region)
 
     def apply_instance(
         self, candidate: Candidate, instances: list[str], disks: list[str], *, dry_run: bool
@@ -161,6 +183,7 @@ class SpotVMCleaner:
             if not dry_run and not self._delete_and_wait(candidate):
                 return
             instances.append(candidate.id)
+            log_action("delete", candidate, dry_run=dry_run)
             for ref in _leftover(candidate):
                 if not disk_ok_to_delete(self._client, settings, ref, zone):
                     continue
@@ -168,7 +191,7 @@ class SpotVMCleaner:
                 if label is not None:
                     disks.append(label)
         except Exception as e:
-            _log_failure(candidate.name, e)
+            _log_failure(candidate.name, e, zone)
 
     def _delete_and_wait(self, candidate: Candidate) -> bool:
         settings = self._settings
@@ -182,6 +205,7 @@ class SpotVMCleaner:
             "Instance delete failed/incomplete for %s; skipping leftover disk deletes",
             candidate.name,
         )
+        runlog.current().fail(zone, candidate.id, "instance delete failed or incomplete")
         return False
 
 

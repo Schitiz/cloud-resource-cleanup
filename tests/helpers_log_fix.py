@@ -22,6 +22,10 @@ _AGE_CHECK_PATTERNS = (
 )
 
 
+_RAW_DUMP = re.compile(r"^(\{.*\}|namespace\(.*\))$", re.DOTALL)
+_LABEL_SKIP = re.compile(r"^Skipping leftover Spot disk .+: exception_labels/notags$")
+
+
 def _is_age_check(message: str) -> bool:
     return any(pattern.search(message) for pattern in _AGE_CHECK_PATTERNS)
 
@@ -41,8 +45,22 @@ def _bug_356(records: list[LogRecordKey]) -> list[LogRecordKey]:
     ]
 
 
+def _bug_358(records: list[LogRecordKey]) -> list[LogRecordKey]:
+    """BUG-358: the raw tag/label dict (or address object) dump of each listed resource and the
+    per-resource "Skipping leftover Spot disk" line (GCP) become DEBUG, text unchanged."""
+    info = (logging.INFO, "INFO")
+    return [
+        _with_level(record, logging.DEBUG)
+        if record[-2] in info
+        and (_RAW_DUMP.match(str(record[-1])) or _LABEL_SKIP.match(str(record[-1])))
+        else record
+        for record in records
+    ]
+
+
 RULES: dict[str, Callable[[list[LogRecordKey]], list[LogRecordKey]]] = {
     "BUG-356": _bug_356,
+    "BUG-358": _bug_358,
 }
 
 

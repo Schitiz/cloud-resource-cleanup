@@ -24,11 +24,13 @@ from google.auth.exceptions import DefaultCredentialsError
 from crc.core.cleaner import Cleaner, Operation, RunContext
 from crc.core.registry import get
 from crc.gcp.disk import Disk, DiskCleaner, build_disk_cleaner
+from tests.helpers_log_fix import expected_logs
 
 ORACLE = Path(__file__).parent / "legacy" / "gcp_disk.txt"
 UTC = datetime.UTC
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=UTC)
 PROJECT = "proj-1"
+BUGS = {"BUG-358"}
 TWO = 2
 THREE = 3
 DAY = {"days": 1}
@@ -677,7 +679,7 @@ def test_matches_main(
     assert new.error == old.error
     assert new.deleted == old.deleted
     assert new.count == old.count
-    assert new.logs == old.logs
+    assert new.logs == expected_logs(old.logs, BUGS)
     assert new.stdout == old.stdout
 
 
@@ -752,10 +754,11 @@ def test_cleaner_protocol_matches_main(
     assert new.stdout == old.stdout
     assert new_deletes == old_deletes
     assert _only(new.calls, "disks.list") == _only(old.calls, "disks.list")
-    assert Counter(new.logs) == Counter(old.logs[:-1])
-    assert new.logs[-1] == old.logs[-2]
+    expected = expected_logs(old.logs, BUGS)
+    assert Counter(new.logs) == Counter(expected[:-1])
+    assert new.logs[-1] == expected[-2]
     if _listed_disks(case) <= 1:
-        assert new.logs == old.logs[:-1]
+        assert new.logs == expected[:-1]
 
 
 def _listed_disks(case: Case) -> int:
@@ -898,7 +901,7 @@ def test_second_delete_call_accumulates_like_main(
         disks.delete()
         disks.delete()
         results.append((gcp.calls, list(disks.get_deleted), _logs(caplog)))
-    assert results[0] == results[1]
+    assert (*results[0][:-1], expected_logs(results[0][-1], BUGS)) == results[1]
 
 
 def test_disk_state_argument_is_ignored_like_main(
@@ -938,3 +941,23 @@ def test_registered_factory_requires_project_id() -> None:
     ctx = RunContext(dry_run=True, operation=Operation.DELETE, options={}, now=NOW)
     with pytest.raises(ValueError, match="project_id is required"):
         get("gcp", "disk")(ctx)
+
+
+def test_bug_358_label_dump_is_debug_not_info(
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    case = _find("mixed-deletes-old-unattached")
+    old = _run(_legacy, case, monkeypatch, caplog, capsys)
+    new = _run(_new, case, monkeypatch, caplog, capsys)
+    assert old.logs != new.logs
+    assert new.logs == expected_logs(old.logs, BUGS)
+    assert [m for _, _, m in new.logs] == [m for _, _, m in old.logs]
+    assert new.calls == old.calls
+    assert new.stdout == old.stdout
+    info = [m for _, level, m in new.logs if level == logging.INFO]
+    assert not [m for m in info if m.startswith(("{", "namespace("))]
+    dumps = [m for _, level, m in old.logs if level == logging.INFO]
+    assert any(m.startswith(("{", "namespace(")) for m in dumps)

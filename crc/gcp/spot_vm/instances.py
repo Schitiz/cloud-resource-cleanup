@@ -82,14 +82,23 @@ def is_old_instance(instance: InstanceView, settings: SpotSettings, clock: Clock
     return core_age.is_old(policy.effective_age(retention_age, settings.age), now, created)
 
 
+def reject_reason(instance: InstanceView, settings: SpotSettings, clock: Clock) -> str | None:
+    """The skip reason of an instance to keep, or None when every instance filter passes, in
+    the order of `main`: status, Spot, managed or GKE node, exception labels, filter labels, age."""
+    if not policy.state_in(instance.status, settings.instance_states):
+        return "state"
+    if not is_spot_instance(instance):
+        return "not_spot"
+    if is_managed_or_gke_node(instance):
+        return "managed_or_gke"
+    if should_skip_instance(instance, settings):
+        return "exception_tag"
+    if not has_matching_filter_label(instance, settings):
+        return "filter_mismatch"
+    return None if is_old_instance(instance, settings, clock) else "too_young"
+
+
 def is_selected(instance: InstanceView, settings: SpotSettings, clock: Clock) -> bool:
     """All instance filters, in the order of `main`: status, Spot, managed or GKE node,
     exception labels, filter labels, age."""
-    return (
-        policy.state_in(instance.status, settings.instance_states)
-        and is_spot_instance(instance)
-        and not is_managed_or_gke_node(instance)
-        and not should_skip_instance(instance, settings)
-        and has_matching_filter_label(instance, settings)
-        and is_old_instance(instance, settings, clock)
-    )
+    return reject_reason(instance, settings, clock) is None

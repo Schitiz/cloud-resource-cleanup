@@ -18,9 +18,10 @@ from google.cloud import compute_v1
 from googleapiclient import discovery
 
 from crc.core import age as core_age
-from crc.core import policy
+from crc.core import policy, runlog
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext
 from crc.core.registry import register
+from crc.gcp._scan import ZoneScan, log_action
 from crc.service import Service
 
 _SERVICE_NAME = "compute"
@@ -173,6 +174,8 @@ class VmCleaner:
             candidates.extend(self.plan_zone(zone, lambda: context.now))
         if context.dry_run:
             names = [candidate.id for candidate in candidates]
+            for candidate in candidates:
+                log_action(context.operation.value, candidate, dry_run=True)
             self._summary(context.operation, names, dry_run=True)
         return Plan(candidates=tuple(candidates))
 
@@ -194,23 +197,32 @@ class VmCleaner:
 
     def plan_zone(self, zone: str, clock: Clock) -> Iterator[Candidate]:
         """List one zone lazily and yield the instances to act on, in the order of `main`:
-        status, exception labels and notags, filter labels, age."""
-        settings = self._settings
-        for instance in self._client.list_instances(settings.project_id, zone):
-            if not policy.state_in(instance.status, settings.instance_state):
+        status, exception labels and notags, filter labels, age; then log the REGION line."""
+        scan = ZoneScan(zone)
+        for instance in self._client.list_instances(self._settings.project_id, zone):
+            scan.scanned += 1
+            reason = self._reject(instance, clock)
+            if reason is not None:
+                runlog.current().skip(reason)
                 continue
-            if self._should_skip(instance):
-                continue
-            if not self._has_matching_filter_label(instance):
-                continue
-            if self._is_old(instance, clock):
-                yield Candidate(
-                    id=instance.name,
-                    name=instance.name,
-                    region=zone,
-                    state=instance.status,
-                    tags=policy.normalize_tags(instance.labels),
-                )
+            scan.selected += 1
+            yield Candidate(
+                id=instance.name,
+                name=instance.name,
+                region=zone,
+                state=instance.status,
+                tags=policy.normalize_tags(instance.labels),
+            )
+        scan.finish()
+
+    def _reject(self, instance: InstanceView, clock: Clock) -> str | None:
+        if not policy.state_in(instance.status, self._settings.instance_state):
+            return "state"
+        if self._should_skip(instance):
+            return "exception_tag"
+        if not self._has_matching_filter_label(instance):
+            return "filter_mismatch"
+        return None if self._is_old(instance, clock) else "too_young"
 
     def apply_instance(
         self, candidate: Candidate, operation: Operation, recorded: list[str], *, dry_run: bool
@@ -229,7 +241,9 @@ class VmCleaner:
             recorded.append(candidate.id)
         except Exception as e:
             logging.error(f"Error occurred while {operation.value} instance {candidate.id}: {e}")
+            runlog.current().fail(candidate.region, candidate.id, e)
             return False
+        log_action(operation.value, candidate, dry_run=dry_run)
         return True
 
     def _should_skip(self, instance: InstanceView) -> bool:
@@ -252,7 +266,7 @@ class VmCleaner:
         settings = self._settings
         created = datetime.datetime.strptime(instance.creation_timestamp, _TIME_FORMAT)
         now = clock().astimezone(created.tzinfo)
-        logging.info(instance.labels)
+        logging.debug(instance.labels)
         retention_age = core_age.get_retention_age(
             cast(dict[str, str], instance.labels), settings.custom_age_tag_key
         )
