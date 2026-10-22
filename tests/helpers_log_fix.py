@@ -8,10 +8,11 @@ Contract: ``docs/refactor/LOGGING.md``.
 
 import logging
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 LogRecordKey = tuple[Any, ...]
+Rule = Callable[[list[LogRecordKey]], list[LogRecordKey]]
 
 _AGE_CHECK_PATTERNS = (
     re.compile(r"^Validating resource age with threshold: "),
@@ -20,10 +21,6 @@ _AGE_CHECK_PATTERNS = (
     re.compile(r"^No tags provided to search for custom_age_tag_key\.$"),
     re.compile(r"^Searching for custom_age_tag_key: "),
 )
-
-
-_RAW_DUMP = re.compile(r"^(\{.*\}|namespace\(.*\))$", re.DOTALL)
-_LABEL_SKIP = re.compile(r"^Skipping leftover Spot disk .+: exception_labels/notags$")
 
 
 def _is_age_check(message: str) -> bool:
@@ -45,27 +42,18 @@ def _bug_356(records: list[LogRecordKey]) -> list[LogRecordKey]:
     ]
 
 
-def _bug_358(records: list[LogRecordKey]) -> list[LogRecordKey]:
-    """BUG-358: the raw tag/label dict (or address object) dump of each listed resource and the
-    per-resource "Skipping leftover Spot disk" line (GCP) become DEBUG, text unchanged."""
-    info = (logging.INFO, "INFO")
-    return [
-        _with_level(record, logging.DEBUG)
-        if record[-2] in info
-        and (_RAW_DUMP.match(str(record[-1])) or _LABEL_SKIP.match(str(record[-1])))
-        else record
-        for record in records
-    ]
-
-
-RULES: dict[str, Callable[[list[LogRecordKey]], list[LogRecordKey]]] = {
+# Core rules only. Each cloud lane keeps its own rules in tests/log_fix_<lane>.py and passes
+# them as ``rules`` (``{**RULES, ...}``), so lanes never edit this file and merge cleanly.
+RULES: dict[str, Rule] = {
     "BUG-356": _bug_356,
-    "BUG-358": _bug_358,
 }
 
 
-def expected_logs(oracle_logs: Sequence[LogRecordKey], bugs: set[str]) -> list[LogRecordKey]:
-    """Rewrite the oracle log records with the rule of each bug ID.
+def expected_logs(
+    oracle_logs: Sequence[LogRecordKey], bugs: set[str], rules: Mapping[str, Rule] | None = None
+) -> list[LogRecordKey]:
+    """Rewrite the oracle log records with the rule of each bug ID (from ``rules``, default
+    the core ``RULES``).
 
     A record is a tuple whose last item is the message and whose second to last is the level
     (``levelno`` or ``levelname``); any items before them (for example the logger name) are kept.
@@ -73,11 +61,15 @@ def expected_logs(oracle_logs: Sequence[LogRecordKey], bugs: set[str]) -> list[L
     """
     records = [tuple(record) for record in oracle_logs]
     for bug in sorted(bugs):
-        records = RULES[bug](records)
+        records = (RULES if rules is None else rules)[bug](records)
     return records
 
 
-def expected_outcome(oracle: tuple[Any, Any, Sequence[LogRecordKey]], bugs: set[str]) -> Any:
+def expected_outcome(
+    oracle: tuple[Any, Any, Sequence[LogRecordKey]],
+    bugs: set[str],
+    rules: Mapping[str, Rule] | None = None,
+) -> Any:
     """Rewrite the log list (third item) of a ``(kind, result, logs)`` parity outcome."""
     kind, result, logs = oracle
-    return kind, result, expected_logs(logs, bugs)
+    return kind, result, expected_logs(logs, bugs, rules)

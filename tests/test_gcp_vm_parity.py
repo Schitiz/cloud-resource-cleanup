@@ -26,6 +26,7 @@ from crc.core.cleaner import Cleaner, Operation, RunContext
 from crc.core.registry import get
 from crc.gcp.vm import VM, VmCleaner, build_vm_cleaner
 from tests.helpers_log_fix import expected_logs
+from tests.log_fix_gcp import RULES
 
 ORACLE = Path(__file__).parent / "legacy" / "gcp_vm.txt"
 UTC = datetime.UTC
@@ -619,7 +620,7 @@ def test_matches_main(
     assert new.deleted == old.deleted
     assert new.stopped == old.stopped
     assert new.count == old.count
-    assert new.logs == expected_logs(old.logs, BUGS)
+    assert new.logs == expected_logs(old.logs, BUGS, RULES)
     assert new.stdout == old.stdout
 
 
@@ -695,7 +696,7 @@ def test_cleaner_protocol_matches_main(
     assert new.stdout == old.stdout
     assert _only(new.calls, *actions) == _only(old.calls, *actions)
     assert _only(new.calls, "instances.list") == _only(old.calls, "instances.list")
-    expected = expected_logs(old.logs, BUGS)
+    expected = expected_logs(old.logs, BUGS, RULES)
     assert Counter(new.logs) == Counter(expected[:-1])
     assert new.logs[-1] == expected[-2]
     if _listed(case) <= 1:
@@ -850,7 +851,7 @@ def test_second_call_accumulates_like_main(
         results.append(
             (gcp.calls, list(vm.get_deleted), list(vm.get_stopped), vm.delete_count, _logs(caplog))
         )
-    assert (*results[0][:-1], expected_logs(results[0][-1], BUGS)) == results[1]
+    assert (*results[0][:-1], expected_logs(results[0][-1], BUGS, RULES)) == results[1]
 
 
 def test_class_attributes_match_main() -> None:
@@ -887,7 +888,7 @@ def test_bug_358_label_dump_is_debug_not_info(
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run(_new, case, monkeypatch, caplog, capsys)
     assert old.logs != new.logs
-    assert new.logs == expected_logs(old.logs, BUGS)
+    assert new.logs == expected_logs(old.logs, BUGS, RULES)
     assert [m for _, _, m in new.logs] == [m for _, _, m in old.logs]
     assert new.calls == old.calls
     assert new.stdout == old.stdout

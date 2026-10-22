@@ -23,6 +23,7 @@ from crc.core.cleaner import Cleaner, Operation, RunContext
 from crc.core.registry import get
 from crc.gcp.ip import IP, IpCleaner, build_ip_cleaner
 from tests.helpers_log_fix import expected_logs
+from tests.log_fix_gcp import RULES
 
 ORACLE = Path(__file__).parent / "legacy" / "gcp_ip.txt"
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)
@@ -312,7 +313,7 @@ def test_matches_main(
     assert new.error == old.error
     assert new.deleted == old.deleted
     assert new.count == old.count
-    assert new.logs == expected_logs(old.logs, BUGS)
+    assert new.logs == expected_logs(old.logs, BUGS, RULES)
     assert new.stdout == old.stdout
 
 
@@ -378,7 +379,7 @@ def test_cleaner_protocol_matches_main(
     assert new.stdout == old.stdout
     assert new_deletes == old_deletes
     assert _only(new.calls, "addresses.list") == _only(old.calls, "addresses.list")
-    expected = expected_logs(old.logs, BUGS)
+    expected = expected_logs(old.logs, BUGS, RULES)
     assert Counter(new.logs) == Counter(expected[:-1])
     assert new.logs[-1] == expected[-2]
     if len(case.regions) <= 1:
@@ -478,7 +479,7 @@ def test_second_delete_call_accumulates_like_main(
         ips.delete()
         ips.delete()
         results.append((gcp.calls, list(ips.get_deleted), _logs(caplog)))
-    assert (*results[0][:-1], expected_logs(results[0][-1], BUGS)) == results[1]
+    assert (*results[0][:-1], expected_logs(results[0][-1], BUGS, RULES)) == results[1]
 
 
 def test_registered_factory_builds_cleaner() -> None:
@@ -517,7 +518,7 @@ def test_bug_358_address_dump_is_debug_not_info(
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run(_new, case, monkeypatch, caplog, capsys)
     assert old.logs != new.logs
-    assert new.logs == expected_logs(old.logs, BUGS)
+    assert new.logs == expected_logs(old.logs, BUGS, RULES)
     assert [m for _, _, m in new.logs] == [m for _, _, m in old.logs]
     assert new.calls == old.calls
     assert new.stdout == old.stdout

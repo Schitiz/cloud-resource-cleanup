@@ -27,6 +27,7 @@ from crc.core.cleaner import Operation, RunContext
 from crc.core.registry import get
 from crc.gcp.spot_vm import SpotVM
 from tests.helpers_log_fix import expected_logs
+from tests.log_fix_gcp import RULES
 
 ORACLE = Path(__file__).parent / "legacy" / "gcp_spot_vm.txt"
 UTC = datetime.UTC
@@ -761,7 +762,7 @@ def test_matches_main(
     assert new.deleted == old.deleted
     assert new.disks == old.disks
     assert new.count == old.count
-    assert new.logs == expected_logs(old.logs, BUGS)
+    assert new.logs == expected_logs(old.logs, BUGS, RULES)
     assert new.stdout == old.stdout
 
 
@@ -854,11 +855,11 @@ def test_cleaner_protocol_matches_main(
     assert [c for c in new.calls if c[0] == "instances.list"] == [
         c for c in old.calls if c[0] == "instances.list"
     ]
-    expected = expected_logs(old.logs, BUGS)
+    expected = expected_logs(old.logs, BUGS, RULES)
     assert Counter(new.logs) == Counter(expected)
     assert new.logs[-2:] == expected[-2:]
     if _listed_instances(case) <= 1:
-        assert new.logs == expected_logs(old.logs, BUGS)
+        assert new.logs == expected_logs(old.logs, BUGS, RULES)
 
 
 def _find(case_id: str) -> Case:
@@ -1023,7 +1024,7 @@ def test_bug_358_leftover_disk_skip_is_debug_not_info(
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run(_new, case, monkeypatch, caplog, capsys)
     assert old.logs != new.logs
-    assert new.logs == expected_logs(old.logs, BUGS)
+    assert new.logs == expected_logs(old.logs, BUGS, RULES)
     assert [m for _, _, m in new.logs] == [m for _, _, m in old.logs]
     assert new.calls == old.calls
     assert new.stdout == old.stdout

@@ -190,3 +190,15 @@ passed `42286` tests (exit 0).
 Test count: 42256 before (`7437ac5`), 42286 after (+30), the same as round 1.
 
 ROUND 2 VERDICT: APPROVE
+
+## Rule move
+
+Mechanical test-helper move, no production code change. After merging `logging/core` (`7c27986`),
+`tests/helpers_log_fix.py` and `tests/test_log_fix_helpers.py` are byte-identical to
+`origin/logging/core`. The BUG-358 rule (`_bug_358`, `_RAW_DUMP`, `_LABEL_SKIP`, same patterns and
+docstring) moved to the new `tests/log_fix_gcp.py`, which defines
+`RULES = {**helpers_log_fix.RULES, "BUG-358": _bug_358}`; this lane did not change the core BUG-356
+rule. The four `tests/test_gcp_*_parity.py` files pass `rules=RULES` to `expected_logs`. The BUG-358
+unit tests moved from `tests/test_log_fix_helpers_gcp.py` to `tests/test_log_fix_gcp.py` (plus two
+tests that `RULES` extends the core rules and that BUG-356 and BUG-358 apply together).
+`tests/README.md` has one added entry for the new files.
