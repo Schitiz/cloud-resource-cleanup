@@ -107,3 +107,86 @@ Ran `pip install -r requirements.txt -r requirements-dev.txt` then `make check`:
 Test count: 42256 before (`7437ac5`), 42286 after (+30).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 7437ac5..HEAD` (commits `6b430cc`, `e05fddf`), checked against
+`docs/refactor/LOGGING.md`, `crc/core/runlog.py`, `crc/core/engine.py` and
+`tests/legacy/gcp_{disk,ip,vm,spot_vm}.txt`. Round 1 verdict and its NIT re-checked first, then
+every check below was done again independently. No code changes in this round.
+
+### Round 1 follow-up
+
+- Round 1 NIT (adapter path logs a zone's ACTION lines before that zone's REGION line, because
+  `plan_zone` / `scan_zone` stay lazy generators like `main`): confirmed, and it is acceptable. The
+  contract does not fix the order of REGION and ACTION lines, and an eager listing would change
+  the order of SDK list and delete calls, which the rung must not do.
+- Round 1 found no BLOCKING issue; I confirm that.
+
+### Checks
+
+1. Only log text, log levels and runlog calls changed. In `disk.py`, `vm.py` and `spot_vm/instances.py`, the filter chains became
+   `_reject()` / `reject_reason()`. They keep the same order and short-circuits as before (attached, exception
+   regex, exception labels, filter labels, detach timestamp, age; status, exception/notags, filter,
+   age; status, spot, managed/GKE, exception, filter, age). `is_selected()` is `reject_reason() is
+   None`. SDK calls and their order are unchanged: `scan_zone` lists eagerly where `list_zone` did,
+   and `plan_zone` stays lazy. The IP `_delete()` records `fail()` and re-raises the same exception.
+   The "Deleting IP address" line is still logged after a successful delete only. Summary lines,
+   Slack and InfluxDB inputs, CLI flags and exit codes are untouched. The parity tests still assert
+   that calls, results, counts, stdout and errors equal the oracle.
+2. No duplicate ACTION lines. `crc/core/engine.py:99-100` runs `plan()` only in a dry run, so
+   `would_*` comes from `plan()` there and `deleted`/`stopped` from `apply()` otherwise. The
+   adapters never call `plan()`; they log ACTION once from `apply_*`. VM `stop` gives
+   `would_stop`/`stopped` through `Operation.value`. All line formats come from `crc/core/runlog.py`
+   (untouched), so key names, key order and levels match the contract.
+3. Parity: `tests/legacy/` is untouched. Every log divergence goes through
+   `expected_logs(..., {"BUG-358"})`. The BUG-358 rule only changes INFO to DEBUG, and only for
+   bare `{...}` / `namespace(...)` dumps and the Spot disk skip line. Every oracle summary line
+   is an f-string with a prefix, so the regex cannot match it (I checked all bare `logging.info(`
+   calls in the four oracles). Each parity file has an `old.logs != new.logs` case that also asserts
+   the same message texts, the same calls and the same stdout. There is no global loosening: the
+   `Counter` comparisons in `test_cleaner_protocol_matches_main` were there before this rung.
+4. `tests/archtest/**` (including `safety_lock.json`), `tests/test_gcp_spot_vm.py`, `crc/core`,
+   `crc/cli`, the other cloud packages and `BUGS.md` / `STATUS.md` / `PLAN.md` are untouched
+   (`git diff --stat` empty).
+5. ARCH-002: `ZoneScan`, `log_action` (`crc/gcp/README.md`), `scan_zone` and `reject_reason`
+   (`crc/gcp/spot_vm/README.md`) are documented. `disk.py` and `vm.py` are at exactly 400 lines
+   (ARCH-004 limit; archtest passes).
+
+### BLOCKING
+
+None.
+
+### NIT
+
+- `crc/gcp/_scan.py:18,24`: the REGION `seconds` come from the module's `time.monotonic`, not from
+  the run's injectable clock. `RunLog._clock` (`crc/core/runlog.py:74`) is private, and the lane may
+  not touch `crc/core`. The tests stay deterministic by monkeypatching `_scan.time`. This is a
+  runlog API gap that the coder summary does not mention. Proposed follow-up for the LOG-0 owner:
+  add a read-only `RunLog.clock` property, then use
+  `clock = runlog.current().clock` in `ZoneScan.__init__`.
+- `crc/gcp/spot_vm/cleaner.py:208` and `crc/gcp/spot_vm/disks.py:119` pass a `str` to `fail()`.
+  The API allows this (`BaseException | str`), but the resulting FAILED line is
+  `error=instance delete failed or incomplete`, without the `<ExceptionType>: ` prefix that
+  `LOGGING.md:59` shows. Proposed change: either document in `LOGGING.md` that string errors are
+  printed as-is, or have runlog print them as `error=Incomplete: <message>`. This is an
+  owner/LOG-0 decision, so it is not changed here.
+- `crc/gcp/spot_vm/disks.py:95`: the per-disk "Skipping leftover Spot disk" line is filed under
+  BUG-358 (label dumps). It is really a per-resource "skipping X because Y" line from contract
+  item 1. The DEBUG move itself is in contract. When the rows are merged, BUG-358's text in
+  `BUGS.md` could mention it. Also, `skip("disk_exception_tag")` counts disks inside a
+  `resource=spot_instances` run, so `skipped=` mixes VMs and disks. This is documented in the
+  coder notes and is acceptable.
+- `crc/gcp/ip.py:125`: the dry-run `plan()` calls `runlog.current().action("would_delete", ...)`
+  directly. Every other site uses `log_action()`. The output is the same; this is only a
+  consistency point.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt`, then `make check`: ruff passed, mypy
+passed (no issues in 210 source files), lint-imports kept 5 contracts and broke 0, and pytest
+passed `42286` tests (exit 0).
+
+Test count: 42256 before (`7437ac5`), 42286 after (+30), the same as round 1.
+
+ROUND 2 VERDICT: APPROVE
