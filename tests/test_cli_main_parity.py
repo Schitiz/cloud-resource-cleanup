@@ -29,7 +29,7 @@ from crc.cli import clients as cli_clients
 from crc.cli import context as cli_context
 from crc.cli import dispatch as cli_dispatch
 from crc.cli import scan as cli_scan
-from crc.core import runlog
+from crc.core import logger
 
 ROOT = Path(__file__).resolve().parent.parent
 ORACLE = ROOT / "tests" / "legacy" / "crc_main.txt"
@@ -664,7 +664,7 @@ def test_bug_360_main_logs_run_start_and_result_around_each_cleaner_pass(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.INFO)
-    monkeypatch.setattr(runlog, "begin", functools.partial(runlog.begin, clock=lambda: 0.0))
+    monkeypatch.setattr(logger, "begin", functools.partial(logger.begin, clock=lambda: 0.0))
     single = Case(
         "single-pass",
         ("--cloud", "aws", "--resource", "keypair", "--age", '{"days": 1}'),

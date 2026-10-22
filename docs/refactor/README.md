@@ -19,7 +19,7 @@ Plan, progress and findings of the CRC Python refactor on `refactor/python-agent
 - `STATUS.md`: one row per rung (R0a to R4c, the cloud and CLI lanes GCP-*, AZ-*, AWS-*, OCI-*, CLI-*, the PL-* and ST-* rungs, Final, and the LOG-* rungs).
 - `BUGS.md`: `BUG-NNN` IDs, never reused.
 - `FILTER_VARIANTS.md`: spec for the functions in `crc/core/policy.py`.
-- `LOGGING.md`: spec for `crc/core/runlog.py`, `tests/helpers_log_fix.py` and the LOG rungs.
+- `LOGGING.md`: spec for `crc/core/logger.py`, `tests/helpers_log_fix.py` and the LOG rungs.
 
 ## Safety Invariants
 

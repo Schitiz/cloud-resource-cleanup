@@ -1,4 +1,4 @@
-"""CLI wiring of crc.core.runlog: one RUN START / RESULT pair per cloud x resource pass."""
+"""CLI wiring of crc.core.logger: one RUN START / RESULT pair per cloud x resource pass."""
 
 import logging
 from typing import Any
@@ -8,7 +8,7 @@ import pytest
 
 from crc.cli import dispatch
 from crc.cli.inputs import Options, Targets
-from crc.core import runlog
+from crc.core import logger
 
 _FIELDS = {name: None for name in Options.__dataclass_fields__}
 
@@ -30,7 +30,7 @@ def _targets(clouds: list[str], resources: list[str], opt_in: bool = False) -> T
 def _fake_crc(monkeypatch: pytest.MonkeyPatch) -> Mock:
     crc = Mock()
     monkeypatch.setattr(dispatch, "make_crc", lambda context, cloud: crc)
-    runlog.finish()
+    logger.finish()
     return crc
 
 
@@ -86,7 +86,7 @@ def test_result_is_logged_and_the_error_propagates_when_the_cleaner_raises(
         dispatch.run_dispatch(Mock(), _options(), _targets(["aws"], ["keypair", "ip"]))
     lines = _run_lines(caplog)
     assert [line.split()[0] for line in lines] == ["RUN", "RESULT"]
-    assert runlog.current().attached is False
+    assert logger.current().attached is False
     _fake_crc.delete_ip.assert_not_called()
 
 
@@ -103,7 +103,7 @@ def test_cleaner_run_lines_land_between_header_and_result(
     caplog.set_level(logging.INFO)
 
     def cleaner(*args: Any) -> None:
-        run = runlog.current()
+        run = logger.current()
         run.region("us-east-1", 4, 1, 0.4)
         run.action("deleted", "us-east-1", "kp-1", "kp")
         run.skip("too_young")

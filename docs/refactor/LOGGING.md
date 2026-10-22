@@ -38,11 +38,11 @@ and swallowed with no end-of-run list.
    `logs/crc.log` keeps everything.
 2. The existing summary lines (`List of ... deleted`, `Number of ... deleted`, ...) stay
    exactly as they are, at INFO (or the level they have today).
-3. `crc/core/runlog.py` is the per-run collector (pure stdlib; imports nothing from a cloud
+3. `crc/core/logger.py` is the per-run collector (pure stdlib; imports nothing from a cloud
    package or `crc.cli`). `crc/cli` calls `begin()` before and `finish()` after each cleaner
    it runs, in a `try/finally`, once per `--cloud` x `--resource` pass (so also for
    `--cloud all`), and the exception of a failing cleaner still propagates.
-4. Cloud lanes call `runlog.current().region/action/skip/fail/region_skipped` from their own
+4. Cloud lanes call `logger.current().region/action/skip/fail/region_skipped` from their own
    code, and move their per-resource lines to DEBUG. They do not change what is selected or
    the order of SDK calls.
 

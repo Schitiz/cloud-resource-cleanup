@@ -22,7 +22,7 @@ plain `dict`, as on `main`.
 - `clients.py`: the Slack `WebClient` and `InfluxDBClient` construction (the InfluxDB field check runs right before it) and the `MAX_AGE` environment write with its print, and its reset.
 - `context.py`: `RunContext` (the settings every `CRC` of a run shares) and `make_crc`, the one place that builds `CRC(...)` for `main`.
 - `scan.py`: `run_scan`, the read-only `--scan_tag` path; it prints, notifies Slack and always exits with code 0.
-- `dispatch.py`: `run_dispatch`, the cloud and resource loops: one small handler per resource wrapped in `crc.core.runlog.begin()` / `finish()` (`try`/`finally`), the AWS disk opt-in circuit breaker, the spot warnings and the `Snapshot` branch.
+- `dispatch.py`: `run_dispatch`, the cloud and resource loops: one small handler per resource wrapped in `crc.core.logger.begin()` / `finish()` (`try`/`finally`), the AWS disk opt-in circuit breaker, the spot warnings and the `Snapshot` branch.
 
 ## Public API
 
