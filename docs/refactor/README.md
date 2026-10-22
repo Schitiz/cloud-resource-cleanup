@@ -10,14 +10,16 @@ Plan, progress and findings of the CRC Python refactor on `refactor/python-agent
 | `STATUS.md` | Rung log with counts and open issues; read it first, update it every rung |
 | `BUGS.md` | Register of every bug and quirk, with the `main` file:line, risk and status |
 | `FILTER_VARIANTS.md` | How each module filters by tags, regex, state and age (written from `main`, with its `file:line`) |
+| `LOGGING.md` | Contract for the LOG behaviour-fix rungs (line formats, levels, parity-test rule) |
 | `SKILL_SELECTION.md` | Why the project skill is shaped as it is |
 | `reviews/` | One review per rung (`<rung>.md`) |
 
 ## Public API
 
-- `STATUS.md`: one row per rung (R0a to R4c, the cloud and CLI lanes GCP-*, AZ-*, AWS-*, OCI-*, CLI-*, the PL-* and ST-* rungs, Final).
+- `STATUS.md`: one row per rung (R0a to R4c, the cloud and CLI lanes GCP-*, AZ-*, AWS-*, OCI-*, CLI-*, the PL-* and ST-* rungs, Final, and the LOG-* rungs).
 - `BUGS.md`: `BUG-NNN` IDs, never reused.
 - `FILTER_VARIANTS.md`: spec for the functions in `crc/core/policy.py`.
+- `LOGGING.md`: spec for `crc/core/logger.py`, `tests/helpers_log_fix.py` and the LOG rungs.
 
 ## Safety Invariants
 

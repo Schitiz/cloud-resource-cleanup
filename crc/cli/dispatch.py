@@ -7,7 +7,7 @@ from typing import Any
 from crc.aws.snapshot import Snapshot
 from crc.cli.context import RunContext, make_crc
 from crc.cli.inputs import Options, Targets
-from crc.core import runlog
+from crc.core import logger
 
 Handler = Callable[[Any, Any, Options, Targets], None]
 
@@ -150,7 +150,7 @@ HANDLERS: dict[str, Handler] = {
 
 
 def _run_options(options: Options) -> dict[str, Any]:
-    """The flags `RUN START` reports; `runlog.begin` prints the non-empty ones."""
+    """The flags `RUN START` reports; `logger.begin` prints the non-empty ones."""
     return {
         "age": options.age,
         "filter_tags": options.filter_tags,
@@ -168,7 +168,7 @@ def _run_handler(
     handler: Handler, crc: Any, cloud: Any, resource: Any, options: Options, targets: Targets
 ) -> None:
     """Run one cloud and resource pass between its RUN START and RESULT lines."""
-    runlog.begin(
+    logger.begin(
         str(cloud),
         str(resource),
         str(options.operation_type or "delete"),
@@ -178,7 +178,7 @@ def _run_handler(
     try:
         handler(crc, cloud, options, targets)
     finally:
-        runlog.finish()
+        logger.finish()
 
 
 def run_dispatch(context: RunContext, options: Options, targets: Targets) -> None:
