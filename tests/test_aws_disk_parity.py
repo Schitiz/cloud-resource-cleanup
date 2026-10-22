@@ -22,6 +22,7 @@ from crc.aws.disk import Disk, DiskCleaner, build_disk_cleaner
 from crc.core import registry
 from crc.core.cleaner import Operation, RunContext
 from tests.helpers_log_fix import expected_logs
+from tests.log_fix_aws_compute import RULES
 
 FIXED_BUGS = {"BUG-356"}
 
@@ -952,7 +953,7 @@ def test_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run(_new, case, monkeypatch, caplog, capsys)
-    old = dataclasses.replace(old, logs=expected_logs(old.logs, FIXED_BUGS))
+    old = dataclasses.replace(old, logs=expected_logs(old.logs, FIXED_BUGS, rules=RULES))
     assert new.calls == old.calls
     assert new.error == old.error
     assert new.deleted == old.deleted
@@ -972,7 +973,7 @@ def test_skip_lines_are_debug_only_in_new_code(
     for case in CASES:
         old = _run(_legacy, case, monkeypatch, caplog, capsys)
         new = _run(_new, case, monkeypatch, caplog, capsys)
-        assert new.logs == expected_logs(old.logs, FIXED_BUGS), case.id
+        assert new.logs == expected_logs(old.logs, FIXED_BUGS, rules=RULES), case.id
         differing += old.logs != new.logs
     assert differing > 0
 
@@ -1003,7 +1004,7 @@ def test_cleaner_protocol_matches_main(
     listing differs; each stream, the results and the errors are equal."""
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run_cleaner(case, monkeypatch, caplog, capsys)
-    old = dataclasses.replace(old, logs=expected_logs(old.logs, FIXED_BUGS))
+    old = dataclasses.replace(old, logs=expected_logs(old.logs, FIXED_BUGS, rules=RULES))
     assert new.error == old.error
     assert new.stdout == old.stdout
     if new.error is None:
@@ -1325,7 +1326,7 @@ def test_adapter_private_helpers_match_main(
         caplog.clear()
         assert new._matches_filter_tags(sample) == old_match
         assert new._should_skip(sample, "foo", "vol-1") == old_skip
-        assert _logs(caplog) == expected_logs(old_logs, FIXED_BUGS)
+        assert _logs(caplog) == expected_logs(old_logs, FIXED_BUGS, rules=RULES)
     candidate_vol = vol(
         "idle", tag_list=[tag("yb_task", "itest"), tag("yb_owner", "qa"), tag("Name", "foo")]
     )

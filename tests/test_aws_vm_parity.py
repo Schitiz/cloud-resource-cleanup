@@ -24,6 +24,7 @@ from crc.aws.vm.cleaner import VmCleaner, build_vm_cleaner, dry_run_names
 from crc.core import registry
 from crc.core.cleaner import Candidate, Operation, RunContext
 from tests.helpers_log_fix import expected_logs
+from tests.log_fix_aws_compute import RULES
 
 ORACLE = Path(__file__).parent / "legacy" / "aws_vm.txt"
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=datetime.UTC)
@@ -613,7 +614,7 @@ def test_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run(_new, case, monkeypatch, caplog, capsys)
-    old = dataclasses.replace(old, logs=expected_logs(old.logs, FIXED_BUGS))
+    old = dataclasses.replace(old, logs=expected_logs(old.logs, FIXED_BUGS, rules=RULES))
     assert new.calls == old.calls
     assert new.error == old.error
     assert new.deleted == old.deleted
@@ -636,7 +637,7 @@ def test_bug_358_tag_dump_is_debug_only_in_new_code(
     assert ("root", logging.DEBUG, dump) in new.logs
     assert ("root", logging.INFO, dump) not in new.logs
     assert old.logs != new.logs
-    assert new.logs == expected_logs(old.logs, {"BUG-358"})
+    assert new.logs == expected_logs(old.logs, {"BUG-358"}, rules=RULES)
 
 
 def _is_mutating(call: tuple[Any, ...]) -> bool:
@@ -673,7 +674,7 @@ def test_cleaner_protocol_matches_main(
     with one region (or a dry run) the whole log is equal."""
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run_cleaner(case, monkeypatch, caplog, capsys)
-    old = dataclasses.replace(old, logs=expected_logs(old.logs, FIXED_BUGS))
+    old = dataclasses.replace(old, logs=expected_logs(old.logs, FIXED_BUGS, rules=RULES))
     assert new.error == old.error
     assert new.stdout == old.stdout
     assert [c for c in new.calls if not _is_mutating(c)] == [
@@ -976,7 +977,7 @@ def test_get_filtered_instances_matches_main(
         return result, aws.calls, _logs(caplog)
 
     result, calls, logs = run_helper(_legacy)
-    assert run_helper(_new) == (result, calls, expected_logs(logs, FIXED_BUGS))
+    assert run_helper(_new) == (result, calls, expected_logs(logs, FIXED_BUGS, rules=RULES))
 
 
 @pytest.mark.parametrize(
@@ -1012,5 +1013,5 @@ def test_repeated_operations_match_main(
         return Outcome(aws.calls, names, count, logs, stdout, None)
 
     old = run_twice(_legacy)
-    old = dataclasses.replace(old, logs=expected_logs(old.logs, FIXED_BUGS))
+    old = dataclasses.replace(old, logs=expected_logs(old.logs, FIXED_BUGS, rules=RULES))
     assert run_twice(_new) == old

@@ -17,6 +17,9 @@ credentials; SDK clients are mocked. Layout:
   `helpers_log_fix.py`, `test_log_fix_helpers.py` and `test_crc_utils_parity.py`, `test_crc_utils.py`:
   `crc/service.py` and `crc/utils.py` against `legacy/crc_service.txt` and `legacy/crc_utils.txt`, plus the
   per-bug oracle log rewriter of the LOG rungs (`docs/refactor/LOGGING.md`).
+  Each cloud lane keeps its own rules in `log_fix_<lane>.py` (passed as `rules=`), so lanes never edit
+  `helpers_log_fix.py`: `log_fix_aws_compute.py` and `test_log_fix_aws_compute.py` hold the LOG-AWS1 rules
+  (BUG-356 skip lines, BUG-358 tag dump, BUG-361, BUG-362) and their unit tests.
 - `test_aws_*.py`, `test_azure_*.py`, `test_azu_spot_vm.py`, `test_gcp_*.py`, `test_oci_*.py`: mocked tests of the
   refactored cloud cleaners (`crc/aws`, `crc/azu`, `crc/gcp`, `crc/oci`). A `*_parity.py` file runs the frozen
   `main` oracle in `legacy/` (see `legacy/README.md` for the full table) and the refactored module (adapter

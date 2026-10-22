@@ -100,9 +100,15 @@ class RunLog:
     def action(
         self, kind: str, region: str | None, resource_id: str, name: str | None = None
     ) -> None:
-        """Count and log one resource acted on, or that would be in a dry run."""
+        """Count and log one resource acted on, or that would be in a dry run.
+
+        An unknown kind is logged as a warning and the resource is still counted:
+        logging must never stop a cleanup halfway.
+        """
         if kind not in ACTION_KINDS:
-            raise ValueError(f"unknown action kind {kind!r}; use one of {ACTION_KINDS}")
+            self._log(
+                logging.WARNING, f"unknown action kind {kind!r}; use one of {ACTION_KINDS}"
+            )
         self._selected += 1
         if kind in _DONE_KINDS:
             self._done += 1

@@ -125,3 +125,12 @@ Scope `git diff 7437ac5..HEAD` (commits `11e31d2`, `949cce5`).
 No runlog API gap found; no owner action needed.
 
 ROUND 2 VERDICT: APPROVE
+
+## Rule move
+
+The LOG-AWS1 rules moved from `tests/helpers_log_fix.py` to `tests/log_fix_aws_compute.py` (test-only, no
+production change), after `logging/core` made `expected_logs` / `expected_outcome` take a `rules` mapping.
+`tests/helpers_log_fix.py` and `tests/test_log_fix_helpers.py` are now identical to `logging/core`. The lane's
+`RULES` is the core rules plus BUG-358, BUG-361, BUG-362 and its own BUG-356 (core age rule, then the INFO
+skip lines); the AWS disk, spot request and VM parity tests pass `rules=RULES`. Unit tests of the moved
+rules are in `tests/test_log_fix_aws_compute.py`. ARCH-002 does not apply (no `crc/**` change).

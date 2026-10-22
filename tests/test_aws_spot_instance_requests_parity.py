@@ -28,6 +28,7 @@ from crc.core import registry
 from crc.core.cleaner import Operation, RunContext
 from crc.core.report import DISK
 from tests.helpers_log_fix import expected_logs
+from tests.log_fix_aws_compute import RULES
 
 FIXED_BUGS = {"BUG-356"}
 
@@ -847,7 +848,7 @@ def test_adapter_matches_main(
 ) -> None:
     old = _run_class(_legacy, case, monkeypatch, caplog)
     new = _run_class(_adapter, case, monkeypatch, caplog)
-    old = dataclasses.replace(old, logs=expected_logs(old.logs, FIXED_BUGS))
+    old = dataclasses.replace(old, logs=expected_logs(old.logs, FIXED_BUGS, rules=RULES))
     assert new.calls == old.calls
     assert new.error == old.error
     assert new.deleted == old.deleted
@@ -863,7 +864,7 @@ def test_skip_lines_are_debug_only_in_new_code(
     for case in CASES:
         old = _run_class(_legacy, case, monkeypatch, caplog)
         new = _run_class(_adapter, case, monkeypatch, caplog)
-        assert new.logs == expected_logs(old.logs, FIXED_BUGS), case.id
+        assert new.logs == expected_logs(old.logs, FIXED_BUGS, rules=RULES), case.id
         if old.logs != new.logs:
             differing.append(case.id)
     assert differing
@@ -890,7 +891,9 @@ def test_cleaner_matches_main(
     assert _per_region(new.calls) == _per_region(old.calls)
     assert new.deleted == old.deleted
     assert new.volumes == old.volumes
-    old_logs = expected_logs([r for r in old.logs if not r[2].startswith(COUNT_LOG)], FIXED_BUGS)
+    old_logs = expected_logs(
+        [r for r in old.logs if not r[2].startswith(COUNT_LOG)], FIXED_BUGS, rules=RULES
+    )
     assert Counter(new.logs) == Counter(old_logs)
     if len(case.regions) == 1:
         assert new.calls == old.calls
