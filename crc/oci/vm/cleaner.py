@@ -26,6 +26,7 @@ from crc.core.cleaner import (
     Skipped,
 )
 from crc.core.registry import register
+from crc.oci import _runlog
 from crc.oci._base import Base
 from crc.oci.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
 from crc.oci.disk.api import RegionLister, regions_of
@@ -34,6 +35,12 @@ from crc.oci.vm.client import ApiFactory, ComputeApi, SdkInstance, compute_api_f
 DEFAULT_INSTANCE_STATES = ("RUNNING",)
 
 TagSpec = Mapping[str, Sequence[str]]
+SKIP_KEYS = {
+    "state is not allowed": "state",
+    "matches exception_tags or notags": "exception_tag",
+    "does not match filter_tags": "filter_mismatch",
+    "not older than age": "too_young",
+}
 Clock = Callable[[], datetime.datetime]
 
 
@@ -117,18 +124,23 @@ class VmCleaner:
         candidates: list[Candidate] = []
         skipped: list[Skipped] = []
         for region in self._list_regions():
+            started = _runlog.region_started()
             try:
                 api = self._api_factory(region)
                 instances = api.list_instances()
             except CONNECTIVITY_ERRORS as e:
                 log_skipped_region(region, f"list_instances vm {context.operation}", e)
+                _runlog.region_skipped(region, e)
                 continue
+            selected = 0
             for instance in instances:
                 decision = self.decide(instance, region, lambda: context.now)
                 if isinstance(decision, Candidate):
                     candidates.append(decision)
+                    selected += 1
                 else:
                     skipped.append(decision)
+            _runlog.region_done(region, len(instances), selected, started)
         if context.dry_run:
             _log_for(context.operation, [c.name for c in candidates], dry_run=True)
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
@@ -137,6 +149,8 @@ class VmCleaner:
         """Act on the planned instances region by region (nothing in a dry run). A failed call
         is logged and left out of the result, as on main."""
         if context.dry_run:
+            for candidate in plan.candidates:
+                self._record(candidate, context.operation, dry_run=True)
             return Result(succeeded=tuple(c.name for c in plan.candidates))
         by_region: dict[str, list[Candidate]] = {}
         for candidate in plan.candidates:
@@ -157,6 +171,7 @@ class VmCleaner:
         check, as `datetime.now()` is on main."""
         reason = self._skip_reason(instance, clock)
         if reason is not None:
+            _runlog.record_skip(SKIP_KEYS[reason])
             return Skipped(id=instance.id, reason=reason, name=instance.display_name)
         return Candidate(
             id=instance.id,
@@ -189,8 +204,20 @@ class VmCleaner:
             done.append(candidate.name)
         except Exception as e:
             logging.error(f"Error occurred while {operation} instance {candidate.name}: {e}")
+            _runlog.record_failure(candidate.region, candidate.id, e)
             return Failure(id=candidate.name, error=str(e))
+        self._record(candidate, operation, dry_run=dry_run)
         return None
+
+    @staticmethod
+    def _record(candidate: Candidate, operation: Operation, *, dry_run: bool) -> None:
+        _runlog.record_action(
+            operation,
+            dry_run=dry_run,
+            region=candidate.region,
+            resource_id=candidate.id,
+            name=candidate.name,
+        )
 
     def _skip_reason(self, instance: SdkInstance, clock: Clock) -> str | None:
         settings = self._settings
@@ -210,7 +237,7 @@ class VmCleaner:
         created_time = instance.time_created
         now = clock().astimezone(created_time.tzinfo)
         tags = instance.freeform_tags or {}
-        logging.info(tags)
+        logging.debug(tags)
         retention_age = core_age.get_retention_age(
             cast(dict[str, str], tags), self._settings.custom_age_tag_key
         )

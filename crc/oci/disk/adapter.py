@@ -11,6 +11,7 @@ from collections.abc import Sequence
 
 from crc.core import age as core_age
 from crc.core.cleaner import Candidate
+from crc.oci import _runlog
 from crc.oci._base import Base
 from crc.oci.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
 from crc.oci.disk.api import SdkVolume, VolumeApi, api_for, regions_of
@@ -95,16 +96,21 @@ class Disk(Service, Base):
             ),
         )
         for region in list_regions():
+            started = _runlog.region_started()
             try:
                 api = api_factory(region)
                 volumes, boot_volumes = cleaner.list_region(api)
             except CONNECTIVITY_ERRORS as e:
                 log_skipped_region(region, _LIST_CONTEXT, e)
+                _runlog.region_skipped(region, e)
                 continue
             attached = cleaner.attached_volume_ids(api, region)
-            self._process(cleaner, api, volumes, attached, KIND_DISK, region)
+            selected = self._process(cleaner, api, volumes, attached, KIND_DISK, region)
             attached_boot = cleaner.attached_boot_volume_ids(api, region)
-            self._process(cleaner, api, boot_volumes, attached_boot, KIND_BOOT_DISK, region)
+            selected += self._process(
+                cleaner, api, boot_volumes, attached_boot, KIND_BOOT_DISK, region
+            )
+            _runlog.region_done(region, len(volumes) + len(boot_volumes), selected, started)
         _log_summary(self.disk_names_to_delete, dry_run=self.dry_run)
 
     def _process(
@@ -115,8 +121,11 @@ class Disk(Service, Base):
         attached_ids: set[str],
         kind: str,
         region: str,
-    ) -> None:
+    ) -> int:
+        selected = 0
         for volume in volumes:
             decision = cleaner.decide(volume, attached_ids, kind, region, self._runtime.clock())
             if isinstance(decision, Candidate):
+                selected += 1
                 cleaner.remove(api, decision, self.disk_names_to_delete, dry_run=self.dry_run)
+        return selected

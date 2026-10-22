@@ -13,6 +13,7 @@ from collections.abc import Sequence
 
 from oci.exceptions import ServiceError
 
+from crc.oci import _runlog
 from crc.oci.spot_vm.client import BlockClient, ComputeClient, Pager
 from crc.oci.spot_vm.decide import SpotVmSettings, tags_protect
 
@@ -33,6 +34,7 @@ def attached_volume_ids(
         ).data
     except Exception as e:
         logging.error("Failed to list volume attachments for %s: %s", instance_id, e)
+        _runlog.record_failure(None, instance_id, e)
         return None
 
     volume_ids: list[str] = []
@@ -53,6 +55,7 @@ def attached_volume_ids(
 
 def _poll_failed(instance_id: str, error: Exception) -> bool:
     logging.error("Error polling OCI instance %s during terminate wait: %s", instance_id, error)
+    _runlog.record_failure(None, instance_id, error)
     return False
 
 
@@ -79,6 +82,7 @@ def wait_terminated(compute: ComputeClient, instance_id: str, settings: SpotVmSe
         "will still attempt leftover volume deletes",
         instance_id,
     )
+    _runlog.record_failure(None, instance_id, "timed out waiting for TERMINATED")
     return False
 
 
@@ -88,9 +92,11 @@ def volume_passes_tag_check(block: BlockClient, volume_id: str, settings: SpotVm
         volume = block.get_volume(volume_id).data
     except Exception as e:
         logging.error("Failed to get volume %s for tag check (skipping): %s", volume_id, e)
+        _runlog.record_failure(None, volume_id, e)
         return False
     if tags_protect(settings, volume.freeform_tags):
-        logging.info("Skipping leftover volume %s: exception_tags/notags", volume_id)
+        logging.debug("Skipping leftover volume %s: exception_tags/notags", volume_id)
+        _runlog.record_skip("leftover_exception_tag")
         return False
     return True
 
@@ -103,6 +109,7 @@ def delete_leftover(block: BlockClient, volume_id: str, done: list[str]) -> None
         done.append(volume_id)
     except Exception as e:
         logging.error("Failed to delete leftover volume %s: %s", volume_id, e)
+        _runlog.record_failure(None, volume_id, e)
 
 
 def checked_volumes(
