@@ -62,11 +62,37 @@ minutes, followed by one review run. Every rung must leave
 | R2 | registry, Cleaner protocol, engine, report (not wired) |
 | R3 | move Slack and Influx into `crc/notify` |
 | R4+ | one resource per rung: AWS keypair, AWS elastic IP, AWS KMS, AWS VPC, AWS snapshot, AWS VM, AWS disk, AWS spot requests (2-3 rungs), Azure, GCP, OCI |
-| CLI | `crc.py` becomes thin wiring over the engine; flags unchanged |
-| Final | remove legacy allowlist, lock all safety tests, README symbol sync everywhere |
+| PL-* | shared helpers (`_base.py`, `connectivity.py`, `service.py`, `utils.py`, Azure VM delete helpers) strict-clean with parity oracles |
+| CLI-1..3 | `crc.py` code moved into `crc/cli/` (args, validators, the `CRC` class, `main()`); `crc.py` is a thin entry point; flags unchanged |
+| ST-* | sibling-file splits turned into subpackages (`crc/aws/vm`, `crc/aws/vpc`, `crc/oci/vm`, `crc/oci/disk`) |
+| Final | docs say the refactor is done and how behaviour-fix rungs work (`BEHAVIOUR_FIX.md`), README wording sweep |
 
-Behaviour fixes (fail closed on missing age, no `MAX_AGE` env mutation, the
-three Azure VM bugs) come after the refactor as separate rungs.
+Deferred from Final, each needs an owner decision first:
+
+- Remove the legacy adapter classes (`SpotVM`, `VM`, `Disk`, ...) so `crc/cli` runs the
+  registered cleaners through `crc.core.engine`. The five hash-locked safety tests build
+  the adapters directly, so this waits for the owner to rewrite and relock them.
+- Wire `crc/cli` through `engine.run` instead of the `CRC` methods (changes the order of
+  calls and notifications, so it is its own rung with parity tests).
+- Extend `safety_lock.json` to the new parity tests (every later fix would then need an
+  owner relock).
+
+## Behaviour-fix rungs
+
+Each rung fixes the `BUG-NNN` rows it lists, nothing else, following
+`.cursor/skills/crc-python-refactor/BEHAVIOUR_FIX.md`: oracles stay frozen, each
+diverging parity case is marked with its bug ID and asserts the new outcome, and a
+change to a hash-locked safety test is handed to the owner. Work from
+`docs/refactor/BUGS.md` by risk: critical first, then high. Known themes: fail closed on
+missing or malformed age (cleaners where `is_old({})` is true), no `MAX_AGE` env
+mutation, Azure deletes scoped to the listed resource group, the three Azure VM bugs,
+and an empty `--scan_tag` running the destructive path (BUG-344).
+
+Add each rung here before it starts, as a row with its ID (for example `FIX-1`), the
+bug IDs, and whether it may edit `CLEANUP_SAFETY.md`:
+
+| Rung | Bugs | May edit CLEANUP_SAFETY.md |
+|------|------|----------------------------|
 
 Progress is logged in `docs/refactor/STATUS.md`. Reviews go to
 `docs/refactor/reviews/<rung>.md`.

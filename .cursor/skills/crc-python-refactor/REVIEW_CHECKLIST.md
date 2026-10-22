@@ -8,8 +8,11 @@ failed item and say which one. Write the review to `docs/refactor/reviews/<rung>
 - [ ] `make check` is green: `ruff check .`, `mypy`, `lint-imports`, `pytest -q`.
 - [ ] Test count is not lower than before the rung (compare with STATUS.md).
 - [ ] Only the current rung's scope changed; no other rung started.
-- [ ] No behaviour change; CLI flags, env vars and JSON flag values
-      (`'{"days": 1}'`) still work.
+- [ ] No behaviour change, except in a behaviour-fix rung for the `BUG-NNN` rows
+      its PLAN.md entry names, done as `BEHAVIOUR_FIX.md` says (oracles untouched,
+      divergence marked per case with the bug ID and asserting the new outcome,
+      every other case still equal to `main`). CLI flags, env vars and JSON flag
+      values (`'{"days": 1}'`) still work.
 - [ ] `requirements.txt` unchanged unless the rung says so.
 
 ## 2. CLEANUP_SAFETY.md parity

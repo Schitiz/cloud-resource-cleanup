@@ -82,7 +82,10 @@ through one explicit per-file list: ruff `extend-exclude` and the
 directory or glob entries, so every new file (for example under `crc/core`,
 `crc/notify` or new tests) is checked by default. mypy checks `crc/` and
 `tests/` through `files`; `crc.py` is left out because its module name clashes
-with the `crc` package, which the CLI rung resolves. The list may only shrink. A rung removes the modules it refactors from both places in
+with the `crc` package, so `crc.py` is a thin entry point and its code lives in the
+mypy-checked `crc/cli/` package. The list may only shrink. After the refactor rungs it
+holds only the five hash-locked safety test files (kept as on `main` so their hashes
+stay valid). A rung removes the modules it refactors from both places in
 the same change, and the refactored code must then pass ruff (complexity 10,
 statements 40, args 6) and mypy strict. Narrow the lists as modules move;
 never widen them.

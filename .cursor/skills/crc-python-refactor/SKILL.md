@@ -5,7 +5,9 @@ description: Implementer rules for the CRC Python 3.11 refactor: Cleaner protoco
 
 # crc-python-refactor (implementer)
 
-Refactor only. Behaviour, CLI flags, env vars and JSON flag values stay the same.
+Behaviour changes only in a behaviour-fix rung, and only for the bugs it names:
+follow `BEHAVIOUR_FIX.md`. Every other change keeps behaviour, CLI flags, env vars
+and JSON flag values the same.
 Read `AGENTS.md`, `ARCHITECTURE.md` and `CLEANUP_SAFETY.md` first. Run
 `make check` before committing. Reviewers use `REVIEW_CHECKLIST.md`.
 
