@@ -79,3 +79,71 @@ Scope reviewed: `git diff 5f6ddcf..HEAD` on branch `logging/core` (rung `LOG-0`,
 
 VERDICT: APPROVE
 
+
+## Round 2 (Opus)
+
+Scope: `git diff 5f6ddcf..HEAD` on `logging/core` (coder `7437ac5`, Round 1 `68e393f`). Round 1's
+fixes (the BUG-356 divergence test in `tests/test_crc_service_parity.py`, the BUG-360 test in
+`tests/test_cli_main_parity.py`, README updates) were re-checked; its findings hold, with one gap
+fixed below.
+
+### Checks
+
+1. **Behaviour only in log text/levels.** `git diff --stat` shows no change under `crc/aws`,
+   `crc/azu`, `crc/gcp`, `crc/oci`, `crc/utils.py`, `crc.py`, `tests/legacy`, `tests/archtest`,
+   `AGENTS.md`, `ARCHITECTURE.md`, `CLEANUP_SAFETY.md` or `.cursor`. `crc/core/age.py` changes
+   exactly five calls from `info`/`warning` to `debug`, text identical (main
+   `crc/service.py:231,252,259,263,294,297`; 252/259 are the single `_log_older` helper). The
+   other age lines (`Found '<key>' tag`, `Overwriting resource age`, parse errors) keep their level.
+   `crc/cli/dispatch.py` only adds `_run_options` / `_run_handler` (begin, then the unchanged
+   handler call in `try`, `finish()` in `finally`, so exceptions propagate unchanged and nothing
+   is wrapped when `HANDLERS.get` returns `None`) and re-wraps one warning literal whose
+   concatenated text is byte-identical. No CLI flag, exit code, Slack or Influx path touched.
+   `main` has a single `--resource_group` (no per-group loop at `crc.py:1532-1544`), so one
+   RUN START / RESULT pair per cloud x resource pass is correct. `operation_type or "delete"`
+   matches main's argparse default (`crc.py:1044-1046`).
+2. **Formats.** `crc/core/runlog.py` RUN START / REGION / ACTION / SKIPPED / ERRORS / FAILED /
+   RESULT match the contract key for key (names, order, `-` fallbacks, `<Type>: <msg>`, INFO vs
+   ERROR, SKIPPED sorted by reason, FAILED in record order, RESULT always last); option keys in the
+   contract order, compact sorted JSON; `current()` unattached run logs nothing; clock injectable.
+   `_json` adds `default=str` so a non-JSON option value cannot make `begin()` raise and change
+   the run's outcome (the contract is silent on this; tested by
+   `test_begin_serialises_non_json_values_as_text`). Accepted.
+3. **Parity.** Oracles untouched. `tests/helpers_log_fix.py` BUG-356 rule only rewrites the level
+   of the five age-check messages (anchored regexes), keeps order, count and text; no global
+   loosening. `both()` captures at DEBUG, so the DEBUG lines are still compared. Grep shows no
+   other test outside `tests/legacy` asserts the demoted messages, and the full suite passing
+   with the oracles frozen confirms no other parity test sees them.
+   **Fixed (minimal):** `test_bug_360_main_logs_run_start_and_result_around_each_cleaner_pass`
+   compared only `events` and checked the first two log lines with `startswith`, so an extra
+   line or trailing text would have passed and stdout/stderr/MAX_AGE/warnings/result were not
+   compared. It now pins the clock (`functools.partial(runlog.begin, clock=lambda: 0.0)`),
+   asserts the exact two-line list including `duration_s=0`, and asserts
+   `new_single == oracle_single` for the whole `Outcome`.
+4. **Safety lock.** `tests/archtest/safety_lock.json` and the five locked files are untouched;
+   none of them asserts the level of an age-check or runlog line. No owner action needed.
+5. **Docs (ARCH-002).** `crc/core/README.md` Public API lists `RunLog`, `begin`, `current`,
+   `finish`; `crc/cli/README.md`, `tests/README.md`, `docs/refactor/README.md` updated.
+   `BUGS.md` BUG-356..362: every main `file:line` re-checked with `git show main:<path>`
+   (kms.py:181-182 bare `except:`/`KEY SKIPPED`, the seven tag/label dumps, snapshot.py:79,
+   crc.py:1532/1544/1629-1640, per-cleaner summary and `except` sites); BUG-357 sits in the
+   medium group, the rest at the end of the low group, so the table stays sorted by risk.
+   `PLAN.md` rows match the task text exactly, with the pointer sentence to `LOGGING.md`.
+   `LOGGING.md` carries the contract (formats, levels, parity rule).
+
+### Findings
+
+- NIT `crc/core/runlog.py:166`: options are omitted when falsy, so `age=0` would not be printed.
+  This matches "non-empty" in the contract and `age=0` is refused by the cleaners anyway; no change.
+- NIT `crc/core/runlog.py:96`: `region_skipped` ignores `error` (the contract logs nothing for it);
+  fine for LOG-0, cloud lanes keep their own warning line.
+- No BLOCKING findings. No problems in the do-not-edit files.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check` on Python 3.12.3:
+ruff passed, mypy strict passed, import-linter passed (crc.core imports nothing from cloud
+packages or crc.cli), pytest: 42258 passed (42213 at `5f6ddcf`; same count as Round 1, the
+fix tightens an existing test).
+
+ROUND 2 VERDICT: APPROVE
