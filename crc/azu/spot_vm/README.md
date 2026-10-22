@@ -2,13 +2,13 @@
 
 ## Purpose
 
-Azure Spot VM cleaner (rung AZ-5). Deletes Spot VMs that are stopped or deallocated, match the tag filters and are old enough, then their leftover Detach disks and their `<vm>-NIC`. Split by responsibility: `cleaner.py` (plan and apply), `client.py` (SDK Protocols), `disks.py` (leftover disk detection), `removal.py` (the mutating steps), `__init__.py` (the legacy `SpotVM` adapter).
+Azure Spot VM cleaner (rung AZ-5). Deletes Spot VMs that are stopped or deallocated, match the tag filters and are old enough, then their leftover Detach disks and their `<vm>-NIC`. Split by responsibility: `cleaner.py` (plan and apply), `client.py` (SDK Protocols), `disks.py` (leftover disk detection), `removal.py` (the mutating steps), `__init__.py` (the `SpotVM` adapter).
 
 ## Public API
 
 - `AzureSpotVmCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus list_vms, decide and power_status used by the adapter); registered as azure / spot_instances.
 - `SpotVmConfig`: frozen dataclass with the flags of one run (resource group, tag specs, validated age, custom age tag key).
-- `build_spot_vm_cleaner()`: registry factory; reads resource_group, filter_tags, exception_tags, notags, age and custom_age_tag_key from RunContext.options and builds the clients from the legacy Base.
+- `build_spot_vm_cleaner()`: registry factory; reads resource_group, filter_tags, exception_tags, notags, age and custom_age_tag_key from RunContext.options and builds the clients from Base.
 - `log_summary()`: the closing warning lines main logs.
 - `STOPPED_POWER_STATES`: the two power states that qualify, "VM stopped" and "VM deallocated".
 - `SpotVM`: adapter crc.py calls (delete(), get_deleted, delete_count, get_deleted_nic, nic_delete_count, get_deleted_disks, base); runs the cleaner VM by VM in the order of main. The extra optional clock argument defaults to datetime.datetime.now.
@@ -26,7 +26,7 @@ Azure Spot VM cleaner (rung AZ-5). Deletes Spot VMs that are stopped or dealloca
 - `plan()` only reads: `virtual_machines.list`, `instance_view` and, in a dry run, `disks.get`. `begin_delete` (VM, disks, NIC) is called from `apply()` and `SpotVM.delete()` only and never in a dry run.
 - Order per VM as on main: VM delete (waited), leftover disks (tag check by `disks.get`, then delete), NIC. A failing VM is logged and skipped, the run goes on; leftover disks outside `--resource_group` or protected by their own exception_tags or notags are kept; a failed disk tag read keeps the disk.
 - A dry run needs `plan()` alone: it also previews the disks and the NIC and logs the summary. The Cleaner path in a real run differs from main only in ordering: all VMs are listed and checked before the first delete.
-- Quirks in `docs/refactor/bugs/pending/AZ-5.md`.
+- Quirks in `docs/refactor/BUGS.md` (`BUG-244` to `BUG-254`).
 
 ## Extension Rules
 

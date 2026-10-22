@@ -9,7 +9,7 @@ behaviour change. Split by responsibility: `model.py` (settings, state, constant
 `client.py` (SDK Protocol), `rules.py` (pure tag and marker decisions), `requests.py` (list,
 filter, age), `volumes.py` (read-only instance and volume lookups, sweep gates), `preview.py`
 (dry-run path, reads only), `leftover.py` (marker tags, wait and delete), `cleanup.py` (one
-request, region sweep), `cleaner.py` (`plan()` / `apply()`), `adapter.py` (legacy class).
+request, region sweep), `cleaner.py` (`plan()` / `apply()`), `adapter.py` (the `SpotInstanceRequests` adapter).
 
 ## Public API
 
@@ -31,7 +31,7 @@ from crc.aws.spot_instance_requests import SpotInstanceRequests keeps working.
 
 ## Safety Invariants
 
-- Authoritative text: `CLEANUP_SAFETY.md` (SAF-028 cancel before terminate, SAF-006 to SAF-013 age gates, SAF-029 to SAF-033 leftover volumes). Quirks: `docs/refactor/BUGS.md` (BUG-004, BUG-021, BUG-022) and `docs/refactor/bugs/pending/AWS-5.md`.
+- Authoritative text: `CLEANUP_SAFETY.md` (SAF-028 cancel before terminate, SAF-006 to SAF-013 age gates, SAF-029 to SAF-033 leftover volumes). Quirks: `docs/refactor/BUGS.md` (BUG-004, BUG-021, BUG-022, BUG-272 to BUG-281).
 - `plan()` only calls describe operations. In a dry run it also performs the reads of the real path and records what would be done; `cancel_spot_instance_requests`, `terminate_instances`, `create_tags`, `delete_tags` and `delete_volume` live in `leftover.py` and `cleanup.py` and are reached from `apply()` only.
 - Order of one request: tag DoT=false volumes, cancel (an already cancelled request skips it), terminate, wait for `available`, delete. A failed tag or cancel aborts before the next step; a failed cancel or terminate invalidates the `crc_leftover_of` / `crc_leftover_tag_*` markers.
 - Fail closed: untagged requests, a bad custom age tag, unreadable volume tags, an unknown instance state and a failed live-request lookup keep the resource. Sensitive `yb_task` and exception/notags protect leftover volumes only.

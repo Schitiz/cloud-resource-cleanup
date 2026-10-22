@@ -2,7 +2,7 @@
 
 ## Purpose
 
-AWS EBS disk cleaner (AWS-4). Deletes available (unattached) EBS volumes in every region that pass the tag, name and age rules, with an optional CloudWatch detach-age guard. The old import path `crc.aws.disk` keeps working: the package `__init__.py` holds the legacy `Disk` class `crc.py` uses.
+AWS EBS disk cleaner (AWS-4). Deletes available (unattached) EBS volumes in every region that pass the tag, name and age rules, with an optional CloudWatch detach-age guard. The old import path `crc.aws.disk` keeps working: the package `__init__.py` holds the `Disk` class `crc.py` uses.
 
 Modules, one per responsibility:
 
@@ -14,7 +14,7 @@ Modules, one per responsibility:
 
 ## Public API
 
-- `Disk`: legacy adapter that crc.py calls (delete(), get_deleted, count, disks_to_delete, age, detach_age); runs the cleaner region by region in the order of main.
+- `Disk`: adapter that crc.py calls (delete(), get_deleted, count, disks_to_delete, age, detach_age); runs the cleaner region by region in the order of main.
 - `DiskCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus plan_region, note_dry_run, apply_region, region_guard and log_summary used by the adapter).
 - `DiskRuntime`: frozen dataclass with the injected EC2 and CloudWatch client factories and the region lister.
 - `build_disk_cleaner()`: registry factory behind the aws / disk registration; reads filter_tags, exception_tags, notags, name_regex, exception_regex, custom_age_tag_key, age and detach_age from RunContext.options.
@@ -46,7 +46,7 @@ Modules, one per responsibility:
 - Fail closed: a missing CreateTime, an invalid custom age tag, an incomplete or failed CloudWatch answer keeps the volume. Attached and Multi-Attach volumes, sensitive `yb_task` values and Kubernetes CSI volumes (without a kubernetes filter) are never deleted; untagged volumes are skipped unless `notags` is set.
 - Region errors: connectivity errors skip the region, `AuthFailure`, `UnauthorizedOperation`, `OptInRequired` and `InvalidClientTokenId` skip it with a warning, every other error is logged and flagged and never raised. `describe_regions` errors (other than connectivity) propagate. Per volume errors are isolated and logged (CLEANUP_SAFETY.md).
 - `Disk.delete()` keeps the call and log order of main (per region: client, listing, CloudWatch, deletes). The Cleaner path lists every region before `apply()` deletes, so delete calls and `Deleted volume` lines come after all listing lines; a dry run is identical because `plan()` also logs the dry-run lines.
-- Log lines, labels (`region/volume-id yb_task=...`) and quirks are those of main; see `docs/refactor/bugs/pending/AWS-4.md`.
+- Log lines, labels (`region/volume-id yb_task=...`) and quirks are those of main; see `docs/refactor/BUGS.md` (`BUG-004`, `BUG-022`, `BUG-282` to `BUG-296`).
 
 ## Extension Rules
 

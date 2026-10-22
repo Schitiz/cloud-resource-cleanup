@@ -2,14 +2,14 @@
 
 ## Purpose
 
-AWS EC2 VM cleaner (rung AWS-3, moved into a subpackage by ST-AWS-VM). `VmCleaner` is a registered `Cleaner` (`@register("aws", "vm")`): `plan()` lists the running instances of every region (`describe_instances`, `describe_network_interfaces`) and applies the tag and age policy; `apply()` calls `terminate_instances` or `stop_instances`. `VM` is the legacy entry point `crc.py` uses; `from crc.aws.vm import VM` keeps working, and so does every other name the old sibling modules exported (`crc.aws.vm_cleaner`, `crc.aws.vm_api` and `crc.aws.vm_scan` are now `crc.aws.vm.cleaner`, `crc.aws.vm.client` and `crc.aws.vm.scan`).
+AWS EC2 VM cleaner (rung AWS-3, moved into a subpackage by ST-AWS-VM). `VmCleaner` is a registered `Cleaner` (`@register("aws", "vm")`): `plan()` lists the running instances of every region (`describe_instances`, `describe_network_interfaces`) and applies the tag and age policy; `apply()` calls `terminate_instances` or `stop_instances`. `VM` is the adapter entry point `crc.py` uses; `from crc.aws.vm import VM` keeps working, and so does every other name the old sibling modules exported (`crc.aws.vm_cleaner`, `crc.aws.vm_api` and `crc.aws.vm_scan` are now `crc.aws.vm.cleaner`, `crc.aws.vm.client` and `crc.aws.vm.scan`).
 
 Modules, one per responsibility:
 
 - `cleaner.py`: settings, default factories, summary logging, `VmCleaner` and the registry factory.
 - `client.py`: typed Protocols of the boto3 EC2 calls used by the cleaner and the tag scan.
 - `scan.py`: the read-only scan of instances by tag across regions.
-- `adapter.py`: the legacy `VM` class and its `VmRuntime`, a thin adapter that drives the cleaner region by region.
+- `adapter.py`: the `VM` class and its `VmRuntime`, a thin adapter that drives the cleaner region by region.
 
 ## Public API
 
@@ -39,7 +39,7 @@ Modules, one per responsibility:
 - Fail closed: any error while judging one instance is logged and keeps it; exception tags (any key) and notags skip an instance; an instance without a `Tags` key or `Name` tag is kept. Termination and stop errors are isolated per instance.
 - Region errors: a `describe_instances` connectivity error skips the region (SAF-001); `describe_regions` falls back to the static list on a connectivity error only and every other error propagates (SAF-004).
 - `VM.delete()` keeps the call and log order of main (per region: client, describe, per-instance decision, then the calls); the Cleaner path lists every region before it mutates.
-- The move into this subpackage changed no behaviour; quirks are in `docs/refactor/BUGS.md` (BUG-004, BUG-020, BUG-021, BUG-213 to BUG-227).
+- The move into this subpackage changed no behaviour; quirks are in `docs/refactor/BUGS.md` (BUG-004, BUG-020, BUG-021, BUG-213 to BUG-227, BUG-351).
 
 ## Extension Rules
 

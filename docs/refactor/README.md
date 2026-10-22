@@ -2,20 +2,20 @@
 
 ## Purpose
 
-Plan, progress and findings of the CRC Python refactor on `refactor/python-agentic`.
+Plan, progress and findings of the CRC Python refactor on `refactor/python-agentic`. Every refactor rung is done; further work happens in behaviour-fix rungs (see `PLAN.md`).
 
 | File | Content |
 |------|---------|
 | `PLAN.md` | Goal, target architecture, guardrails, rungs (guardrail file) |
 | `STATUS.md` | Rung log with counts and open issues; read it first, update it every rung |
 | `BUGS.md` | Register of every bug and quirk, with the `main` file:line, risk and status |
-| `FILTER_VARIANTS.md` | How each legacy module filters by tags, regex, state and age |
+| `FILTER_VARIANTS.md` | How each module filters by tags, regex, state and age (written from `main`, with its `file:line`) |
 | `SKILL_SELECTION.md` | Why the project skill is shaped as it is |
 | `reviews/` | One review per rung (`<rung>.md`) |
 
 ## Public API
 
-- `STATUS.md`: one row per rung (R0a, R0b, R1a, R1b, R2a, R2b, R2c).
+- `STATUS.md`: one row per rung (R0a to R4c, the cloud and CLI lanes GCP-*, AZ-*, AWS-*, OCI-*, CLI-*, the PL-* and ST-* rungs, Final).
 - `BUGS.md`: `BUG-NNN` IDs, never reused.
 - `FILTER_VARIANTS.md`: spec for the functions in `crc/core/policy.py`.
 

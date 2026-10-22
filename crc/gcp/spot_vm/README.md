@@ -12,7 +12,7 @@ Modules:
 - `operations.py`: waiting for a zone or region operation.
 - `disks.py`: leftover disk references, label check and delete.
 - `cleaner.py`: `SpotVMCleaner`, its summary log and the registry factory.
-- `adapter.py`: the legacy `SpotVM` class.
+- `adapter.py`: the `SpotVM` class, the adapter `crc/cli` uses.
 
 ## Public API
 
@@ -48,7 +48,7 @@ The package init re-exports the main names below, so the old import path of the 
 - An instance is selected only when its status is RUNNING, TERMINATED or SUSPENDED (`policy.state_in`), it is Spot or preemptible, is not a GKE node or MIG member (`policy.gcp_is_managed_or_gke_node`), is not excluded by `exception_labels` (any key) or `notags` (all keys) (`policy.should_skip_by_tags`; an unlabelled VM is never excluded), matches `filter_labels` (`policy.filter_tags_all_keys`; empty matches all, an unlabelled VM fails an active filter) and is at least as old as the custom age label or else `age` (`core_age.validated_retention_age`, `policy.effective_age`, `core_age.is_old`, `MAX_AGE` still applies). An invalid custom age label keeps the VM. The clock comes from `RunContext.now` (Cleaner) or the injected `clock` (adapter), never read inside the cleaner.
 - If the delete call fails, or its operation errors, times out (`INSTANCE_DELETE_WAIT_SEC`, default 180 s) or has no name, the VM is not recorded and its leftover disks are kept. Errors per VM are logged (`Error processing GCP Spot VM ...`) and the run goes on; a zone listing error skips the zone; the zone listing itself, the instances client and the session errors propagate unchanged (no connectivity fallback).
 - The wait reads `time.monotonic` and `time.sleep` (ARCH-003 bans `time.time`); `main` used `time.time`.
-- `SpotVM.delete()` keeps the call order of `main` (per zone: list, then VM by VM: filter, delete, wait, disks); the registered Cleaner lists and filters every zone first, then deletes, so an error while listing a later zone stops before any delete, and in a dry run `plan()` also reads the leftover disks. Quirks are in `docs/refactor/bugs/pending/GCP-4.md`.
+- `SpotVM.delete()` keeps the call order of `main` (per zone: list, then VM by VM: filter, delete, wait, disks); the registered Cleaner lists and filters every zone first, then deletes, so an error while listing a later zone stops before any delete, and in a dry run `plan()` also reads the leftover disks. Quirks are in `docs/refactor/BUGS.md` (`BUG-228` to `BUG-243`).
 - Do not call real cloud APIs in tests; mock every SDK client.
 
 ## Extension Rules
@@ -57,4 +57,4 @@ The package init re-exports the main names below, so the old import path of the 
 2. New filters go through `crc.core.policy`; age through `crc.core.age`; no `re`, `print`, wall clock or `os.environ` in this package (ARCH-003).
 3. A new SDK call goes into `GcpSpotClient` first, with a fake in the tests; `plan()` stays read-only.
 4. Keep each module under 400 lines; split by responsibility and keep the old import path through `__init__.py`.
-5. Record every new bug or quirk in `docs/refactor/BUGS.md` with its `main` file:line (pending rows first: `docs/refactor/bugs/pending/GCP-4.md`).
+5. Record every new bug or quirk in `docs/refactor/BUGS.md` with its `main` file:line.

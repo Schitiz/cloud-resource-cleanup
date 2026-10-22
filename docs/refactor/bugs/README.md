@@ -8,7 +8,7 @@ integrator folds the rows into `BUGS.md` and assigns the real `BUG-NNN` IDs.
 
 ## Public API
 
-- `pending/<rung>.md`: rows of one rung, same columns as `docs/refactor/BUGS.md`, ID column `NEW`.
+- `pending/<rung>.md`: rows of one rung, same columns as `docs/refactor/BUGS.md`, ID column `NEW` (deleted when folded into `BUGS.md`).
 
 ## Safety Invariants
 
@@ -18,4 +18,4 @@ integrator folds the rows into `BUGS.md` and assigns the real `BUG-NNN` IDs.
 ## Extension Rules
 
 1. One file per rung in `pending/`; do not edit another rung's file.
-2. Once the rows are in `docs/refactor/BUGS.md`, keep the pending file as history.
+2. Once the rows are in `docs/refactor/BUGS.md`, the integrator deletes the pending file.

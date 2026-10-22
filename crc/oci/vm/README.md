@@ -4,7 +4,7 @@
 
 OCI compute instance cleaner (`--cloud oci --resource vm`). `VmCleaner` is a registered `Cleaner`
 (`@register("oci", "vm")`): `plan()` lists the instances of every region and decides on each one,
-`apply()` terminates (`delete`) or stops (`stop`) the selected instances. `VM` is the legacy entry
+`apply()` terminates (`delete`) or stops (`stop`) the selected instances. `VM` is the adapter entry
 point `crc.py` uses; `from crc.oci.vm import VM` keeps working. Converted in rung ST-OCI-VM from
 the sibling files `crc/oci/vm.py` and `crc/oci/vm_api.py` (pure move, no behaviour change); the old
 `crc.oci.vm_api` path is gone, its names are exported by this package.
@@ -37,7 +37,7 @@ Modules, split by responsibility:
 - Only instances in an allowed state (`RUNNING` by default) are candidates; `filter_tags` needs every key (`docs/refactor/FILTER_VARIANTS.md`, section 5).
 - An empty age matches every instance (SAF-006) and `MAX_AGE` can shorten the age (SAF-010); the age of an instance with a custom age tag fails open to `--age` (SAF-009, `BUG-004`).
 - A failed terminate or stop is logged and skipped, never raised, as on main; list and region errors are not isolated per instance (connectivity errors skip the region, other errors propagate).
-- Known bugs and quirks (do not fix outside a behaviour-fix rung): `docs/refactor/BUGS.md` (BUG-158 to BUG-171 are the OCI VM rows); new quirks are queued in `docs/refactor/bugs/pending/ST-OCI-VM.md`.
+- Known bugs and quirks (do not fix outside a behaviour-fix rung): `docs/refactor/BUGS.md` (`BUG-158` to `BUG-171`, `BUG-352`).
 - Do not call real cloud APIs in tests; use fakes for `ComputeApi`.
 
 ## Extension Rules
@@ -46,4 +46,4 @@ Modules, split by responsibility:
 2. Tag, age and state decisions call `crc.core.policy` / `crc.core.age`; no `re`, no wall-clock read in the cleaner (the clock is injected), no `os.environ`, no `print` (ARCH-003).
 3. Every SDK call goes through `ComputeApi` in `client.py`; add a method to the Protocol only for a call the cleaner really makes.
 4. `plan()` stays read-only: every mutating call belongs in `apply()` / `act()`.
-5. Record every new bug or quirk in `docs/refactor/BUGS.md` with its `main` file:line (parallel lanes use `docs/refactor/bugs/pending/`).
+5. Record every new bug or quirk in `docs/refactor/BUGS.md` with its `main` file:line.

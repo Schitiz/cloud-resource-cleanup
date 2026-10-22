@@ -46,7 +46,7 @@ Modules, split by responsibility:
 - `SpotVmCleaner`: the Cleaner (supports delete only, read-only plan, mutating apply, plus list_region, consider and terminate used by the adapter).
 - `build_spot_vm_cleaner()`: registry factory behind @register("oci", "spot_instances"); reads filter_tags, exception_tags, notags, age (required, positive) and custom_age_tag_key from RunContext.options.
 - `SpotVmRuntime`: frozen dataclass with the injected clients factory, region lister, pager and clock (now) of `SpotVM`; unset parts come from Base and the SDK.
-- `SpotVM`: adapter crc.py calls (delete(), get_deleted, get_deleted_volumes, delete_count, instance_names_to_delete, volumes_to_delete, and the private hooks the legacy tests use); subclasses Service and Base; acts instance by instance in the order of main.
+- `SpotVM`: adapter crc.py calls (delete(), get_deleted, get_deleted_volumes, delete_count, instance_names_to_delete, volumes_to_delete, and the private hooks the hash-locked safety test uses); subclasses Service and Base; acts instance by instance in the order of main.
 
 ## Safety Invariants
 
@@ -54,7 +54,7 @@ Modules, split by responsibility:
 - `plan()` only lists and decides (ARCH-005). In a dry run it also reads the leftover volumes to report them; no mutating call is made.
 - `apply()` is the only caller of `terminate_instance` (with `preserve_boot_volume=False`) and `delete_volume`. Order per instance: terminate, wait for `TERMINATED` when volumes were attached, delete the tag-checked volumes. A failed wait still tries the volume deletes (as on main).
 - A failure on one instance or volume is logged and skipped, never raised, as on main. A failed region list is skipped; the region list itself (`get_all_regions`) falls back to the home region on connectivity and auth errors.
-- Known bugs and quirks (do not fix outside a behaviour-fix rung): `docs/refactor/BUGS.md`; new Spot VM quirks are queued in `docs/refactor/bugs/pending/OCI-3.md`.
+- Known bugs and quirks (do not fix outside a behaviour-fix rung): `docs/refactor/BUGS.md` (`BUG-255` to `BUG-271`).
 - Do not call real cloud APIs in tests; use fakes for `ComputeClient` and `BlockClient`.
 
 ## Extension Rules
@@ -63,4 +63,4 @@ Modules, split by responsibility:
 2. Tag, age and OKE decisions stay in `decide.py` and call `crc.core.policy` / `crc.core.age`; no `re`, no wall-clock read, no `os.environ`, no `print` (ARCH-003). The clock is injected; only `time.monotonic` and `time.sleep` are used for the wait.
 3. Every SDK call goes through `ComputeClient` or `BlockClient`; add a method to the Protocol only for a call the cleaner really makes.
 4. `plan()` stays read-only: every mutating call belongs in `apply()` (`terminate()`, `delete_leftover()`).
-5. Record every new bug or quirk in `docs/refactor/BUGS.md` with its `main` file:line (parallel lanes use `docs/refactor/bugs/pending/`).
+5. Record every new bug or quirk in `docs/refactor/BUGS.md` with its `main` file:line.

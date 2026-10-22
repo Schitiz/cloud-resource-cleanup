@@ -34,8 +34,10 @@ InfluxDB (module influx.py):
   channel prefix (`BUG-034`), `ping_on_slack` wording (`BUG-029`), the missing Influx settings
   without `influxdb_conn` (`BUG-030`), disks that are neither list nor dict send nothing
   (`BUG-031`), Slack and Influx are written in dry run (`BUG-032`), bare `except` in the lookups
-  (`BUG-033`), the duplicate `notify_deleted_nic_via_slack` in `crc.py` (`BUG-028`), and the
-  string `"not_found"` iterated as user groups (`BUG-041`).
+  (`BUG-033`), the duplicate `notify_deleted_nic_via_slack` in `crc.py` (`BUG-028`), the
+  string `"not_found"` iterated as user groups (`BUG-041`), `conversations_open` failure aborting
+  owner pings (`BUG-042`), and `ping_on_slack` fetching user groups before checking an empty dict or
+  `None` owner list (`BUG-043`, `BUG-044`).
 - A failed `chat_postMessage` is printed and swallowed per message; an error from
   `conversations_open` propagates, so `SlackNotifier.fail_open` is False. Influx failures are
   swallowed per point (`InfluxNotifier.fail_open` is True).

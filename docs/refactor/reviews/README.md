@@ -3,7 +3,7 @@
 ## Purpose
 
 One review per rung, written by a separate review run with `.cursor/skills/crc-python-refactor/REVIEW_CHECKLIST.md`:
-`R0a.md`, `R0b.md`, `R1a.md`, `R1b.md`, `R2a.md`, `R2b.md`, `R2c.md`. Each states the scope reviewed, the
+`R0a.md` to `R4c.md`, the lane rungs (`AWS-*.md`, `AZ-*.md`, `GCP-*.md`, `OCI-*.md`, `CLI-*.md`), the shared-helper rungs (`PL-*.md`), the subpackage rungs (`ST-*.md`) and `FINAL.md`. Each states the scope reviewed, the
 findings, what the reviewer fixed and the verdict.
 
 ## Public API

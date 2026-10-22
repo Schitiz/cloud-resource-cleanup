@@ -31,7 +31,7 @@ Modules, split by responsibility:
 - Only `AVAILABLE` volumes that are not `ATTACHED` / `ATTACHING` are candidates; block and boot volumes are both covered.
 - An empty age matches every volume (SAF-006) and `MAX_AGE` can shorten the age (SAF-010); the age of a volume with a custom age tag fails open to `--age` (SAF-009, `BUG-004`).
 - A failed delete is logged and skipped, never raised, as on main. A connectivity error while listing attachments is swallowed as on main (`BUG-096`, `BUG-097`), and a region with no availability domains has no boot volume attachments (`BUG-098`): attached volumes can then be deleted; do not fix outside a behaviour-fix rung.
-- Filtering per module: `docs/refactor/FILTER_VARIANTS.md` section 5 (freeform tags, any key). Parity oracle: `tests/legacy/oci_disk.txt`, a frozen copy of `main`, never edited. Known quirks: `docs/refactor/BUGS.md` rows `BUG-004` and `BUG-096` to `BUG-110`; new ones are queued in `docs/refactor/bugs/pending/ST-OCI-DISK.md`.
+- Filtering per module: `docs/refactor/FILTER_VARIANTS.md` section 5 (freeform tags, any key). Parity oracle: `tests/legacy/oci_disk.txt`, a frozen copy of `main`, never edited. Known quirks: `docs/refactor/BUGS.md` rows `BUG-004`, `BUG-096` to `BUG-110`, `BUG-353`, `BUG-354`.
 - Do not call real cloud APIs in tests; mock every SDK client.
 
 ## Extension Rules

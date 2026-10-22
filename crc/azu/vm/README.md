@@ -6,13 +6,13 @@ Azure virtual machine cleaner (rung AZ-4). `VmCleaner` is a registered `Cleaner`
 (`@register("azure", "vm")`): `plan()` lists the VMs of the whole subscription, applies the tag and
 age policy and reads each selected VM's instance view; `apply()` deletes the VM and waits for it,
 then removes its `<vm>-NIC` NIC (through `crc/azu/vm_delete_helpers.py`), or powers the VM off.
-`VM` is the legacy entry point `crc.py` uses; `from crc.azu.vm import VM` keeps working.
+`VM` is the adapter entry point `crc.py` uses; `from crc.azu.vm import VM` keeps working.
 
 Modules (split by responsibility):
 
 - `client.py`: the Azure SDK calls used, as typed Protocols
 - `cleaner.py`: settings, name tally, summary logging, `VmCleaner` and the registry factory
-- `adapter.py`: the legacy `VM` class, a thin adapter that drives the cleaner VM by VM
+- `adapter.py`: the `VM` class, a thin adapter that drives the cleaner VM by VM
 
 ## Public API
 
@@ -28,7 +28,7 @@ Modules (split by responsibility):
 - `Tally`: the VM, stopped VM and NIC names recorded so far.
 - `log_summary()`: the closing log lines of main for an operation.
 - `VmCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus list_vms, decide, state_allowed, process and act used by the adapter).
-- `build_vm_cleaner()`: registry factory behind @register("azure", "vm"); reads resource_group, filter_tags, exception_tags, notags, age, custom_age_tag_key and instance_state from RunContext.options and builds the clients from the legacy Base.
+- `build_vm_cleaner()`: registry factory behind @register("azure", "vm"); reads resource_group, filter_tags, exception_tags, notags, age, custom_age_tag_key and instance_state from RunContext.options and builds the clients from Base.
 - `VM`: adapter crc.py calls (delete(), stop(), get_deleted, delete_count, get_deleted_nic, nic_delete_count, get_stopped, stopped_count, base); runs the cleaner VM by VM in the order of main.
 
 ## Safety Invariants
@@ -39,7 +39,7 @@ Modules (split by responsibility):
 - Age uses `crc.core.age` (`get_retention_age`, fail open, then `is_old`, which still reads `MAX_AGE`); the clock is injected (`RunContext.now`, `VM(clock=...)`). There is no age gate in `__init__` (SAF-011 is not met): an empty age selects every VM that passes the tag and status checks (SAF-006).
 - A VM is acted on only when an allowed state is a substring of `instance_view(...).statuses[1].display_status`; a failing status read keeps the VM (fail closed) and is logged.
 - Per-VM errors (status, delete, power-off) are logged and swallowed, as on main; list errors and age errors propagate.
-- The listing is subscription-wide while status, delete and power-off use the configured resource group (BUG-002); stop is `begin_power_off`, not a deallocate (BUG-003); `statuses[1]` is unchecked (BUG-010). New quirks are in `docs/refactor/bugs/pending/AZ-4.md`.
+- The listing is subscription-wide while status, delete and power-off use the configured resource group (BUG-002); stop is `begin_power_off`, not a deallocate (BUG-003); `statuses[1]` is unchecked (BUG-010). Quirks in `docs/refactor/BUGS.md` (`BUG-198` to `BUG-212`).
 - Do not call real cloud APIs in tests; mock every SDK client.
 
 ## Extension Rules
