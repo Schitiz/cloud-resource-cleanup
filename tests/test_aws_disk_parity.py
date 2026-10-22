@@ -6,6 +6,7 @@ legacy adapter class and through the registered Cleaner (`plan()` then `apply()`
 alone in a dry run).
 """
 
+import dataclasses
 import datetime
 import logging
 import types
@@ -20,6 +21,10 @@ from botocore.exceptions import ClientError, ConnectTimeoutError, EndpointConnec
 from crc.aws.disk import Disk, DiskCleaner, build_disk_cleaner
 from crc.core import registry
 from crc.core.cleaner import Operation, RunContext
+from tests.helpers_log_fix import expected_logs
+from tests.log_fix_aws_compute import RULES
+
+FIXED_BUGS = {"BUG-356"}
 
 ORACLE = Path(__file__).parent / "legacy" / "aws_disk.txt"
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=datetime.UTC)
@@ -948,12 +953,29 @@ def test_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run(_new, case, monkeypatch, caplog, capsys)
+    old = dataclasses.replace(old, logs=expected_logs(old.logs, FIXED_BUGS, rules=RULES))
     assert new.calls == old.calls
     assert new.error == old.error
     assert new.deleted == old.deleted
     assert new.count == old.count
     assert new.logs == old.logs
     assert new.stdout == old.stdout
+
+
+def test_skip_lines_are_debug_only_in_new_code(
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """BUG-356 (LOG-AWS1): every INFO "Skipping volume ..." line of the oracle is DEBUG now."""
+    differing = 0
+    for case in CASES:
+        old = _run(_legacy, case, monkeypatch, caplog, capsys)
+        new = _run(_new, case, monkeypatch, caplog, capsys)
+        assert new.logs == expected_logs(old.logs, FIXED_BUGS, rules=RULES), case.id
+        differing += old.logs != new.logs
+    assert differing > 0
 
 
 def _is_delete_call(call: tuple[Any, ...]) -> bool:
@@ -982,6 +1004,7 @@ def test_cleaner_protocol_matches_main(
     listing differs; each stream, the results and the errors are equal."""
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run_cleaner(case, monkeypatch, caplog, capsys)
+    old = dataclasses.replace(old, logs=expected_logs(old.logs, FIXED_BUGS, rules=RULES))
     assert new.error == old.error
     assert new.stdout == old.stdout
     if new.error is None:
@@ -1081,8 +1104,9 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
     ),
     (
         "yb-task-key-variants",
-        lambda o: o.deleted
-        == ["us-west-2/d yb_task=dev", "us-west-2/e", "us-west-2/f yb_task=dev"],
+        lambda o: (
+            o.deleted == ["us-west-2/d yb_task=dev", "us-west-2/e", "us-west-2/f yb_task=dev"]
+        ),
     ),
     ("yb-task-non-string", lambda o: o.error is None and o.deleted == []),
     ("kubernetes-skipped", lambda o: o.deleted == ["us-west-2/e"]),
@@ -1302,7 +1326,7 @@ def test_adapter_private_helpers_match_main(
         caplog.clear()
         assert new._matches_filter_tags(sample) == old_match
         assert new._should_skip(sample, "foo", "vol-1") == old_skip
-        assert _logs(caplog) == old_logs
+        assert _logs(caplog) == expected_logs(old_logs, FIXED_BUGS, rules=RULES)
     candidate_vol = vol(
         "idle", tag_list=[tag("yb_task", "itest"), tag("yb_owner", "qa"), tag("Name", "foo")]
     )
@@ -1311,5 +1335,3 @@ def test_adapter_private_helpers_match_main(
     assert new._drop_recently_attached("us-west-2", vols) == old._drop_recently_attached(
         "us-west-2", vols
     )
-
-

@@ -11,7 +11,7 @@ from crc.aws.spot_instance_requests.client import SpotClient
 from crc.aws.spot_instance_requests.model import RequestMatch, SpotSettings, TagList
 from crc.aws.spot_instance_requests.rules import matches_filter, should_skip
 from crc.core import age as core_age
-from crc.core import policy
+from crc.core import logger, policy
 from crc.core.age import AgeSpec
 
 EC2Filters = list[dict[str, Any]]
@@ -72,6 +72,12 @@ def passes_age_gate(
     )
 
 
+def _kept(reason: str) -> RequestMatch | None:
+    """A request that is not cleaned: counted under `reason` in the run's SKIPPED summary."""
+    logger.current().skip(reason)
+    return None
+
+
 def _decide(
     settings: SpotSettings, now: datetime.datetime, request: Mapping[str, Any]
 ) -> RequestMatch | None:
@@ -80,23 +86,23 @@ def _decide(
     instance_id = request.get("InstanceId") or None
     # Untagged requests are never cleaned (fail closed); so are cancelled ones without instance.
     if not tags or (already_cancelled and not instance_id):
-        return None
+        return _kept("no_tags" if not tags else "cancelled_no_instance")
     if should_skip(settings, tags):
-        return None
+        return _kept("exception_tag")
     if settings.filter_tags and not matches_filter(settings, tags):
-        return None
+        return _kept("filter_tags")
     request_id = request["SpotInstanceRequestId"]
     create_time = request["CreateTime"]
     request_type = (request.get("Type") or "one-time").lower()
     try:
         retention_age = _retention(settings, tags)
     except ValueError:
-        return None
+        return _kept("invalid_age_tag")
     if retention_age:
         logging.info("Updating age for SpotInstanceRequestId: %s", request_id)
     age = policy.effective_age(retention_age, settings.age)
     if not core_age.is_old(age, now.astimezone(create_time.tzinfo), create_time):
-        return None
+        return _kept("too_young")
     logging.info(
         "Spot request %s (type=%s, cancelled=%s) instance=%s queued",
         request_id,
@@ -108,7 +114,10 @@ def _decide(
 
 
 def filtered_requests(
-    settings: SpotSettings, now: datetime.datetime, details: Mapping[str, Any]
+    settings: SpotSettings,
+    now: datetime.datetime,
+    details: Mapping[str, Any],
+    region: str | None = None,
 ) -> list[RequestMatch]:
     """Requests that match the filters and are old enough. A bad request is logged and kept."""
     matches: list[RequestMatch] = []
@@ -119,4 +128,6 @@ def filtered_requests(
                 matches.append(match)
         except Exception as e:
             logging.error("Error occurred while processing spot request %s: %s", request, e)
+            request_id = request.get("SpotInstanceRequestId") if hasattr(request, "get") else None
+            logger.current().fail(region, str(request_id or "-"), e)
     return matches

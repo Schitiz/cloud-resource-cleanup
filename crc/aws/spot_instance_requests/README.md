@@ -37,6 +37,7 @@ from crc.aws.spot_instance_requests import SpotInstanceRequests keeps working.
 - Fail closed: untagged requests, a bad custom age tag, unreadable volume tags, an unknown instance state and a failed live-request lookup keep the resource. Sensitive `yb_task` and exception/notags protect leftover volumes only.
 - Listing errors are logged and skip the region; a `describe_regions` failure logs and ends the run; connectivity errors skip the region; per-request and per-volume errors are logged and isolated.
 - Cleaner path vs `main` (real runs with more than one region): `plan()` lists every region before `apply()` mutates, so the SDK calls and log lines of different regions are not interleaved as on `main`; each region's call stream and the multiset of log lines are the same. The adapter path keeps the order of `main`.
+- Logging (LOG-AWS1, BUG-356/361/362): the INFO `Skipping ...` lines of leftover volumes and cancelled requests are DEBUG with the same text; REGION (listing and filtering time), ACTION (`deleted` / `would_delete` per request, instance and volume), skip counts and failures (describe, cancel, terminate, tag, wait/delete and sweep errors) go to `crc.core.logger.current()`.
 
 ## Extension Rules
 

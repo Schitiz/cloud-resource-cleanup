@@ -17,6 +17,8 @@ from crc.aws.vm.cleaner import (
     build_vm_cleaner,
     dry_run_names,
     log_summary,
+    note_dry_run,
+    note_region,
     skip_region,
 )
 from crc.aws.vm.client import VmClient, VmPaginator, VmScanClient, VmSession
@@ -51,5 +53,7 @@ __all__ = [
     "find_instances_with_tag",
     "instance_name",
     "log_summary",
+    "note_dry_run",
+    "note_region",
     "skip_region",
 ]

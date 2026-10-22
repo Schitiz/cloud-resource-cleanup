@@ -47,6 +47,7 @@ Modules, one per responsibility:
 - Region errors: connectivity errors skip the region, `AuthFailure`, `UnauthorizedOperation`, `OptInRequired` and `InvalidClientTokenId` skip it with a warning, every other error is logged and flagged and never raised. `describe_regions` errors (other than connectivity) propagate. Per volume errors are isolated and logged (CLEANUP_SAFETY.md).
 - `Disk.delete()` keeps the call and log order of main (per region: client, listing, CloudWatch, deletes). The Cleaner path lists every region before `apply()` deletes, so delete calls and `Deleted volume` lines come after all listing lines; a dry run is identical because `plan()` also logs the dry-run lines.
 - Log lines, labels (`region/volume-id yb_task=...`) and quirks are those of main; see `docs/refactor/BUGS.md` (`BUG-004`, `BUG-022`, `BUG-282` to `BUG-296`).
+- Logging (LOG-AWS1, BUG-356/361/362): the per-volume `Skipping volume ...` INFO lines are DEBUG with the same text (warnings keep their level); REGION, ACTION (`deleted` / `would_delete`), skip counts and failures (delete errors, per-volume and region errors, CloudWatch lookup errors) go to `crc.core.logger.current()`; an unauthorised or connectivity skip of a region is a `region_skipped`.
 
 ## Extension Rules
 
