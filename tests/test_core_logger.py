@@ -1,12 +1,12 @@
-"""Unit tests for crc.core.runlog: exact line formats, counters, order and the clock."""
+"""Unit tests for crc.core.logger: exact line formats, counters, order and the clock."""
 
 import logging
 from collections.abc import Iterator
 
 import pytest
 
-from crc.core import runlog
-from crc.core.runlog import RunLog
+from crc.core import logger
+from crc.core.logger import RunLog
 
 
 class Clock:
@@ -19,9 +19,9 @@ class Clock:
 
 @pytest.fixture(autouse=True)
 def _reset_current() -> Iterator[None]:
-    runlog.finish()
+    logger.finish()
     yield
-    runlog.finish()
+    logger.finish()
 
 
 def _records(caplog: pytest.LogCaptureFixture) -> list[tuple[int, str]]:
@@ -45,7 +45,7 @@ def test_begin_logs_run_start_with_non_empty_options_in_fixed_order(
         "detach_age": {"days": 3},
         "slack_channel": "chan",
     }
-    runlog.begin("aws", "vm", "delete", False, options)
+    logger.begin("aws", "vm", "delete", False, options)
     assert _records(caplog) == [
         (
             logging.INFO,
@@ -58,28 +58,28 @@ def test_begin_logs_run_start_with_non_empty_options_in_fixed_order(
 
 def test_begin_without_options_and_dry_run_stop(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.INFO)
-    runlog.begin("gcp", "vm", "stop", True, {})
+    logger.begin("gcp", "vm", "stop", True, {})
     assert caplog.messages == ["RUN START cloud=gcp resource=vm operation=stop dry_run=true"]
 
 
 def test_begin_serialises_non_json_values_as_text(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.INFO)
-    runlog.begin("oci", "disk", "delete", False, {"age": {"days": {1}}})
+    logger.begin("oci", "disk", "delete", False, {"age": {"days": {1}}})
     assert caplog.messages == [
         'RUN START cloud=oci resource=disk operation=delete dry_run=false age={"days":"{1}"}'
     ]
 
 
 def test_begin_sets_current_and_finish_clears_it() -> None:
-    run = runlog.begin("aws", "disk", "delete", False, {})
-    assert runlog.current() is run
-    runlog.finish()
-    assert runlog.current() is not run
+    run = logger.begin("aws", "disk", "delete", False, {})
+    assert logger.current() is run
+    logger.finish()
+    assert logger.current() is not run
 
 
 def test_current_without_run_is_fresh_and_logs_nothing(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG)
-    first, second = runlog.current(), runlog.current()
+    first, second = logger.current(), logger.current()
     assert first is not second
     assert first.attached is False
     first.region("us-east-1", 3, 1, 2.5)
@@ -93,13 +93,13 @@ def test_current_without_run_is_fresh_and_logs_nothing(caplog: pytest.LogCapture
 
 def test_finish_without_begin_is_a_noop(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG)
-    runlog.finish()
+    logger.finish()
     assert caplog.records == []
 
 
 def test_dry_run_flow_lines_and_result(caplog: pytest.LogCaptureFixture) -> None:
     clock = Clock()
-    run = runlog.begin("aws", "vm", "delete", True, {"age": {"days": 1}}, clock=clock)
+    run = logger.begin("aws", "vm", "delete", True, {"age": {"days": 1}}, clock=clock)
     caplog.set_level(logging.INFO)
     caplog.clear()
     run.region("us-east-1", 10, 2, 3.9)
@@ -110,7 +110,7 @@ def test_dry_run_flow_lines_and_result(caplog: pytest.LogCaptureFixture) -> None
     run.skip("too_young")
     run.region("us-west-2", 0, 0, 0.2)
     clock.now = 161.9
-    runlog.finish()
+    logger.finish()
     assert _records(caplog) == [
         (
             logging.INFO,
@@ -137,7 +137,7 @@ def test_dry_run_flow_lines_and_result(caplog: pytest.LogCaptureFixture) -> None
 
 def test_real_run_with_failure_and_skipped_region(caplog: pytest.LogCaptureFixture) -> None:
     clock = Clock()
-    run = runlog.begin("azure", "vm", "stop", False, {}, clock=clock)
+    run = logger.begin("azure", "vm", "stop", False, {}, clock=clock)
     caplog.set_level(logging.INFO)
     caplog.clear()
     run.action("stopped", None, "vm-1", "one")
@@ -146,7 +146,7 @@ def test_real_run_with_failure_and_skipped_region(caplog: pytest.LogCaptureFixtu
     run.fail("westus", "vm-3", RuntimeError("cannot stop"))
     run.fail(None, "vm-4", "plain text")
     clock.now = 130.0
-    runlog.finish()
+    logger.finish()
     assert _records(caplog) == [
         (logging.INFO, "ACTION stopped cloud=azure resource=vm region=- id=vm-1 name=one"),
         (logging.INFO, "ACTION would_stop cloud=azure resource=vm region=westus id=vm-2 name=-"),
@@ -166,9 +166,9 @@ def test_real_run_with_failure_and_skipped_region(caplog: pytest.LogCaptureFixtu
 
 def test_result_line_is_always_logged_for_an_empty_run(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.INFO)
-    runlog.begin("oci", "disk", "delete", False, {}, clock=Clock())
+    logger.begin("oci", "disk", "delete", False, {}, clock=Clock())
     caplog.clear()
-    runlog.finish()
+    logger.finish()
     assert caplog.messages == [
         "RESULT cloud=oci resource=disk operation=delete dry_run=false selected=0 done=0 "
         "failed=0 skipped=0 regions=0 regions_skipped=0 duration_s=0"
@@ -192,7 +192,7 @@ def test_unknown_action_kind_raises() -> None:
 
 
 def test_skip_and_region_skipped_log_nothing(caplog: pytest.LogCaptureFixture) -> None:
-    run = runlog.begin("gcp", "disk", "delete", False, {})
+    run = logger.begin("gcp", "disk", "delete", False, {})
     caplog.set_level(logging.DEBUG)
     caplog.clear()
     run.skip("state")
@@ -202,13 +202,13 @@ def test_skip_and_region_skipped_log_nothing(caplog: pytest.LogCaptureFixture) -
 
 
 def test_begin_replaces_a_run_that_was_never_finished(caplog: pytest.LogCaptureFixture) -> None:
-    first = runlog.begin("aws", "vm", "delete", False, {})
-    second = runlog.begin("aws", "disk", "delete", False, {})
-    assert runlog.current() is second
-    assert runlog.current() is not first
+    first = logger.begin("aws", "vm", "delete", False, {})
+    second = logger.begin("aws", "disk", "delete", False, {})
+    assert logger.current() is second
+    assert logger.current() is not first
     caplog.set_level(logging.INFO)
     caplog.clear()
-    runlog.finish()
+    logger.finish()
     assert caplog.messages[-1].startswith("RESULT cloud=aws resource=disk ")
 
 
@@ -216,6 +216,6 @@ def test_default_clock_is_monotonic_and_duration_is_an_int(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     caplog.set_level(logging.INFO)
-    runlog.begin("aws", "vm", "delete", False, {})
-    runlog.finish()
+    logger.begin("aws", "vm", "delete", False, {})
+    logger.finish()
     assert caplog.messages[-1].rsplit("duration_s=", 1)[1].isdigit()
