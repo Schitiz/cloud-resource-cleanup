@@ -26,6 +26,8 @@ from crc.azu.vm import VM, VmCleaner, build_vm_cleaner
 from crc.core.cleaner import Cleaner, Operation, RunContext
 from crc.core.registry import get
 from tests.helpers_azure_vm import NOW, RUNNING, STOPPED, FakeAzure, not_found, vm
+from tests.helpers_log_fix import expected_logs
+from tests.log_fix_azure import RULES
 
 ORACLE = Path(__file__).parent / "legacy" / "azu_vm.txt"
 ENV = {"env": ["ci"]}
@@ -33,6 +35,8 @@ _ADDRESS = re.compile(r"0x[0-9a-f]+")
 NIC_ATTEMPTS = 24
 THREE = 3
 SUMMARY = ("No Azure instances", "number of Azure", "List of Azure")
+
+BUGS = {"BUG-358"}  # log-only divergences of the LOG-AZU rung
 
 
 @dataclass
@@ -468,7 +472,7 @@ def test_matches_main(
     assert new.deleted == old.deleted
     assert new.nics == old.nics
     assert new.stopped == old.stopped
-    assert new.logs == old.logs
+    assert new.logs == expected_logs(old.logs, BUGS, RULES)
     assert new.counts == old.counts
     assert new.stdout == old.stdout
     assert (new.error is not None) == case.fails_in_plan
@@ -554,10 +558,10 @@ def test_cleaner_protocol_matches_main(
     assert new.nics == old.nics
     assert new.stopped == old.stopped
     assert sorted(r for r in new.logs if not _is_summary(r)) == sorted(
-        r for r in old.logs if not _is_summary(r)
+        r for r in expected_logs(old.logs, BUGS, RULES) if not _is_summary(r)
     )
     new_summary = [r for r in new.logs if _is_summary(r)]
-    assert new_summary == [r for r in old.logs if _is_summary(r)]
+    assert new_summary == [r for r in expected_logs(old.logs, BUGS, RULES) if _is_summary(r)]
     assert new.logs[len(new.logs) - len(new_summary) :] == new_summary
 
 
@@ -736,7 +740,10 @@ def test_repeated_delete_accumulates_like_main(
                 [(r.levelno, r.getMessage()) for r in caplog.records],
             )
         )
-    assert results[0] == results[1]
+    old, new = results
+    assert new[:3] == old[:3]
+    assert new[3] == expected_logs(old[3], BUGS, RULES)
+    assert new[3] != old[3]
     assert results[1][1] == ["vm-a", "vm-b", "vm-a", "vm-b"]
 
 
@@ -761,7 +768,10 @@ def test_stop_then_empty_delete_shares_name_lists_like_main(
                 [(r.levelno, r.getMessage()) for r in caplog.records],
             )
         )
-    assert results[0] == results[1]
+    old, new = results
+    assert new[:3] == old[:3]
+    assert new[3] == expected_logs(old[3], BUGS, RULES)
+    assert new[3] != old[3]
     assert results[1][1] == []
     assert results[1][2] == ["vm-a", "vm-b"]
     assert not any("No Azure instances to delete." in m for _, m in results[1][3])

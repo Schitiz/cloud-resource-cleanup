@@ -13,6 +13,7 @@ from typing import Any
 
 from azure.core.exceptions import HttpResponseError, ResourceNotFoundError
 
+from crc.azu import _logger
 from crc.azu.spot_vm.client import (
     ComputeFactory,
     NetworkFactory,
@@ -72,12 +73,13 @@ class Remover:
         Fails closed when `disks.get` fails for a reason other than 404.
         """
         if resource_group.casefold() != self._resource_group.casefold():
-            logging.info(
+            logging.debug(
                 "Skipping leftover Spot disk %s/%s: outside --resource_group %s",
                 resource_group,
                 disk_name,
                 self._resource_group,
             )
+            _logger.skip("leftover disk outside resource group")
             return True
         try:
             disk = self._compute_factory().disks.get(resource_group, disk_name)
@@ -111,11 +113,12 @@ class Remover:
             or policy.notags_all(tags, self._notags)
         ):
             return False
-        logging.info(
+        logging.debug(
             "Skipping leftover Spot disk %s/%s: exception_tags/notags on the disk",
             resource_group,
             disk_name,
         )
+        _logger.skip("leftover disk exception tag")
         return True
 
     def remove_disk(
@@ -143,8 +146,10 @@ class Remover:
                 self._disk_gone(label, rg_from_id, disks)
                 return
             logging.error("Failed to delete disk %s: %s", label, e)
+            _logger.failed(resource_group, label, e)
         except Exception as e:
             logging.error("Failed to delete disk %s: %s", label, e)
+            _logger.failed(resource_group, label, e)
 
     @staticmethod
     def _disk_gone(label: str, rg_from_id: bool, disks: list[str]) -> None:
@@ -165,6 +170,7 @@ class Remover:
         except Exception as e:
             logging.error("Error deleting Spot VM %s: %s", vm_name, e)
             raise
+        _logger.acted("deleted", self._resource_group, vm_name)
 
     def remove_nic(self, vm_name: str, dry_run: bool, nics: list[str]) -> None:
         """Delete the NIC `<vm>-NIC` (the helper retries and records it)."""

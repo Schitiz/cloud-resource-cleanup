@@ -11,6 +11,7 @@ so there is no region fallback or region auth error to cover.
 
 import collections
 import datetime
+import logging
 import re
 import types
 from collections.abc import Callable, Mapping, Sequence
@@ -34,11 +35,15 @@ from tests.helpers_azure_spot import (
     slot,
     vm,
 )
+from tests.helpers_log_fix import expected_logs
+from tests.log_fix_azure import RULES
 
 ORACLE = Path(__file__).parent / "legacy" / "azu_spot_vm.txt"
 DAY = datetime.timedelta(days=1)
 HOUR = datetime.timedelta(hours=1)
 KEEP = {"keep": ["true"]}
+
+BUGS = {"BUG-356"}  # log-only divergences of the LOG-AZU rung
 
 
 def boom(text: str = "boom") -> Exception:
@@ -417,9 +422,30 @@ def test_matches_main(
     assert new.calls == old.calls
     assert new.error == old.error
     assert (new.deleted, new.nics, new.disks) == (old.deleted, old.nics, old.disks)
-    assert new.logs == old.logs
+    assert new.logs == expected_logs(old.logs, BUGS, RULES)
     assert new.stdout == old.stdout
     assert (new.error is not None) == case.fails_in_plan
+
+
+def test_leftover_disk_skip_lines_diverge_from_main_in_level_only(
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """BUG-356 (LOG-AZU): the per-leftover-disk skip lines are DEBUG, text unchanged."""
+    diverging = 0
+    for case in CASES:
+        old = _run(_legacy, case, monkeypatch, caplog, capsys)
+        new = _run(_new, case, monkeypatch, caplog, capsys)
+        skips = [r for r in old.logs if r[2].startswith("Skipping leftover Spot disk")]
+        if skips:
+            diverging += 1
+            assert new.logs != old.logs
+            assert [r for r in new.logs if r[2].startswith("Skipping leftover Spot disk")] == [
+                (name, logging.DEBUG, message) for name, _, message in skips
+            ]
+    assert diverging
 
 
 def _run_cleaner(
@@ -497,16 +523,18 @@ def test_cleaner_protocol_matches_main(
     assert _only(new.calls, *READS) == _only(old.calls, *READS)
     if case.fails_in_plan:
         assert _only(new.calls, *MUTATING) == []
-        assert new.logs == old.logs
+        assert new.logs == expected_logs(old.logs, BUGS, RULES)
         return
     assert _only(new.calls, *MUTATING) == _only(old.calls, *MUTATING)
     assert (new.deleted, new.nics, new.disks) == (old.deleted, old.nics, old.disks)
     if case.dry_run:
         assert new.calls == old.calls
-        assert new.logs == old.logs
+        assert new.logs == expected_logs(old.logs, BUGS, RULES)
     else:
-        assert collections.Counter(new.logs) == collections.Counter(old.logs)
-        assert new.logs[-3:] == old.logs[-3:]
+        assert collections.Counter(new.logs) == collections.Counter(
+            expected_logs(old.logs, BUGS, RULES)
+        )
+        assert new.logs[-3:] == expected_logs(old.logs, BUGS, RULES)[-3:]
 
 
 def test_repeated_delete_accumulates_lists_as_main(
