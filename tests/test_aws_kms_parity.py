@@ -23,6 +23,8 @@ from botocore.exceptions import ClientError, ConnectTimeoutError, EndpointConnec
 from crc.aws.kms import Kms, KmsCleaner, KmsRuntime, build_kms_cleaner
 from crc.core.cleaner import Cleaner, Operation, RunContext
 from crc.core.registry import get
+from tests.helpers_log_fix import expected_logs
+from tests.log_fix_aws_misc import RULES
 
 ORACLE = Path(__file__).parent / "legacy" / "aws_kms.txt"
 UTC = datetime.UTC
@@ -619,6 +621,9 @@ def debug_logs(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG)
 
 
+LOG_BUGS = {"BUG-357"}
+
+
 @pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
 def test_matches_main(
     case: Case,
@@ -632,7 +637,7 @@ def test_matches_main(
     assert new.calls == old.calls
     assert new.error == old.error
     assert new.deleted == old.deleted
-    assert new.logs == old.logs
+    assert new.logs == expected_logs(old.logs, LOG_BUGS, rules=RULES)
     assert new.stdout == old.stdout
 
 
@@ -689,7 +694,7 @@ def test_cleaner_protocol_matches_main(
     assert new.stdout == old.stdout
     assert _without_client(new.calls) == _without_client(old.calls)
     assert all(c == ("client", "kms", "us-west-2") for c in new.calls if c[0] == "client")
-    assert new.logs == old.logs
+    assert new.logs == expected_logs(old.logs, LOG_BUGS, rules=RULES)
     assert new.deleted == old.deleted
     if case.fails_in_plan:
         assert not [c for c in new.calls if c[0] == "schedule_key_deletion"]
@@ -863,3 +868,26 @@ def test_runtime_injection_replaces_boto3(monkeypatch: pytest.MonkeyPatch) -> No
     kms = Kms(False, {}, {}, DESC, USER, 7, {"days": 1}, "", runtime)
     kms.delete()
     assert kms.get_deleted == ["k1", "k2"]
+
+
+@pytest.mark.parametrize(
+    "case_id",
+    ["tag-unhashable-value-skips", "policy-match-then-statement-without-aws-stays-selected"],
+)
+def test_key_skipped_is_debug(
+    case_id: str,
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """BUG-357: the oracle warns `KEY SKIPPED`, the new code logs the same text at DEBUG."""
+    case = _find(case_id)
+    old = _run(_legacy, case, monkeypatch, caplog, capsys)
+    new = _run(_new, case, monkeypatch, caplog, capsys)
+    assert old.logs != new.logs
+    assert ("root", logging.WARNING, "KEY SKIPPED k1") in old.logs
+    assert ("root", logging.DEBUG, "KEY SKIPPED k1") in new.logs
+    assert not [r for r in new.logs if r[2].startswith("KEY SKIPPED") and r[1] != logging.DEBUG]
+    assert new.deleted == old.deleted
+    assert new.calls == old.calls

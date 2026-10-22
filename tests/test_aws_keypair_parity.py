@@ -17,6 +17,8 @@ from botocore.exceptions import ClientError, ConnectTimeoutError, EndpointConnec
 
 from crc.aws.keypairs import KeyPairRuntime, KeyPairs, build_keypair_cleaner
 from crc.core.cleaner import Operation, RunContext
+from tests.helpers_log_fix import expected_logs
+from tests.log_fix_aws_misc import RULES
 
 ORACLE = Path(__file__).parent / "legacy" / "aws_keypairs.txt"
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)
@@ -216,9 +218,7 @@ class FakeAws:
 
     def session(self) -> Any:
         self.calls.append(("session",))
-        return types.SimpleNamespace(
-            get_available_regions=lambda service: list(self.case.regions)
-        )
+        return types.SimpleNamespace(get_available_regions=lambda service: list(self.case.regions))
 
 
 @dataclass
@@ -278,6 +278,9 @@ def _run(
     return Outcome(aws.calls, deleted, count, logs, capsys.readouterr().out, error)
 
 
+LOG_BUGS = {"BUG-356"}
+
+
 @pytest.fixture(autouse=False)
 def debug_logs(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG)
@@ -297,7 +300,7 @@ def test_matches_main(
     assert new.error == old.error
     assert new.deleted == old.deleted
     assert new.count == old.count
-    assert new.logs == old.logs
+    assert new.logs == expected_logs(old.logs, LOG_BUGS, rules=RULES)
     assert new.stdout == old.stdout
 
 
@@ -398,7 +401,7 @@ def test_cleaner_protocol_matches_main(
     if new.error is None:
         assert new.deleted == old.deleted
     if len(case.regions) <= 1 and new.error is None:
-        assert new.logs == old.logs[:-1]
+        assert new.logs == expected_logs(old.logs[:-1], LOG_BUGS, rules=RULES)
         assert [c for c in new.calls if c[0] != "client"] == [
             c for c in old.calls if c[0] != "client"
         ]
@@ -418,3 +421,23 @@ def test_quirk_is_preserved(
     new = _run(_new, case, monkeypatch, caplog, capsys)
     assert check(old), "oracle no longer shows the quirk"
     assert check(new)
+
+
+@pytest.mark.parametrize("case_id", ["exception-regex", "age-days"])
+def test_per_keypair_skip_lines_are_debug(
+    case_id: str,
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """BUG-356: the oracle logs the per-keypair skip lines at INFO, the new code at DEBUG."""
+    case = next(c for c in CASES if c.id == case_id)
+    old = _run(_legacy, case, monkeypatch, caplog, capsys)
+    new = _run(_new, case, monkeypatch, caplog, capsys)
+    assert old.logs != new.logs
+    assert new.logs == expected_logs(old.logs, LOG_BUGS, rules=RULES)
+    skip_lines = [r for r in new.logs if "exception_regex" in r[2] or "not old enough" in r[2]]
+    assert skip_lines
+    assert {r[1] for r in skip_lines} == {logging.DEBUG}
+    assert {r[1] for r in old.logs if r[2].startswith("Keypair ")} == {logging.INFO}
