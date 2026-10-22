@@ -182,3 +182,12 @@ test this round).
 
 ROUND 2 VERDICT: APPROVE
 
+
+## Rule move
+
+The LOG-AZU bug rules moved out of `tests/helpers_log_fix.py` (now identical to `logging/core`) into
+`tests/log_fix_azure.py`, so the lane branches merge without conflicts. `RULES` there is
+`{**helpers_log_fix.RULES, "BUG-356": ..., "BUG-358": ...}`: the lane's BUG-356 applies the core rule and
+then also turns the `Skipping leftover Spot disk ` lines into DEBUG; BUG-358 (raw tag dump) is unchanged.
+The Azure disk, VM and Spot VM parity tests pass `rules=RULES` to `expected_logs`. The unit tests of the
+moved rules are in `tests/test_log_fix_azure.py`. No production code changed.

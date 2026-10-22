@@ -36,6 +36,7 @@ from tests.helpers_azure_spot import (
     vm,
 )
 from tests.helpers_log_fix import expected_logs
+from tests.log_fix_azure import RULES
 
 ORACLE = Path(__file__).parent / "legacy" / "azu_spot_vm.txt"
 DAY = datetime.timedelta(days=1)
@@ -421,7 +422,7 @@ def test_matches_main(
     assert new.calls == old.calls
     assert new.error == old.error
     assert (new.deleted, new.nics, new.disks) == (old.deleted, old.nics, old.disks)
-    assert new.logs == expected_logs(old.logs, BUGS)
+    assert new.logs == expected_logs(old.logs, BUGS, RULES)
     assert new.stdout == old.stdout
     assert (new.error is not None) == case.fails_in_plan
 
@@ -522,16 +523,18 @@ def test_cleaner_protocol_matches_main(
     assert _only(new.calls, *READS) == _only(old.calls, *READS)
     if case.fails_in_plan:
         assert _only(new.calls, *MUTATING) == []
-        assert new.logs == expected_logs(old.logs, BUGS)
+        assert new.logs == expected_logs(old.logs, BUGS, RULES)
         return
     assert _only(new.calls, *MUTATING) == _only(old.calls, *MUTATING)
     assert (new.deleted, new.nics, new.disks) == (old.deleted, old.nics, old.disks)
     if case.dry_run:
         assert new.calls == old.calls
-        assert new.logs == expected_logs(old.logs, BUGS)
+        assert new.logs == expected_logs(old.logs, BUGS, RULES)
     else:
-        assert collections.Counter(new.logs) == collections.Counter(expected_logs(old.logs, BUGS))
-        assert new.logs[-3:] == expected_logs(old.logs, BUGS)[-3:]
+        assert collections.Counter(new.logs) == collections.Counter(
+            expected_logs(old.logs, BUGS, RULES)
+        )
+        assert new.logs[-3:] == expected_logs(old.logs, BUGS, RULES)[-3:]
 
 
 def test_repeated_delete_accumulates_lists_as_main(

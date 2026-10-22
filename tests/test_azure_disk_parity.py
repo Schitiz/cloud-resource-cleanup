@@ -26,6 +26,7 @@ from crc.core.cleaner import Cleaner, Operation, RunContext
 from crc.core.registry import get
 from tests.helpers_azure_disk import NOW, FakeAzure, ago, disk
 from tests.helpers_log_fix import expected_logs
+from tests.log_fix_azure import RULES
 
 _ADDRESS = re.compile(r"0x[0-9a-f]+")
 ORACLE = Path(__file__).parent / "legacy" / "azu_disk.txt"
@@ -382,7 +383,7 @@ def test_matches_main(
     assert new.error == old.error
     assert new.deleted == old.deleted
     assert new.count == old.count
-    assert new.logs == expected_logs(old.logs, BUGS)
+    assert new.logs == expected_logs(old.logs, BUGS, RULES)
     assert new.count_logs == old.count_logs
     assert new.stdout == old.stdout
     assert (new.error is not None) == (case.error_phase is not None)
@@ -457,11 +458,11 @@ def test_cleaner_protocol_matches_main(
         return
     assert _only(new.calls, "begin_delete") == _only(old.calls, "begin_delete")
     if case.error_phase == "apply":
-        assert _groups(new.logs)[1:] == _groups(expected_logs(old.logs, BUGS))[1:]
+        assert _groups(new.logs)[1:] == _groups(expected_logs(old.logs, BUGS, RULES))[1:]
         return
     assert new.deleted == old.deleted
     assert new.count == old.count
-    assert _groups(new.logs) == _groups(expected_logs(old.logs, BUGS))
+    assert _groups(new.logs) == _groups(expected_logs(old.logs, BUGS, RULES))
 
 
 def _find(case_id: str) -> Case:
@@ -574,7 +575,7 @@ def test_repeated_delete_accumulates_like_main(
         )
     old, new = results
     assert new[:2] == old[:2]
-    assert new[2] == expected_logs(old[2], BUGS)
+    assert new[2] == expected_logs(old[2], BUGS, RULES)
     assert new[2] != old[2]
     assert new[1] == ["a", "c", "a", "c"]
 

@@ -185,10 +185,13 @@ def test_done_counts_only_deleted_and_stopped(kind: str, done: int) -> None:
     assert (run._selected, run._done) == (1, done)
 
 
-def test_unknown_action_kind_raises() -> None:
+def test_unknown_action_kind_warns_and_never_raises(caplog: pytest.LogCaptureFixture) -> None:
     run = RunLog("aws", "vm", "delete", False, attached=True)
-    with pytest.raises(ValueError, match="unknown action kind"):
+    with caplog.at_level(logging.DEBUG):
         run.action("deleting", "r", "id")
+    assert [r.levelno for r in caplog.records] == [logging.WARNING, logging.INFO]
+    assert "unknown action kind 'deleting'" in caplog.records[0].getMessage()
+    assert (run._selected, run._done) == (1, 0)
 
 
 def test_skip_and_region_skipped_log_nothing(caplog: pytest.LogCaptureFixture) -> None:
