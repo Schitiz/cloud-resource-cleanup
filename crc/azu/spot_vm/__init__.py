@@ -12,7 +12,7 @@ import logging
 from collections.abc import Callable
 from typing import Any, cast
 
-from crc.azu import _runlog
+from crc.azu import _logger
 from crc.azu._base import Base
 from crc.azu.spot_vm.cleaner import (
     STOPPED_POWER_STATES,
@@ -198,7 +198,7 @@ class SpotVM(Service):
         if not self.dry_run:
             remover.remove_vm_instance(vm_name)
         else:
-            _runlog.acted("would_delete", self.base.resource_group, vm_name)
+            _logger.acted("would_delete", self.base.resource_group, vm_name)
         self.instance_names_to_delete.append(vm_name)
 
         for resource_group, disk_name, rg_from_id in leftover_disks:
@@ -214,7 +214,7 @@ class SpotVM(Service):
         filter/exception tags and age. In dry_run mode only lists candidates.
         """
         cleaner = self._cleaner()
-        started = _runlog.started()
+        started = _logger.started()
         scanned = selected = 0
         for vm in cleaner.list_vms():
             scanned += 1
@@ -226,8 +226,8 @@ class SpotVM(Service):
                 self._delete_vm(vm)
             except Exception as e:
                 logging.error("Error deleting Spot VM %s: %s", vm.name, e)
-                _runlog.failed(self.base.resource_group, vm.name, e)
-        _runlog.region_done(self.base.resource_group, scanned, selected, started)
+                _logger.failed(self.base.resource_group, vm.name, e)
+        _logger.region_done(self.base.resource_group, scanned, selected, started)
 
         log_summary(
             Removed(

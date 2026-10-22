@@ -12,7 +12,7 @@ import logging
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, Protocol
 
-from crc.azu import _runlog
+from crc.azu import _logger
 from crc.azu._base import Base
 from crc.core import policy
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext, Skipped
@@ -83,7 +83,7 @@ class AzureIpCleaner:
         """List every public IP of the subscription and filter. Makes no mutating call."""
         candidates: list[Candidate] = []
         skipped: list[Skipped] = []
-        started = _runlog.started()
+        started = _logger.started()
         scanned = 0
         for ip in self.list_ips():
             scanned += 1
@@ -92,10 +92,10 @@ class AzureIpCleaner:
                 candidates.append(candidate)
             else:
                 skipped.append(Skipped(id=getattr(ip, "name", ""), reason=reason))
-        _runlog.region_done(self._resource_group, scanned, len(candidates), started)
+        _logger.region_done(self._resource_group, scanned, len(candidates), started)
         if context.dry_run:
             for candidate in candidates:
-                _runlog.acted("would_delete", self._resource_group, candidate.id)
+                _logger.acted("would_delete", self._resource_group, candidate.id)
             _log_summary([c.id for c in candidates], dry_run=True)
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
 
@@ -120,11 +120,11 @@ class AzureIpCleaner:
             public_ip_address_name=candidate.id,
         )
         logging.info(f"Deleted IP address: {candidate.id}")
-        _runlog.acted("deleted", self._resource_group, candidate.id)
+        _logger.acted("deleted", self._resource_group, candidate.id)
 
     @staticmethod
     def _kept(reason: str) -> tuple[None, str]:
-        _runlog.skip(reason)
+        _logger.skip(reason)
         return None, reason
 
     def decide(self, ip: Any) -> tuple[Candidate | None, str]:
@@ -225,7 +225,7 @@ class IP(Service):
         Delete public IP addresses that match the filter and exception tags.
         """
         cleaner = self._cleaner()
-        started = _runlog.started()
+        started = _logger.started()
         scanned = selected = 0
         for ip in cleaner.list_ips():
             scanned += 1
@@ -236,7 +236,7 @@ class IP(Service):
             if not self.dry_run:
                 cleaner.delete_candidate(candidate)
             else:
-                _runlog.acted("would_delete", self.base.resource_group, candidate.id)
+                _logger.acted("would_delete", self.base.resource_group, candidate.id)
             self.deleted_ips.append(candidate.id)
-        _runlog.region_done(self.base.resource_group, scanned, selected, started)
+        _logger.region_done(self.base.resource_group, scanned, selected, started)
         _log_summary(self.deleted_ips, dry_run=self.dry_run)

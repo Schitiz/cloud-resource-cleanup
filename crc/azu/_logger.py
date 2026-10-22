@@ -1,6 +1,6 @@
 # Copyright (c) Yugabyte, Inc.
 
-"""Azure side of the per-run log collector (`crc.core.runlog`, rung LOG-AZU).
+"""Azure side of the per-run log collector (`crc.core.logger`, rung LOG-AZU).
 
 Azure has no regions, so one REGION line is logged per resource group with
 `region=<resource group>`. These helpers only report; they never decide what is acted on.
@@ -8,7 +8,7 @@ Azure has no regions, so one REGION line is logged per resource group with
 
 import time
 
-from crc.core import runlog
+from crc.core import logger
 
 # Short snake_case skip reasons for the SKIPPED lines; a reason not listed is slugged.
 _SKIP_REASONS: dict[str, str] = {
@@ -50,19 +50,19 @@ def started() -> float:
 
 def region_done(resource_group: str, scanned: int, selected: int, since: float) -> None:
     """Log the REGION line of the resource group just walked."""
-    runlog.current().region(resource_group, scanned, selected, time.monotonic() - since)
+    logger.current().region(resource_group, scanned, selected, time.monotonic() - since)
 
 
 def skip(reason: str) -> None:
     """Count one skipped resource under the slug of `reason`; logs nothing."""
-    runlog.current().skip(reason_slug(reason))
+    logger.current().skip(reason_slug(reason))
 
 
 def acted(kind: str, resource_group: str, resource_id: str, name: str | None = None) -> None:
     """Log one ACTION line for a resource acted on (or that would be in a dry run)."""
-    runlog.current().action(kind, resource_group, resource_id, name or resource_id)
+    logger.current().action(kind, resource_group, resource_id, name or resource_id)
 
 
 def failed(resource_group: str, resource_id: str, error: BaseException | str) -> None:
     """Record one per-resource failure for the end-of-run list."""
-    runlog.current().fail(resource_group, resource_id, error)
+    logger.current().fail(resource_group, resource_id, error)

@@ -1,4 +1,4 @@
-"""LOG-AZU: the Azure cleaners report to `crc.core.runlog` (REGION, ACTION, SKIPPED, FAILED).
+"""LOG-AZU: the Azure cleaners report to `crc.core.logger` (REGION, ACTION, SKIPPED, FAILED).
 
 Azure has no regions: one REGION line per resource group, `region=<resource group>`. Every case
 runs the adapter `crc.py` uses under a begun run and asserts the exact new lines; the tag dumps
@@ -12,13 +12,13 @@ from typing import Any
 
 import pytest
 
-from crc.azu import _runlog
+from crc.azu import _logger
 from crc.azu.disk import AzureDiskCleaner, Disk, DiskSettings
 from crc.azu.ip import IP
 from crc.azu.nic import NIC, AzureNicCleaner
 from crc.azu.spot_vm import SpotVM
 from crc.azu.vm import VM, VmCleaner, VmSettings
-from crc.core import runlog
+from crc.core import logger
 from crc.core.cleaner import Operation, RunContext
 from tests import helpers_azure_disk as hd
 from tests import helpers_azure_ip as hi
@@ -42,13 +42,13 @@ class _Clock:
 @pytest.fixture(autouse=True)
 def _caplog_info(caplog: pytest.LogCaptureFixture) -> Iterator[None]:
     caplog.set_level(logging.DEBUG)
-    runlog.finish()
+    logger.finish()
     yield
-    runlog.finish()
+    logger.finish()
 
 
 def _begin(resource: str, *, dry_run: bool) -> None:
-    runlog.begin("azure", resource, "delete", dry_run, {}, clock=_Clock())
+    logger.begin("azure", resource, "delete", dry_run, {}, clock=_Clock())
 
 
 def _lines(caplog: pytest.LogCaptureFixture) -> list[str]:
@@ -84,7 +84,7 @@ def test_disk_real_run_reports_region_actions_and_skips(
     _disks(monkeypatch)
     _begin("disk", dry_run=False)
     _disk().delete()
-    runlog.finish()
+    logger.finish()
     assert _lines(caplog) == [
         "RUN START cloud=azure resource=disk operation=delete dry_run=false",
         "ACTION deleted cloud=azure resource=disk region=rg id=a name=a",
@@ -104,7 +104,7 @@ def test_disk_dry_run_logs_would_delete_and_done_is_zero(
     adapter = Disk("rg", True, {"env": ["ci"]}, None, None, None, None)
     _begin("disk", dry_run=True)
     adapter.delete()
-    runlog.finish()
+    logger.finish()
     lines = _lines(caplog)
     assert lines[1:3] == [
         "ACTION would_delete cloud=azure resource=disk region=rg id=a name=a",
@@ -133,7 +133,7 @@ def test_disk_cleaner_plan_dry_run_logs_each_action_once(caplog: pytest.LogCaptu
     _begin("disk", dry_run=True)
     plan = cleaner.plan(context)
     cleaner.apply(plan, context)
-    runlog.finish()
+    logger.finish()
     assert [line for line in _lines(caplog) if line.startswith("ACTION")] == [
         "ACTION would_delete cloud=azure resource=disk region=rg id=a name=a"
     ]
@@ -151,7 +151,7 @@ def test_ip_real_and_dry_run(
     azure.install(monkeypatch)
     _begin("ip", dry_run=False)
     IP("rg", False, {"env": ["ci"]}, {}, {}).delete()
-    runlog.finish()
+    logger.finish()
     assert _lines(caplog)[1:] == [
         "ACTION deleted cloud=azure resource=ip region=rg id=a name=a",
         "REGION cloud=azure resource=ip region=rg scanned=3 selected=1 seconds=S",
@@ -163,7 +163,7 @@ def test_ip_real_and_dry_run(
     caplog.clear()
     _begin("ip", dry_run=True)
     IP("rg", True, {"env": ["ci"]}, {}, {}).delete()
-    runlog.finish()
+    logger.finish()
     lines = _lines(caplog)
     assert lines[1] == "ACTION would_delete cloud=azure resource=ip region=rg id=a name=a"
     assert "selected=1 done=0" in lines[-1]
@@ -184,7 +184,7 @@ def test_nic_failure_after_three_attempts_is_listed(
     _begin("nic", dry_run=False)
     adapter = NIC("rg", False, ["nic"], None)
     adapter.delete()
-    runlog.finish()
+    logger.finish()
     assert adapter.get_deleted == ["nic-a"]
     assert _lines(caplog)[1:] == [
         "ACTION deleted cloud=azure resource=nic region=rg id=nic-a name=nic-a",
@@ -206,7 +206,7 @@ def test_nic_dry_run_and_no_double_action_from_plan_and_apply(
     azure.install(monkeypatch)
     _begin("nic", dry_run=True)
     NIC("rg", True, ["nic"], None).delete()
-    runlog.finish()
+    logger.finish()
     assert "ACTION would_delete cloud=azure resource=nic region=rg id=nic-a name=nic-a" in _lines(
         caplog
     )
@@ -215,7 +215,7 @@ def test_nic_dry_run_and_no_double_action_from_plan_and_apply(
     context = RunContext(dry_run=True, operation=Operation.DELETE, options={}, now=hn.NOW)
     _begin("nic", dry_run=True)
     cleaner.apply(cleaner.plan(context), context)
-    runlog.finish()
+    logger.finish()
     assert [x for x in _lines(caplog) if x.startswith("ACTION")] == [
         "ACTION would_delete cloud=azure resource=nic region=rg id=nic-a name=nic-a"
     ]
@@ -243,7 +243,7 @@ def test_vm_delete_reports_skips_and_failures(
     azure.install(monkeypatch)
     _begin("vm", dry_run=False)
     _vm_adapter(dry_run=False).delete()
-    runlog.finish()
+    logger.finish()
     assert _lines(caplog)[1:] == [
         "ACTION deleted cloud=azure resource=vm region=rg id=vm-a name=vm-a",
         "REGION cloud=azure resource=vm region=rg scanned=5 selected=1 seconds=S",
@@ -263,12 +263,12 @@ def test_vm_stop_and_dry_run_kinds(
     hv.FakeAzure([hv.vm("vm-a")]).install(monkeypatch)
     _begin("vm", dry_run=False)
     _vm_adapter(dry_run=False).stop()
-    runlog.finish()
+    logger.finish()
     assert "ACTION stopped cloud=azure resource=vm region=rg id=vm-a name=vm-a" in _lines(caplog)
     caplog.clear()
     _begin("vm", dry_run=True)
     _vm_adapter(dry_run=True).stop()
-    runlog.finish()
+    logger.finish()
     lines = _lines(caplog)
     assert "ACTION would_stop cloud=azure resource=vm region=rg id=vm-a name=vm-a" in lines
     assert "selected=1 done=0" in lines[-1]
@@ -282,7 +282,7 @@ def test_vm_nic_failure_after_24_attempts_is_listed(
     azure.install(monkeypatch)
     _begin("vm", dry_run=False)
     _vm_adapter(dry_run=False).delete()
-    runlog.finish()
+    logger.finish()
     lines = _lines(caplog)
     assert (
         "FAILED cloud=azure resource=vm region=rg id=vm-a-NIC "
@@ -298,7 +298,7 @@ def test_vm_failed_delete_counts_as_selected_without_action(
     azure.install(monkeypatch)
     _begin("vm", dry_run=False)
     _vm_adapter(dry_run=False).delete()
-    runlog.finish()
+    logger.finish()
     lines = _lines(caplog)
     assert not [x for x in lines if x.startswith("ACTION")]
     assert "REGION cloud=azure resource=vm region=rg scanned=1 selected=1 seconds=S" in lines
@@ -354,7 +354,7 @@ def test_spot_real_run_reports_region_action_skips_and_failures(
     azure.install(monkeypatch)
     _begin("spot_instances", dry_run=False)
     _spot(dry_run=False).delete()
-    runlog.finish()
+    logger.finish()
     lines = _lines(caplog)
     region = f"REGION cloud=azure resource=spot_instances region={hs.RG} scanned=5 selected=2"
     assert f"{region} seconds=S" in lines
@@ -379,7 +379,7 @@ def test_spot_dry_run_and_leftover_disk_skips_are_debug(
     azure.install(monkeypatch)
     _begin("spot_instances", dry_run=True)
     _spot(dry_run=True).delete()
-    runlog.finish()
+    logger.finish()
     lines = _lines(caplog)
     assert (
         f"ACTION would_delete cloud=azure resource=spot_instances region={hs.RG} id=s1 name=s1"
@@ -398,14 +398,14 @@ def test_spot_dry_run_and_leftover_disk_skips_are_debug(
 
 
 def test_reason_slug_maps_known_reasons_and_slugs_the_rest() -> None:
-    assert _runlog.reason_slug("not older than the age threshold") == "too_young"
-    assert _runlog.reason_slug("Disk: State!!") == "disk_state"
-    assert _runlog.reason_slug("???") == "other"
+    assert _logger.reason_slug("not older than the age threshold") == "too_young"
+    assert _logger.reason_slug("Disk: State!!") == "disk_state"
+    assert _logger.reason_slug("???") == "other"
 
 
 def test_no_run_begun_logs_nothing_extra(caplog: pytest.LogCaptureFixture) -> None:
-    _runlog.region_done("rg", 1, 1, _runlog.started())
-    _runlog.acted("deleted", "rg", "x")
-    _runlog.skip("too young")
-    _runlog.failed("rg", "x", "boom")
+    _logger.region_done("rg", 1, 1, _logger.started())
+    _logger.acted("deleted", "rg", "x")
+    _logger.skip("too young")
+    _logger.failed("rg", "x", "boom")
     assert _lines(caplog) == []

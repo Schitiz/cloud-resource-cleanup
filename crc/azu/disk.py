@@ -14,7 +14,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Protocol
 
-from crc.azu import _runlog
+from crc.azu import _logger
 from crc.azu._base import Base
 from crc.core import age as core_age
 from crc.core import policy
@@ -129,7 +129,7 @@ class AzureDiskCleaner:
         """List every disk of the subscription and filter. Makes no mutating call."""
         candidates: list[Candidate] = []
         skipped: list[Skipped] = []
-        started = _runlog.started()
+        started = _logger.started()
         scanned = 0
         for disk in self.list_disks():
             scanned += 1
@@ -138,10 +138,10 @@ class AzureDiskCleaner:
                 candidates.append(candidate)
             else:
                 skipped.append(Skipped(id=disk.name, reason=reason, name=disk.name))
-        _runlog.region_done(self._resource_group, scanned, len(candidates), started)
+        _logger.region_done(self._resource_group, scanned, len(candidates), started)
         if context.dry_run:
             for candidate in candidates:
-                _runlog.acted("would_delete", self._resource_group, candidate.id)
+                _logger.acted("would_delete", self._resource_group, candidate.id)
             _log_summary([c.id for c in candidates], dry_run=True)
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
 
@@ -168,21 +168,21 @@ class AzureDiskCleaner:
             logging.info("Deleted disk: " + disk_name)
         if record:
             kind = "would_delete" if dry_run else "deleted"
-            _runlog.acted(kind, self._resource_group, disk_name)
+            _logger.acted(kind, self._resource_group, disk_name)
 
     def decide(self, disk: SdkDisk, now: datetime.datetime) -> tuple[Candidate | None, str]:
         """Select one SDK disk: the candidate, or None with the reason it was kept."""
         tags = dict(disk.tags) if disk.tags else {}
         reason = self._tag_skip_reason(tags)
         if reason:
-            _runlog.skip(reason)
+            _logger.skip(reason)
             return None, reason
         logging.debug(disk.tags)
         if not self._is_old_enough(disk, now):
-            _runlog.skip("not older than the age threshold")
+            _logger.skip("not older than the age threshold")
             return None, "not older than the age threshold"
         if not policy.state_is_substring_of_any(disk.disk_state, self._settings.disk_states):
-            _runlog.skip("disk state not allowed")
+            _logger.skip("disk state not allowed")
             return None, "disk state not allowed"
         return Candidate(id=disk.name, name=disk.name, state=disk.disk_state, tags=tags), ""
 
@@ -304,7 +304,7 @@ class Disk(Service):
         older than the age. In dry_run mode it only lists the matching disks.
         """
         cleaner = self._cleaner()
-        started = _runlog.started()
+        started = _logger.started()
         scanned = selected = 0
         for disk in cleaner.list_disks():
             scanned += 1
@@ -314,5 +314,5 @@ class Disk(Service):
             selected += 1
             cleaner.delete_disk(candidate.id, dry_run=self.dry_run)
             self.disks_names_to_delete.append(candidate.id)
-        _runlog.region_done(self.base.resource_group, scanned, selected, started)
+        _logger.region_done(self.base.resource_group, scanned, selected, started)
         _log_summary(self.disks_names_to_delete, dry_run=self.dry_run)

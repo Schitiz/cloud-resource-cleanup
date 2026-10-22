@@ -12,7 +12,7 @@ import logging
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any, Protocol
 
-from crc.azu import _runlog
+from crc.azu import _logger
 from crc.azu._base import Base
 from crc.core import policy
 from crc.core.cleaner import (
@@ -107,7 +107,7 @@ class AzureNicCleaner:
             return Plan()
         candidates: list[Candidate] = []
         skipped: list[Skipped] = []
-        started = _runlog.started()
+        started = _logger.started()
         scanned = 0
         for nic in self.list_nics():
             scanned += 1
@@ -116,10 +116,10 @@ class AzureNicCleaner:
                 candidates.append(candidate)
             else:
                 skipped.append(Skipped(id=getattr(nic, "name", ""), reason=reason))
-        _runlog.region_done(self._resource_group, scanned, len(candidates), started)
+        _logger.region_done(self._resource_group, scanned, len(candidates), started)
         if context.dry_run:
             for candidate in candidates:
-                _runlog.acted("would_delete", self._resource_group, candidate.id)
+                _logger.acted("would_delete", self._resource_group, candidate.id)
             _log_summary([c.id for c in candidates], dry_run=True)
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
 
@@ -164,7 +164,7 @@ class AzureNicCleaner:
                     logging.info(f"Deleted NIC: {nic_name}")
                 if record:
                     kind = "would_delete" if dry_run else "deleted"
-                    _runlog.acted(kind, self._resource_group, nic_name)
+                    _logger.acted(kind, self._resource_group, nic_name)
                 return None
             except Exception as e:
                 failure_count -= 1
@@ -174,12 +174,12 @@ class AzureNicCleaner:
                 if failure_count:
                     logging.info(f"Retrying deletion of NIC {nic_name}")
         logging.error(f"Failed to delete the NIC - {nic_name}")
-        _runlog.failed(self._resource_group, nic_name, last_exception or last_error)
+        _logger.failed(self._resource_group, nic_name, last_exception or last_error)
         return last_error
 
     @staticmethod
     def _kept(reason: str) -> tuple[None, str]:
-        _runlog.skip(reason)
+        _logger.skip(reason)
         return None, reason
 
     def decide(self, nic: Any) -> tuple[Candidate | None, str]:
@@ -277,7 +277,7 @@ class NIC(Service):
             return
 
         cleaner = self._cleaner()
-        started = _runlog.started()
+        started = _logger.started()
         scanned = selected = 0
         for nic in cleaner.list_nics():
             scanned += 1
@@ -287,6 +287,6 @@ class NIC(Service):
             selected += 1
             if cleaner.attempt_delete(candidate.id, dry_run=self.dry_run) is None:
                 self.nics_names_to_delete.append(candidate.id)
-        _runlog.region_done(self.base.resource_group, scanned, selected, started)
+        _logger.region_done(self.base.resource_group, scanned, selected, started)
 
         _log_summary(self.nics_names_to_delete, dry_run=self.dry_run)

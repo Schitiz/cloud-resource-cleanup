@@ -10,7 +10,7 @@ from typing import Any, Protocol
 
 from azure.core.exceptions import HttpResponseError, ResourceNotFoundError
 
-from crc.azu import _runlog
+from crc.azu import _logger
 
 # Max time to wait for a single VM delete LRO (large disks can be slow)
 DEFAULT_VM_DELETE_TIMEOUT_SEC = 3600
@@ -114,6 +114,6 @@ def delete_vm_primary_nic(
             time.sleep(NIC_DELETE_RETRY_INTERVAL_SEC)
 
     logging.error("Failed to delete the NIC - %s after %s attempts", nic_name, NIC_DELETE_ATTEMPTS)
-    _runlog.failed(
+    _logger.failed(
         resource_group, nic_name, f"NIC delete failed after {NIC_DELETE_ATTEMPTS} attempts"
     )
