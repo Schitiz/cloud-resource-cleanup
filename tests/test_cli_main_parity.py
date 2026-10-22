@@ -7,6 +7,7 @@ and constructor arguments, the printed output, the warnings logged, `os.environ[
 after the run and the raised error (type and message) or exit code must be equal.
 """
 
+import functools
 import importlib.util
 import io
 import itertools
@@ -28,6 +29,7 @@ from crc.cli import clients as cli_clients
 from crc.cli import context as cli_context
 from crc.cli import dispatch as cli_dispatch
 from crc.cli import scan as cli_scan
+from crc.core import runlog
 
 ROOT = Path(__file__).resolve().parent.parent
 ORACLE = ROOT / "tests" / "legacy" / "crc_main.txt"
@@ -662,6 +664,7 @@ def test_bug_360_main_logs_run_start_and_result_around_each_cleaner_pass(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.INFO)
+    monkeypatch.setattr(runlog, "begin", functools.partial(runlog.begin, clock=lambda: 0.0))
     single = Case(
         "single-pass",
         ("--cloud", "aws", "--resource", "keypair", "--age", '{"days": 1}'),
@@ -672,18 +675,20 @@ def test_bug_360_main_logs_run_start_and_result_around_each_cleaner_pass(
     caplog.clear()
     new_single = run_new(single, monkeypatch)
     new_logs = [(r.levelno, r.getMessage()) for r in caplog.records]
-    assert oracle_single.events == new_single.events
+    assert new_single == oracle_single
     assert oracle_logs == []
     assert oracle_logs != new_logs
-    assert new_logs[0] == (
-        logging.INFO,
-        'RUN START cloud=aws resource=keypair operation=delete dry_run=false age={"days":1}',
-    )
-    assert new_logs[1][0] == logging.INFO
-    assert new_logs[1][1].startswith(
-        "RESULT cloud=aws resource=keypair operation=delete dry_run=false "
-        "selected=0 done=0 failed=0 skipped=0 regions=0 regions_skipped=0 duration_s="
-    )
+    assert new_logs == [
+        (
+            logging.INFO,
+            'RUN START cloud=aws resource=keypair operation=delete dry_run=false age={"days":1}',
+        ),
+        (
+            logging.INFO,
+            "RESULT cloud=aws resource=keypair operation=delete dry_run=false selected=0 "
+            "done=0 failed=0 skipped=0 regions=0 regions_skipped=0 duration_s=0",
+        ),
+    ]
 
     scan_case = Case("scan-pass", ("--cloud", "aws", "--resource", "vm", "--scan_tag", "k=v"))
     caplog.clear()
