@@ -206,16 +206,19 @@ class VmCleaner:
 
     def process(self, vm_name: str, operation: Operation, tally: Tally, *, dry_run: bool) -> bool:
         """Status check and action for one VM that passed `decide()`. Any error is logged and
-        swallowed, as on main. Returns True when the VM was acted on (or would be)."""
+        swallowed, as on main. Returns True when the VM passed the status check (selected, as
+        in `plan()`), even if the action then failed."""
+        selected = False
         try:
-            if self.state_allowed(vm_name, self._settings.instance_states):
+            selected = self.state_allowed(vm_name, self._settings.instance_states)
+            if selected:
                 self.act(vm_name, operation, tally, dry_run=dry_run)
-                return True
-            _runlog.skip("status does not contain an allowed state")
+            else:
+                _runlog.skip("status does not contain an allowed state")
         except Exception as e:
             _log_processing_error(vm_name, e)
             _runlog.failed(self._resource_group, vm_name, e)
-        return False
+        return selected
 
     def act(self, vm_name: str, operation: Operation, tally: Tally, *, dry_run: bool) -> None:
         """Delete (with the NIC) or power off one VM and record its name, also in a dry run,

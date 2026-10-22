@@ -290,6 +290,24 @@ def test_vm_nic_failure_after_24_attempts_is_listed(
     )
 
 
+def test_vm_failed_delete_counts_as_selected_without_action(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    boom = RuntimeError("delete failed")
+    azure = hv.FakeAzure([hv.vm("vm-a")], scripts={"vm_begin": {"vm-a": [boom]}})
+    azure.install(monkeypatch)
+    _begin("vm", dry_run=False)
+    _vm_adapter(dry_run=False).delete()
+    runlog.finish()
+    lines = _lines(caplog)
+    assert not [x for x in lines if x.startswith("ACTION")]
+    assert "REGION cloud=azure resource=vm region=rg scanned=1 selected=1 seconds=S" in lines
+    assert "FAILED cloud=azure resource=vm region=rg id=vm-a error=RuntimeError: delete failed" in (
+        lines
+    )
+    assert "selected=0 done=0 failed=1 skipped=0" in lines[-1]
+
+
 def test_vm_tag_dump_is_debug_with_unchanged_text(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
