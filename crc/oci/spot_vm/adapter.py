@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from crc.core import age as core_age
+from crc.core.cleaner import Operation
+from crc.oci import _logger
 from crc.oci._base import Base
 from crc.oci.spot_vm import decide, leftovers
 from crc.oci.spot_vm.cleaner import SpotVmCleaner, log_instance_error, log_summary
@@ -60,6 +62,7 @@ class SpotVM(Service, Base):
     INSTANCE_TERMINATED_WAIT_SEC = decide.INSTANCE_TERMINATED_WAIT_SEC
     INSTANCE_POLL_INTERVAL_SEC = decide.INSTANCE_POLL_INTERVAL_SEC
     _runtime: SpotVmRuntime = SpotVmRuntime()
+    _region: str | None = None
 
     def __init__(  # noqa: PLR0913, PLR0917 - the six parameters are the public signature
         self,
@@ -127,20 +130,35 @@ class SpotVM(Service, Base):
     ) -> list[str] | None:
         """Attached block volume IDs, or None if listing failed (the caller must not terminate)."""
         return leftovers.attached_volume_ids(
-            compute_client, self.compartment_id, instance_id, self._pager()
+            compute_client, self.compartment_id, instance_id, self._pager(), self._region
         )
 
     def _wait_instance_terminated(self, compute_client: ComputeClient, instance_id: str) -> bool:
-        return leftovers.wait_terminated(compute_client, instance_id, self._settings())
+        return leftovers.wait_terminated(
+            compute_client, instance_id, self._settings(), self._region
+        )
 
     def _volume_ok_to_delete(self, blockstorage_client: BlockClient, volume_id: str) -> bool:
-        return leftovers.volume_passes_tag_check(blockstorage_client, volume_id, self._settings())
+        return leftovers.volume_passes_tag_check(
+            blockstorage_client, volume_id, self._settings(), self._region
+        )
 
     def _delete_volume(self, blockstorage_client: BlockClient, volume_id: str) -> None:
+        before = len(self.volumes_to_delete)
         if self.dry_run:
             self.volumes_to_delete.append(volume_id)
-            return
-        leftovers.delete_leftover(blockstorage_client, volume_id, self.volumes_to_delete)
+        else:
+            leftovers.delete_leftover(
+                blockstorage_client, volume_id, self.volumes_to_delete, self._region
+            )
+        if len(self.volumes_to_delete) > before:
+            _logger.record_action(
+                Operation.DELETE,
+                dry_run=self.dry_run,
+                region=self._region,
+                resource_id=volume_id,
+                name=None,
+            )
 
     def delete(self) -> None:
         """Terminate (or, in a dry run, only list) the matching preemptible instances of every
@@ -155,27 +173,40 @@ class SpotVM(Service, Base):
             self._pager(),
         )
         for region in list_regions():
+            started = _logger.region_started()
             listed = cleaner.list_region(region)
             if listed is None:
                 continue
             clients, instances = listed
+            selected = 0
             for instance in instances:
                 try:
-                    self._process(clients, instance, runtime.clock)
+                    selected += self._process(clients, instance, runtime.clock, region)
                 except Exception as e:
                     log_instance_error(getattr(instance, "display_name", "?"), e)
+                    _logger.record_failure(region, getattr(instance, "id", "?"), e)
+            _logger.region_done(region, len(instances), selected, started)
 
         log_summary(self.instance_names_to_delete, self.volumes_to_delete, dry_run=self.dry_run)
 
-    def _process(self, clients: RegionClients, instance: SdkInstance, clock: decide.Clock) -> None:
+    def _process(
+        self,
+        clients: RegionClients,
+        instance: SdkInstance,
+        clock: decide.Clock,
+        region: str | None = None,
+    ) -> int:
+        """Act on one instance; returns 1 when it was selected (terminated, or listed in a dry
+        run), else 0."""
+        self._region = region
         if decide.skip_reason(self._settings(), instance, clock) is not None:
-            return
+            return 0
         leftover = self._attached_block_volume_ids(clients.compute, instance.id)
         if leftover is None:
             logging.error(
                 "Skipping terminate for %s: volume attachment list failed", instance.display_name
             )
-            return
+            return 0
         if not self.dry_run:
             clients.compute.terminate_instance(instance.id, preserve_boot_volume=False)
             logging.info("Terminating OCI preemptible instance %s", instance.display_name)
@@ -185,6 +216,14 @@ class SpotVM(Service, Base):
                     instance.display_name,
                 )
         self.instance_names_to_delete.append(instance.display_name)
+        _logger.record_action(
+            Operation.DELETE,
+            dry_run=self.dry_run,
+            region=region,
+            resource_id=instance.id,
+            name=instance.display_name,
+        )
         for volume_id in leftover:
             if self._volume_ok_to_delete(clients.block, volume_id):
                 self._delete_volume(clients.block, volume_id)
+        return 1

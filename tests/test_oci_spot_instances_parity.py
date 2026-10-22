@@ -24,7 +24,10 @@ from oci.exceptions import ConnectTimeout, RequestException, ServiceError
 import crc.oci.spot_vm.leftovers as leftovers_module
 from crc.core.cleaner import Operation, RunContext
 from crc.oci.spot_vm import SpotVM, SpotVmRuntime, build_spot_vm_cleaner
+from tests.helpers_log_fix import expected_logs
+from tests.log_fix_oci import RULES
 
+BUGS = {"BUG-358"}
 ORACLE = Path(__file__).parent / "legacy" / "oci_spot_vm.txt"
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)
 NOW_UTC = NOW.astimezone(datetime.UTC)
@@ -733,7 +736,7 @@ def test_adapter_matches_main(
     assert new.error == old.error
     assert new.acted == old.acted
     assert new.volumes == old.volumes
-    assert new.logs == old.logs
+    assert new.logs == expected_logs(old.logs, BUGS, RULES)
     assert new.stdout == old.stdout
 
 
@@ -812,14 +815,15 @@ def test_cleaner_protocol_matches_main(
     for name in sorted(names):
         assert _of(new.calls, [name]) == _of(old.calls, [name]), name
     assert _of(new.calls, MUTATING) == _of(old.calls, MUTATING)
-    assert Counter(new.logs) == Counter(old.logs)
+    old_logs = expected_logs(old.logs, BUGS, RULES)
+    assert Counter(new.logs) == Counter(old_logs)
     assert [log for log in new.logs if _is_summary(log)] == [
-        log for log in old.logs if _is_summary(log)
+        log for log in old_logs if _is_summary(log)
     ]
-    assert new.logs[len(new.logs) - len([log for log in old.logs if _is_summary(log)]) :] == [
-        log for log in old.logs if _is_summary(log)
+    assert new.logs[len(new.logs) - len([log for log in old_logs if _is_summary(log)]) :] == [
+        log for log in old_logs if _is_summary(log)
     ]
-    quiet = [log for log in old.logs if not _is_summary(log) and not _is_error_processing(log)]
+    quiet = [log for log in old_logs if not _is_summary(log) and not _is_error_processing(log)]
     plan_group = [log for log in quiet if case.dry_run or not _is_apply(log)]
     apply_group = [] if case.dry_run else [log for log in quiet if _is_apply(log)]
     new_quiet = [log for log in new.logs if not _is_summary(log) and not _is_error_processing(log)]
@@ -849,7 +853,9 @@ def test_repeated_delete_accumulates_as_main(
     new = _sequence(_new, case, world)
     assert new == old
     assert world.calls == old_calls
-    assert [(r.levelno, r.getMessage()) for r in caplog.records] == old_logs
+    assert [(r.levelno, r.getMessage()) for r in caplog.records] == expected_logs(
+        old_logs, BUGS, RULES
+    )
 
 
 QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
@@ -898,3 +904,23 @@ def test_quirk_is_preserved(
     new = _run(_new, case, monkeypatch, caplog, capsys)
     assert check(old), "oracle no longer shows the quirk"
     assert check(new)
+
+
+def test_spot_vm_diverges_from_oracle(
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """BUG-358: new logs differ from the oracle by a level only."""
+    changed = 0
+    for case in CASES:
+        old = _run(_legacy, case, monkeypatch, caplog, capsys)
+        new = _run(_new, case, monkeypatch, caplog, capsys)
+        if old.logs == new.logs:
+            continue
+        changed += 1
+        assert [log[2] for log in new.logs] == [log[2] for log in old.logs]
+        assert new.calls == old.calls
+        assert {log[1] for log in new.logs if log not in old.logs} == {logging.DEBUG}
+    assert changed > 0

@@ -13,6 +13,7 @@ from collections.abc import Sequence
 
 from oci.exceptions import ServiceError
 
+from crc.oci import _logger
 from crc.oci.spot_vm.client import BlockClient, ComputeClient, Pager
 from crc.oci.spot_vm.decide import SpotVmSettings, tags_protect
 
@@ -21,7 +22,11 @@ _HTTP_NOT_FOUND = 404
 
 
 def attached_volume_ids(
-    compute: ComputeClient, compartment_id: str, instance_id: str, pager: Pager
+    compute: ComputeClient,
+    compartment_id: str,
+    instance_id: str,
+    pager: Pager,
+    region: str | None = None,
 ) -> list[str] | None:
     """Attached block volume IDs, or None if listing failed (the caller must not terminate:
     the leftovers would be lost)."""
@@ -33,6 +38,7 @@ def attached_volume_ids(
         ).data
     except Exception as e:
         logging.error("Failed to list volume attachments for %s: %s", instance_id, e)
+        _logger.record_failure(region, instance_id, e)
         return None
 
     volume_ids: list[str] = []
@@ -51,12 +57,18 @@ def attached_volume_ids(
     return volume_ids
 
 
-def _poll_failed(instance_id: str, error: Exception) -> bool:
+def _poll_failed(instance_id: str, error: Exception, region: str | None = None) -> bool:
     logging.error("Error polling OCI instance %s during terminate wait: %s", instance_id, error)
+    _logger.record_failure(region, instance_id, error)
     return False
 
 
-def wait_terminated(compute: ComputeClient, instance_id: str, settings: SpotVmSettings) -> bool:
+def wait_terminated(
+    compute: ComputeClient,
+    instance_id: str,
+    settings: SpotVmSettings,
+    region: str | None = None,
+) -> bool:
     """Block until the instance is TERMINATED (or gone). Volumes cannot be deleted while still
     attached during the asynchronous terminate."""
     deadline = time.monotonic() + settings.terminated_wait_sec
@@ -69,9 +81,9 @@ def wait_terminated(compute: ComputeClient, instance_id: str, settings: SpotVmSe
         except ServiceError as e:
             if getattr(e, "status", None) == _HTTP_NOT_FOUND:
                 return True
-            return _poll_failed(instance_id, e)
+            return _poll_failed(instance_id, e, region)
         except Exception as e:
-            return _poll_failed(instance_id, e)
+            return _poll_failed(instance_id, e, region)
         time.sleep(settings.poll_interval_sec)
 
     logging.error(
@@ -79,23 +91,33 @@ def wait_terminated(compute: ComputeClient, instance_id: str, settings: SpotVmSe
         "will still attempt leftover volume deletes",
         instance_id,
     )
+    _logger.record_failure(region, instance_id, "timed out waiting for TERMINATED")
     return False
 
 
-def volume_passes_tag_check(block: BlockClient, volume_id: str, settings: SpotVmSettings) -> bool:
+def volume_passes_tag_check(
+    block: BlockClient,
+    volume_id: str,
+    settings: SpotVmSettings,
+    region: str | None = None,
+) -> bool:
     """Read the volume and keep it when it cannot be read or its tags protect it."""
     try:
         volume = block.get_volume(volume_id).data
     except Exception as e:
         logging.error("Failed to get volume %s for tag check (skipping): %s", volume_id, e)
+        _logger.record_failure(region, volume_id, e)
         return False
     if tags_protect(settings, volume.freeform_tags):
-        logging.info("Skipping leftover volume %s: exception_tags/notags", volume_id)
+        logging.debug("Skipping leftover volume %s: exception_tags/notags", volume_id)
+        _logger.record_skip("leftover_exception_tag")
         return False
     return True
 
 
-def delete_leftover(block: BlockClient, volume_id: str, done: list[str]) -> None:
+def delete_leftover(
+    block: BlockClient, volume_id: str, done: list[str], region: str | None = None
+) -> None:
     """Delete one leftover volume; a failure is logged and the volume left out of `done`."""
     try:
         block.delete_volume(volume_id)
@@ -103,10 +125,14 @@ def delete_leftover(block: BlockClient, volume_id: str, done: list[str]) -> None
         done.append(volume_id)
     except Exception as e:
         logging.error("Failed to delete leftover volume %s: %s", volume_id, e)
+        _logger.record_failure(region, volume_id, e)
 
 
 def checked_volumes(
-    block: BlockClient, volume_ids: Sequence[str], settings: SpotVmSettings
+    block: BlockClient,
+    volume_ids: Sequence[str],
+    settings: SpotVmSettings,
+    region: str | None = None,
 ) -> list[str]:
     """The volumes of `volume_ids` that pass the tag check, in order."""
-    return [v for v in volume_ids if volume_passes_tag_check(block, v, settings)]
+    return [v for v in volume_ids if volume_passes_tag_check(block, v, settings, region)]

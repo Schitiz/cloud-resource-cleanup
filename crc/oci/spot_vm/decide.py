@@ -14,11 +14,21 @@ from typing import cast
 
 from crc.core import age as core_age
 from crc.core import policy
+from crc.oci import _logger
 from crc.oci.spot_vm.client import SdkInstance
 
 DEFAULT_INSTANCE_STATES = ("RUNNING", "STOPPED")
 INSTANCE_TERMINATED_WAIT_SEC = 180
 INSTANCE_POLL_INTERVAL_SEC = 5
+
+SKIP_KEYS = {
+    "state is not allowed": "state",
+    "not preemptible": "not_preemptible",
+    "OKE or instance pool member": "oke_member",
+    "matches exception_tags or notags": "exception_tag",
+    "does not match filter_tags": "filter_mismatch",
+    "not older than age": "too_young",
+}
 
 TagSpec = Mapping[str, Sequence[str]]
 Clock = Callable[[], datetime.datetime]
@@ -97,6 +107,7 @@ def skip_reason(settings: SpotVmSettings, instance: SdkInstance, clock: Clock) -
     )
     for reason, applies in kept_when:
         if applies():
+            _logger.record_skip(SKIP_KEYS[reason])
             return reason
     return None
 

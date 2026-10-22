@@ -24,6 +24,7 @@ from crc.core.cleaner import (
     Skipped,
 )
 from crc.core.registry import register
+from crc.oci import _logger
 from crc.oci._base import Base
 from crc.oci.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
 from crc.oci.spot_vm import leftovers
@@ -87,10 +88,12 @@ class SpotVmCleaner:
         candidates: list[Candidate] = []
         skipped: list[Skipped] = []
         for region in self._list_regions():
+            started = _logger.region_started()
             listed = self.list_region(region)
             if listed is None:
                 continue
             clients, instances = listed
+            before = len(candidates)
             for instance in instances:
                 try:
                     decision = self.consider(clients, instance, region, lambda: context.now)
@@ -100,6 +103,8 @@ class SpotVmCleaner:
                         candidates.append(self._checked(clients, decision, context.dry_run))
                 except Exception as e:
                     log_instance_error(getattr(instance, "display_name", "?"), e)
+                    _logger.record_failure(region, getattr(instance, "id", "?"), e)
+            _logger.region_done(region, len(instances), len(candidates) - before, started)
         if context.dry_run:
             volumes = [v for c in candidates for v in c.extra["volumes"]]
             log_summary([c.name for c in candidates], volumes, dry_run=True)
@@ -116,6 +121,22 @@ class SpotVmCleaner:
         names = [c.name for c in plan.candidates]
         if context.dry_run:
             volumes = [v for c in plan.candidates for v in c.extra["volumes"]]
+            for candidate in plan.candidates:
+                _logger.record_action(
+                    Operation.DELETE,
+                    dry_run=True,
+                    region=candidate.region,
+                    resource_id=candidate.id,
+                    name=candidate.name,
+                )
+                for volume_id in candidate.extra["volumes"]:
+                    _logger.record_action(
+                        Operation.DELETE,
+                        dry_run=True,
+                        region=candidate.region,
+                        resource_id=volume_id,
+                        name=None,
+                    )
             return Result(succeeded=tuple(names), related={VOLUMES_LABEL: tuple(volumes)})
         done: list[str] = []
         deleted: list[str] = []
@@ -126,6 +147,7 @@ class SpotVmCleaner:
                 self.terminate(clients, candidate, done, deleted)
             except Exception as e:
                 log_instance_error(candidate.name, e)
+                _logger.record_failure(candidate.region, candidate.id, e)
                 failed.append(Failure(id=candidate.id, error=str(e)))
         log_summary(done, deleted, dry_run=False)
         return Result(
@@ -141,9 +163,11 @@ class SpotVmCleaner:
             ).data
         except CONNECTIVITY_ERRORS as e:
             log_skipped_region(region, "list_instances spot/preemptible cleanup", e)
+            _logger.region_skipped(region, e)
             return None
         except Exception as e:
             logging.error("Region %s: failed listing instances: %s", region, e)
+            _logger.record_failure(region, "-", e)
             return None
         self._clients[region] = clients
         return clients, instances
@@ -157,7 +181,7 @@ class SpotVmCleaner:
         if reason is not None:
             return Skipped(id=instance.id, reason=reason, name=instance.display_name)
         leftover = leftovers.attached_volume_ids(
-            clients.compute, clients.compartment_id, instance.id, self._pager
+            clients.compute, clients.compartment_id, instance.id, self._pager, region
         )
         if leftover is None:
             logging.error(
@@ -188,22 +212,40 @@ class SpotVmCleaner:
         clients.compute.terminate_instance(candidate.id, preserve_boot_volume=False)
         logging.info("Terminating OCI preemptible instance %s", candidate.name)
         if leftover and not leftovers.wait_terminated(
-            clients.compute, candidate.id, self._settings
+            clients.compute, candidate.id, self._settings, candidate.region
         ):
             logging.error(
                 "Instance %s not TERMINATED yet; attempting leftover volume deletes anyway",
                 candidate.name,
             )
         done.append(candidate.name)
+        _logger.record_action(
+            Operation.DELETE,
+            dry_run=False,
+            region=candidate.region,
+            resource_id=candidate.id,
+            name=candidate.name,
+        )
         for volume_id in leftover:
-            if leftovers.volume_passes_tag_check(clients.block, volume_id, self._settings):
-                leftovers.delete_leftover(clients.block, volume_id, deleted)
+            if leftovers.volume_passes_tag_check(
+                clients.block, volume_id, self._settings, candidate.region
+            ):
+                before = len(deleted)
+                leftovers.delete_leftover(clients.block, volume_id, deleted, candidate.region)
+                if len(deleted) > before:
+                    _logger.record_action(
+                        Operation.DELETE,
+                        dry_run=False,
+                        region=candidate.region,
+                        resource_id=volume_id,
+                        name=None,
+                    )
 
     def _checked(self, clients: RegionClients, candidate: Candidate, dry_run: bool) -> Candidate:
         if not dry_run:
             return candidate
         volumes = leftovers.checked_volumes(
-            clients.block, candidate.extra["leftover"], self._settings
+            clients.block, candidate.extra["leftover"], self._settings, candidate.region
         )
         return Candidate(
             id=candidate.id,

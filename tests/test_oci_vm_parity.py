@@ -21,7 +21,10 @@ from oci.exceptions import ConnectTimeout, RequestException, ServiceError
 
 from crc.core.cleaner import Operation, RunContext
 from crc.oci.vm import VM, VmRuntime, build_vm_cleaner
+from tests.helpers_log_fix import expected_logs
+from tests.log_fix_oci import RULES
 
+BUGS = {"BUG-358"}
 ORACLE = Path(__file__).parent / "legacy" / "oci_vm.txt"
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)
 NOW_UTC = NOW.astimezone(datetime.UTC)
@@ -577,7 +580,7 @@ def test_adapter_matches_main(
     assert new.error == old.error
     assert new.acted == old.acted
     assert new.count == old.count
-    assert new.logs == old.logs
+    assert new.logs == expected_logs(old.logs, BUGS, RULES)
     assert new.stdout == old.stdout
 
 
@@ -655,7 +658,11 @@ def test_cleaner_protocol_matches_main(
         c for c in old.calls if not _is_mutation(c)
     ]
     assert [c for c in new.calls if _is_mutation(c)] == [c for c in old.calls if _is_mutation(c)]
-    old_logs = [log for log in old.logs if not log[2].startswith("count of items")]
+    old_logs = [
+        log
+        for log in expected_logs(old.logs, BUGS, RULES)
+        if not log[2].startswith("count of items")
+    ]
     plan_logs = [log for log in old_logs if not _is_apply_log(log) and not _is_summary_log(log)]
     apply_logs = [log for log in old_logs if _is_apply_log(log)]
     summary_logs = [log for log in old_logs if _is_summary_log(log)]
@@ -695,7 +702,7 @@ def test_delete_then_stop_then_delete_shares_name_lists_as_main(
     new_logs = [(r.levelno, r.getMessage()) for r in caplog.records]
     assert new == old
     assert world.calls == old_calls
-    assert new_logs == old_logs
+    assert new_logs == expected_logs(old_logs, BUGS, RULES)
 
 
 QUIRKS: Sequence[tuple[str, str, Callable[[Outcome], bool]]] = [
@@ -772,3 +779,23 @@ def test_quirk_is_preserved(
     new = _run(_new, case, operation, monkeypatch, caplog, capsys)
     assert check(old), "oracle no longer shows the quirk"
     assert check(new)
+
+
+def test_vm_diverges_from_oracle(
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """BUG-358: new logs differ from the oracle by a level only."""
+    changed = 0
+    for case, operation in PARAMS:
+        old = _run(_legacy, case, operation, monkeypatch, caplog, capsys)
+        new = _run(_new, case, operation, monkeypatch, caplog, capsys)
+        if old.logs == new.logs:
+            continue
+        changed += 1
+        assert [log[2] for log in new.logs] == [log[2] for log in old.logs]
+        assert new.calls == old.calls
+        assert {log[1] for log in new.logs if log not in old.logs} == {logging.DEBUG}
+    assert changed > 0
