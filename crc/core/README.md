@@ -137,7 +137,7 @@ Engine (module engine.py). Orchestration only; Slack and Influx senders are inje
 - `Notifier`: protocol with name, fail_open and send(report, context); a fail_open notifier error is logged and swallowed, any other propagates.
 - `KIND_LABELS`: report label of each resource kind.
 
-Run log (module runlog.py, imported as "from crc.core import runlog"). Pure stdlib collector of the
+Run log (module logger.py, imported as "from crc.core import logger"). Pure stdlib collector of the
 per-run lines of the LOG rungs; the contract is in docs/refactor/LOGGING.md. Log text only: it never
 decides what a cleaner selects or deletes.
 
