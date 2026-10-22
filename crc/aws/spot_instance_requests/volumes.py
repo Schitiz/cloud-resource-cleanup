@@ -32,6 +32,7 @@ from crc.aws.spot_instance_requests.rules import (
     tag_map,
     volume_tags_protect,
 )
+from crc.core import runlog
 
 ERRORS = (ClientError, BotoCoreError)
 LiveLookup = tuple[str, TagList | None, Any]
@@ -83,13 +84,15 @@ def volume_ok_to_delete(settings: SpotSettings, client: SpotClient, volume_id: s
     tags = describe_volume_tag_list(client, volume_id)
     if tags is None:
         logging.error("Skipping leftover volume %s: could not read tags (fail closed)", volume_id)
+        runlog.current().fail(None, volume_id, "could not read volume tags (fail closed)")
         return False
     if volume_tags_protect(settings, own_volume_tags(tags)):
-        logging.info(
+        logging.debug(
             "Skipping leftover volume %s: protected by volume tags "
             "(exception/notags/sensitive yb_task)",
             volume_id,
         )
+        runlog.current().skip("volume_protected")
         return False
     return True
 
@@ -194,18 +197,20 @@ def inspect_instance(client: SpotClient, match: RequestMatch) -> Inspection | No
                 match.request_id,
                 match.instance_id,
             )
+            runlog.current().fail(None, match.request_id, "describe_instances failed")
             return None
         volumes_from_bdm = bool(leftover_volumes)
     if not leftover_volumes:
         leftover_volumes = volumes_tagged_leftover(client, match.request_id)
     inspection = Inspection(instance_state, leftover_volumes, volumes_from_bdm)
     if match.already_cancelled and inspection.instance_done and not leftover_volumes:
-        logging.info(
+        logging.debug(
             "Skipping cancelled spot request %s: instance %s already "
             "gone/terminated and no leftover volumes to delete",
             match.request_id,
             match.instance_id or "none",
         )
+        runlog.current().skip("already_cancelled_done")
         return None
     return inspection
 
@@ -279,14 +284,16 @@ def run_sweep(
             continue
         try:
             if not volume_passes_sweep_gates(settings, client, volume, now):
-                logging.info(
+                logging.debug(
                     "Skipping tagged leftover volume %s in %s (filters/exceptions)",
                     volume_id,
                     region,
                 )
+                runlog.current().skip("sweep_gates")
                 continue
             act(volume_id)
         except Exception as e:
             logging.error(
                 "Region %s: error sweeping tagged leftover volume %s: %s", region, volume_id, e
             )
+            runlog.current().fail(region, str(volume_id), e)

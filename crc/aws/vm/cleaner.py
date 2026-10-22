@@ -10,6 +10,7 @@ of every region (`describe_instances`, `describe_network_interfaces`) and filter
 
 import datetime
 import logging
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -21,7 +22,7 @@ from crc.aws.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
 from crc.aws.vm import scan as vm_scan
 from crc.aws.vm.client import VmClient
 from crc.core import age as core_age
-from crc.core import policy
+from crc.core import policy, runlog
 from crc.core.age import AgeSpec
 from crc.core.cleaner import (
     Candidate,
@@ -73,8 +74,38 @@ _ERROR_TEXT = {
 _DONE_TEXT = {Operation.DELETE: "Instance: {} deleted.", Operation.STOP: "Instance {} stopped."}
 
 
+_SKIP_REASONS = {
+    "no Tags key": "no_tags",
+    "exception tag or notags": "exception_tag",
+    "younger than age": "too_young",
+}
+_ACTED = {
+    (Operation.DELETE, False): "deleted",
+    (Operation.DELETE, True): "would_delete",
+    (Operation.STOP, False): "stopped",
+    (Operation.STOP, True): "would_stop",
+}
+
+
 def skip_region(region: str, operation: Operation, error: BaseException) -> None:
     log_skipped_region(region, f"ec2 vm {operation.value}", error)
+    runlog.current().region_skipped(region, error)
+
+
+def note_region(
+    region: str, started: float, found: Sequence[Candidate], kept: Sequence[Skipped]
+) -> None:
+    """The REGION progress line of a region that was listed and filtered."""
+    seconds = time.monotonic() - started
+    runlog.current().region(region, len(found) + len(kept), len(found), seconds)
+
+
+def note_dry_run(operation: Operation, candidates: Sequence[Candidate]) -> None:
+    """One ACTION would_* line per instance a dry run lists."""
+    for candidate in candidates:
+        runlog.current().action(
+            _ACTED[operation, True], candidate.region, candidate.id, candidate.name
+        )
 
 
 def log_summary(
@@ -155,6 +186,7 @@ class VmCleaner:
         candidates: list[Candidate] = []
         skipped: list[Skipped] = []
         for region in self._list_regions():
+            started = time.monotonic()
             try:
                 client = self._client_factory(region)
                 found, kept = self.filter_instances(
@@ -163,10 +195,12 @@ class VmCleaner:
             except CONNECTIVITY_ERRORS as e:
                 skip_region(region, operation, e)
                 continue
+            note_region(region, started, found, kept)
             self._clients[region] = client
             candidates.extend(found)
             skipped.extend(kept)
         if context.dry_run:
+            note_dry_run(operation, candidates)
             _summarise(operation, True, dry_run_names(operation, candidates))
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
 
@@ -206,7 +240,18 @@ class VmCleaner:
                     found.append(decision)
                 else:
                     kept.append(decision)
+                    self._note_skipped(decision, region)
         return found, kept
+
+    @staticmethod
+    def _note_skipped(decision: Skipped, region: str) -> None:
+        """Count a kept instance under its runlog reason. Errors were recorded by `_decide`;
+        the missing Name tag is logged at ERROR, so it is also a failure."""
+        run = runlog.current()
+        if decision.reason == "no Name tag":
+            run.fail(region or None, decision.id, "instance doesn't have Name Tag")
+        elif decision.reason in _SKIP_REASONS:
+            run.skip(_SKIP_REASONS[decision.reason])
 
     def apply_region(
         self, client: VmClient, candidates: Sequence[Candidate], operation: Operation
@@ -219,8 +264,12 @@ class VmCleaner:
             try:
                 self._call(client, operation, candidate.id)
                 names.append(candidate.name)
+                runlog.current().action(
+                    _ACTED[operation, False], candidate.region, candidate.id, candidate.name
+                )
             except Exception as e:
                 logging.error(f"{_ERROR_TEXT[operation]} {candidate.id}: {e}")
+                runlog.current().fail(candidate.region, candidate.id, e)
                 failures.append(Failure(id=candidate.id, error=str(e)))
         for name in names:
             logging.info(_DONE_TEXT[operation].format(name))
@@ -263,6 +312,7 @@ class VmCleaner:
             return self._judge(client, inst, (name, region), tags, now)
         except Exception as e:
             logging.error(f"Error occurred while processing {name} instance: {e}")
+            runlog.current().fail(region or None, _safe_id(inst), e)
             return Skipped(id=_safe_id(inst), reason=f"error: {e}")
 
     def _screen(self, inst: Mapping[str, Any]) -> Skipped | tuple[str, Any]:
@@ -288,7 +338,7 @@ class VmCleaner:
         name, region = where
         instance_id = inst["InstanceId"]
         attached = _attach_time(client, inst)
-        logging.info(tags)
+        logging.debug(tags)
         retention_age: AgeSpec | None = core_age.get_retention_age(
             tags, self._settings.custom_age_tag_key
         )

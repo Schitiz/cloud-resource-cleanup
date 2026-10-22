@@ -349,9 +349,7 @@ def aws_disk_creation_floor(
     return max(floors, key=age_to_timedelta) if floors else {}
 
 
-def is_older_than_floor(
-    created: datetime.datetime, now: datetime.datetime, floor: AgeSpec
-) -> bool:
+def is_older_than_floor(created: datetime.datetime, now: datetime.datetime, floor: AgeSpec) -> bool:
     """AWS disk: ``now - created >= floor``, ignoring MAX_AGE. A zero or empty floor gives False."""
     limit = age_to_timedelta(floor)
     return bool(limit) and (now - created) >= limit

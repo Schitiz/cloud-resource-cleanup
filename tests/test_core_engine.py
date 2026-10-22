@@ -89,15 +89,11 @@ class FakeNotifier:
             raise self.error
 
 
-def make_registry(
-    events: list[str], pairs: list[tuple[str, str]], **kwargs: object
-) -> Registry:
+def make_registry(events: list[str], pairs: list[tuple[str, str]], **kwargs: object) -> Registry:
     registry = Registry()
     for cloud, kind in pairs:
 
-        def factory(
-            context: RunContext, cloud: str = cloud, kind: str = kind
-        ) -> FakeCleaner:
+        def factory(context: RunContext, cloud: str = cloud, kind: str = kind) -> FakeCleaner:
             return FakeCleaner(cloud, kind, events, **kwargs)  # type: ignore[arg-type]
 
         registry.register(cloud, kind)(factory)

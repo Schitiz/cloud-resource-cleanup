@@ -12,10 +12,26 @@ from crc.aws.spot_instance_requests.volumes import (
     inspect_instance,
     run_sweep,
 )
+from crc.core import runlog
+
+
+def _note_would_delete(
+    region: str | None, match: RequestMatch, instance_done: bool, volumes: list[str]
+) -> None:
+    run = runlog.current()
+    run.action("would_delete", region, match.request_id)
+    if match.instance_id and not instance_done:
+        run.action("would_delete", region, match.instance_id)
+    for volume_id in volumes:
+        run.action("would_delete", region, volume_id)
 
 
 def preview_request(
-    settings: SpotSettings, state: SpotState, client: SpotClient, match: RequestMatch
+    settings: SpotSettings,
+    state: SpotState,
+    client: SpotClient,
+    match: RequestMatch,
+    region: str | None = None,
 ) -> None:
     """Record what a real run would do for one request (reads only)."""
     inspection = inspect_instance(client, match)
@@ -26,6 +42,7 @@ def preview_request(
     if match.instance_id and not inspection.instance_done:
         state.instance_ids_to_delete.append(match.instance_id)
     state.volumes_to_delete.extend(deletable)
+    _note_would_delete(region, match, inspection.instance_done, deletable)
     logging.info(
         "Dry run: would %s spot request %s (type=%s), terminate %s, delete leftover volumes %s",
         "skip-cancel (already cancelled)" if match.already_cancelled else "cancel",
@@ -48,6 +65,7 @@ def preview_sweep(
     def act(volume_id: str) -> None:
         if volume_id not in state.volumes_to_delete:
             state.volumes_to_delete.append(volume_id)
+            runlog.current().action("would_delete", region, volume_id)
         logging.info("Dry run: would delete tagged leftover volume %s in %s", volume_id, region)
 
     run_sweep(settings, client, region, now, act)

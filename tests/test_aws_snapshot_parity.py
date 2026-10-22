@@ -719,4 +719,3 @@ def test_get_snapshots_used_by_amis_matches_main(
         old, FakeEc2(old_aws, "us-west-2")
     )
     assert new_aws.calls == old_aws.calls
-

@@ -8,6 +8,7 @@ region in the exact call order of the original implementation.
 
 import datetime
 import logging
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import partial
@@ -31,6 +32,8 @@ from crc.aws.vm.cleaner import (
     build_vm_cleaner,
     dry_run_names,
     log_summary,
+    note_dry_run,
+    note_region,
     skip_region,
 )
 from crc.aws.vm.client import VmClient, VmScanClient, VmSession
@@ -169,6 +172,7 @@ class VM(Service):
         operation: Operation,
     ) -> None:
         if self.dry_run:
+            note_dry_run(operation, found)
             names = dry_run_names(operation, found)
         else:
             names, _ = cleaner.apply_region(client, found, operation)
@@ -187,11 +191,13 @@ class VM(Service):
         cleaner = self._cleaner(instance_state)
         filters = cleaner.build_filters()
         for region in runtime.list_regions():
+            started = time.monotonic()
             try:
                 client = runtime.client_factory(region)
-                found, _ = cleaner.filter_instances(
+                found, kept = cleaner.filter_instances(
                     client, client.describe_instances(Filters=filters), region, runtime.clock()
                 )
+                note_region(region, started, found, kept)
                 if found:
                     self._record(cleaner, client, found, operation)
             except CONNECTIVITY_ERRORS as e:

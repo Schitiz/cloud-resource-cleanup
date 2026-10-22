@@ -24,7 +24,7 @@ from crc.aws.spot_instance_requests.model import RequestMatch, SpotSettings, Spo
 from crc.aws.spot_instance_requests.preview import preview_request, preview_sweep
 from crc.aws.spot_instance_requests.requests import build_filter, filtered_requests
 from crc.aws.spot_instance_requests.rules import scope_tags_for_volume
-from crc.core import policy
+from crc.core import policy, runlog
 from crc.service import Service
 
 
@@ -132,7 +132,7 @@ class SpotInstanceRequests(Service):
             request_id, instance_id, request_type, already_cancelled, request_tags or []
         )
         if self.dry_run:
-            preview_request(self._settings(), self._state(), client, match)
+            preview_request(self._settings(), self._state(), client, match, region)
         else:
             cleanup_one(self._env(region), client, match)
 
@@ -174,6 +174,7 @@ class SpotInstanceRequests(Service):
             regions = self._runtime.list_regions()
         except Exception as e:
             logging.error("Failed to list AWS regions for EC2: %s", e)
+            runlog.current().fail(None, "-", e)
             return
         for region in regions:
             try:
@@ -181,6 +182,7 @@ class SpotInstanceRequests(Service):
                 self._process_region(client, region, spot_filter)
             except CONNECTIVITY_ERRORS as e:
                 log_skipped_region(region, model.SKIP_CONTEXT, e)
+                runlog.current().region_skipped(region, e)
                 continue
         log_summary(self._state(), dry_run=self.dry_run)
 

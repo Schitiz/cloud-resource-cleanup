@@ -6,6 +6,7 @@ legacy adapter class and through the registered Cleaner (`plan()` then `apply()`
 alone in a dry run).
 """
 
+import dataclasses
 import datetime
 import logging
 import re
@@ -22,9 +23,11 @@ from crc.aws.vm import VM
 from crc.aws.vm.cleaner import VmCleaner, build_vm_cleaner, dry_run_names
 from crc.core import registry
 from crc.core.cleaner import Candidate, Operation, RunContext
+from tests.helpers_log_fix import expected_logs
 
 ORACLE = Path(__file__).parent / "legacy" / "aws_vm.txt"
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=datetime.UTC)
+FIXED_BUGS = {"BUG-358"}
 MUTATING = ("terminate_instances", "stop_instances")
 MUTATE_LOG_PREFIXES = ("Error occured while delete", "Error occurred while stop", "Instance: ")
 SUMMARY_LOG_PREFIXES = ("No AWS instances", "number of AWS", "List of AWS")
@@ -610,12 +613,30 @@ def test_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run(_new, case, monkeypatch, caplog, capsys)
+    old = dataclasses.replace(old, logs=expected_logs(old.logs, FIXED_BUGS))
     assert new.calls == old.calls
     assert new.error == old.error
     assert new.deleted == old.deleted
     assert new.count == old.count
     assert new.logs == old.logs
     assert new.stdout == old.stdout
+
+
+def test_bug_358_tag_dump_is_debug_only_in_new_code(
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    case = next(c for c in CASES if c.id == "real-delete")
+    old = _run(_legacy, case, monkeypatch, caplog, capsys)
+    new = _run(_new, case, monkeypatch, caplog, capsys)
+    dump = "[{'Key': 'Name', 'Value': 'vm-a'}]"
+    assert ("root", logging.INFO, dump) in old.logs
+    assert ("root", logging.DEBUG, dump) in new.logs
+    assert ("root", logging.INFO, dump) not in new.logs
+    assert old.logs != new.logs
+    assert new.logs == expected_logs(old.logs, {"BUG-358"})
 
 
 def _is_mutating(call: tuple[Any, ...]) -> bool:
@@ -652,6 +673,7 @@ def test_cleaner_protocol_matches_main(
     with one region (or a dry run) the whole log is equal."""
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run_cleaner(case, monkeypatch, caplog, capsys)
+    old = dataclasses.replace(old, logs=expected_logs(old.logs, FIXED_BUGS))
     assert new.error == old.error
     assert new.stdout == old.stdout
     assert [c for c in new.calls if not _is_mutating(c)] == [
@@ -953,7 +975,8 @@ def test_get_filtered_instances_matches_main(
             result = (type(e).__name__, str(e))
         return result, aws.calls, _logs(caplog)
 
-    assert run_helper(_new) == run_helper(_legacy)
+    result, calls, logs = run_helper(_legacy)
+    assert run_helper(_new) == (result, calls, expected_logs(logs, FIXED_BUGS))
 
 
 @pytest.mark.parametrize(
@@ -988,4 +1011,6 @@ def test_repeated_operations_match_main(
         count = vm.delete_count + vm.stopped_count
         return Outcome(aws.calls, names, count, logs, stdout, None)
 
-    assert run_twice(_new) == run_twice(_legacy)
+    old = run_twice(_legacy)
+    old = dataclasses.replace(old, logs=expected_logs(old.logs, FIXED_BUGS))
+    assert run_twice(_new) == old

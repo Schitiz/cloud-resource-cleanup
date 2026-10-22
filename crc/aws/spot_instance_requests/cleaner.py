@@ -9,6 +9,7 @@ leftover volumes, region by region, in the order of the original implementation.
 
 import datetime
 import logging
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from functools import partial
@@ -39,6 +40,7 @@ from crc.aws.spot_instance_requests.requests import (
     filtered_requests,
 )
 from crc.core import age as core_age
+from crc.core import runlog
 from crc.core.cleaner import (
     Candidate,
     Cleaner,
@@ -97,6 +99,7 @@ def list_matches(
     spot_filter: list[dict[str, Any]],
 ) -> list[RequestMatch] | None:
     """Matching requests of one region, or None when listing failed (logged, region skipped)."""
+    started = time.monotonic()
     try:
         details = describe_all_requests(client, spot_filter)
     except ClientError as e:
@@ -106,11 +109,16 @@ def list_matches(
             e.response.get("Error", {}).get("Code", "Unknown"),
             e,
         )
+        runlog.current().fail(region, "-", e)
         return None
     except Exception as e:
         logging.error("Region %s: describe_spot_instance_requests failed: %s", region, e)
+        runlog.current().fail(region, "-", e)
         return None
-    return filtered_requests(settings, now, details)
+    matches = filtered_requests(settings, now, details, region)
+    scanned = len(details.get("SpotInstanceRequests", []))
+    runlog.current().region(region, scanned, len(matches), time.monotonic() - started)
+    return matches
 
 
 def guarded_sweep(region: str, sweep: Callable[[], None]) -> None:
@@ -119,6 +127,7 @@ def guarded_sweep(region: str, sweep: Callable[[], None]) -> None:
         sweep()
     except Exception as e:
         logging.error("Region %s: failed sweeping tagged leftover volumes: %s", region, e)
+        runlog.current().fail(region, "-", e)
 
 
 def guarded_cleanup(region: str, request_id: str, action: Callable[[], None]) -> None:
@@ -127,6 +136,7 @@ def guarded_cleanup(region: str, request_id: str, action: Callable[[], None]) ->
         action()
     except Exception as e:
         logging.error("Region %s: failed cleaning spot request %s: %s", region, request_id, e)
+        runlog.current().fail(region, request_id, e)
 
 
 def _candidate(match: RequestMatch, region: str) -> Candidate:
@@ -180,6 +190,7 @@ class SpotRequestCleaner:
             regions = list(self.runtime.list_regions())
         except Exception as e:
             logging.error("Failed to list AWS regions for EC2: %s", e)
+            runlog.current().fail(None, "-", e)
             return Plan()
         state = SpotState()
         candidates: list[Candidate] = []
@@ -198,6 +209,7 @@ class SpotRequestCleaner:
                     candidates.extend(_candidate(m, region) for m in matches)
             except CONNECTIVITY_ERRORS as e:
                 log_skipped_region(region, SKIP_CONTEXT, e)
+                runlog.current().region_skipped(region, e)
         self._regions = planned
         if context.dry_run:
             log_summary(state, dry_run=True)
@@ -220,7 +232,7 @@ class SpotRequestCleaner:
             guarded_cleanup(
                 region,
                 match.request_id,
-                partial(preview_request, self.settings, state, client, match),
+                partial(preview_request, self.settings, state, client, match, region),
             )
         guarded_sweep(region, partial(preview_sweep, self.settings, state, client, region, now))
 
@@ -242,6 +254,7 @@ class SpotRequestCleaner:
                 client = self._clients.get(region) or self.runtime.client_factory(region)
             except CONNECTIVITY_ERRORS as e:
                 log_skipped_region(region, SKIP_CONTEXT, e)
+                runlog.current().region_skipped(region, e)
                 continue
             env = CleanupEnv(self.settings, state, self.runtime.waiter, region)
             self.apply_region(env, client, [_match(c) for c in items], context.now)
