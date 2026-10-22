@@ -8,7 +8,7 @@ from collections.abc import Iterable, Iterator
 from typing import Any
 
 from crc.core import age as core_age
-from crc.core import runlog
+from crc.core import logger
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext
 from crc.core.registry import register
 from crc.gcp._scan import ZoneScan, log_action
@@ -48,7 +48,7 @@ def log_summary(instances: list[str], disks: list[str], *, dry_run: bool) -> Non
 
 def _log_failure(name: object, error: Exception, zone: str) -> None:
     logging.error("Error processing GCP Spot VM %s: %s", name, error)
-    runlog.current().fail(zone, str(name), error)
+    logger.current().fail(zone, str(name), error)
 
 
 def _leftover(candidate: Candidate) -> tuple[DiskRef, ...]:
@@ -84,7 +84,7 @@ class SpotVMCleaner:
             return list(self._client.list_instances(self._settings.project_id, zone))
         except Exception as e:
             logging.error("Zone %s: failed listing GCP instances: %s", zone, e)
-            runlog.current().region_skipped(zone, e)
+            logger.current().region_skipped(zone, e)
             return None
 
     def scan_zone(self, zone: str, clock: Clock) -> Iterator[Candidate]:
@@ -108,7 +108,7 @@ class SpotVMCleaner:
         try:
             reason = reject_reason(instance, self._settings, clock)
             if reason is not None:
-                runlog.current().skip(reason)
+                logger.current().skip(reason)
                 return None
             leftover = non_autodelete_disks(instance, self._settings.project_id)
             return Candidate(
@@ -205,7 +205,7 @@ class SpotVMCleaner:
             "Instance delete failed/incomplete for %s; skipping leftover disk deletes",
             candidate.name,
         )
-        runlog.current().fail(zone, candidate.id, "instance delete failed or incomplete")
+        logger.current().fail(zone, candidate.id, "instance delete failed or incomplete")
         return False
 
 

@@ -4,7 +4,7 @@
 
 import logging
 
-from crc.core import runlog
+from crc.core import logger
 from crc.gcp.spot_vm.client import GcpSpotClient, InstanceView
 from crc.gcp.spot_vm.instances import labels_protect
 from crc.gcp.spot_vm.operations import wait_operation
@@ -89,11 +89,11 @@ def disk_ok_to_delete(
         disk = client.get_disk(project, scope, location, name)
     except Exception as e:
         logging.error("Failed to get leftover disk %s for label check (skipping): %s", label, e)
-        runlog.current().fail(location, label, e)
+        logger.current().fail(location, label, e)
         return False
     if labels_protect(disk.get("labels") or {}, settings):
         logging.debug("Skipping leftover Spot disk %s: exception_labels/notags", label)
-        runlog.current().skip("disk_exception_tag")
+        logger.current().skip("disk_exception_tag")
         return False
     return True
 
@@ -116,11 +116,11 @@ def remove_leftover_disk(
         op_name = operation.get("name")
         if op_name and not wait_operation(client, settings, scope, location, op_name, project):
             logging.error("Disk delete operation failed/incomplete for %s; not counted", label)
-            runlog.current().fail(location, label, "disk delete operation failed or incomplete")
+            logger.current().fail(location, label, "disk delete operation failed or incomplete")
             return None
         logging.info("Deleted leftover Spot VM disk %s", label)
     except Exception as e:
         logging.error("Failed to delete leftover disk %s: %s", label, e)
-        runlog.current().fail(location, label, e)
+        logger.current().fail(location, label, e)
         return None
     return label

@@ -18,7 +18,7 @@ from google.cloud import compute_v1
 from googleapiclient import discovery
 
 from crc.core import age as core_age
-from crc.core import policy, runlog
+from crc.core import logger, policy
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext
 from crc.core.registry import register
 from crc.gcp._scan import ZoneScan, log_action
@@ -203,7 +203,7 @@ class VmCleaner:
             scan.scanned += 1
             reason = self._reject(instance, clock)
             if reason is not None:
-                runlog.current().skip(reason)
+                logger.current().skip(reason)
                 continue
             scan.selected += 1
             yield Candidate(
@@ -241,7 +241,7 @@ class VmCleaner:
             recorded.append(candidate.id)
         except Exception as e:
             logging.error(f"Error occurred while {operation.value} instance {candidate.id}: {e}")
-            runlog.current().fail(candidate.region, candidate.id, e)
+            logger.current().fail(candidate.region, candidate.id, e)
             return False
         log_action(operation.value, candidate, dry_run=dry_run)
         return True

@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from crc.core import runlog
+from crc.core import logger
 from crc.core.cleaner import Operation
 from crc.gcp import _scan
 from crc.gcp.disk import Disk
@@ -34,11 +34,11 @@ def _scan_clock(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     ticks = itertools.cycle([0.0, float(SCAN_SECONDS)])
     monkeypatch.setattr(_scan, "time", types.SimpleNamespace(monotonic=lambda: next(ticks)))
     yield
-    runlog.finish()
+    logger.finish()
 
 
 def begin(resource: str, operation: str = "delete", *, dry_run: bool = False) -> None:
-    runlog.begin("gcp", resource, operation, dry_run, {}, clock=lambda: 0.0)
+    logger.begin("gcp", resource, operation, dry_run, {}, clock=lambda: 0.0)
 
 
 def run_lines(caplog: pytest.LogCaptureFixture) -> list[str]:
@@ -79,7 +79,7 @@ def test_vm_delete_logs_region_actions_skips_and_failure(caplog: pytest.LogCaptu
     begin("vm")
     plan = cleaner.plan(vms.ctx())
     cleaner.apply(plan, vms.ctx())
-    runlog.finish()
+    logger.finish()
     assert run_lines(caplog) == [
         region("vm", "z1", 3, 1),
         region("vm", "z2", 2, 2),
@@ -103,7 +103,7 @@ def test_vm_stop_dry_run_logs_would_stop_from_plan(caplog: pytest.LogCaptureFixt
     cleaner = vms.cleaner(vms.FakeClient({"z": [vms.inst("a"), vms.inst("b")]}))
     begin("vm", "stop", dry_run=True)
     cleaner.plan(vms.ctx(dry_run=True, operation=Operation.STOP))
-    runlog.finish()
+    logger.finish()
     assert run_lines(caplog) == [
         region("vm", "z", 2, 2),
         action("would_stop", "vm", "z", "a"),
@@ -122,10 +122,10 @@ def test_vm_adapter_stop_and_dry_run_delete(caplog: pytest.LogCaptureFixture) ->
     client = vms.FakeClient({"z": [vms.inst("a")]})
     begin("vm", "stop")
     VM(False, vms.PROJECT, {}, {}, 1, "", {}, client=client, clock=lambda: vms.NOW).stop()
-    runlog.finish()
+    logger.finish()
     begin("vm", dry_run=True)
     VM(True, vms.PROJECT, {}, {}, 1, "", {}, client=client, clock=lambda: vms.NOW).delete()
-    runlog.finish()
+    logger.finish()
     lines = run_lines(caplog)
     assert action("stopped", "vm", "z", "a") in lines
     assert action("would_delete", "vm", "z", "a") in lines
@@ -154,7 +154,7 @@ def test_disk_logs_regions_skips_actions_and_failure(caplog: pytest.LogCaptureFi
     cleaner = disks.cleaner(client, exception_labels={"k": ["v"]})
     begin("disk")
     cleaner.apply(cleaner.plan(disks.ctx()), disks.ctx())
-    runlog.finish()
+    logger.finish()
     assert run_lines(caplog) == [
         region("disk", "z1", 3, 1),
         region("disk", "z2", 2, 1),
@@ -178,7 +178,7 @@ def test_disk_dry_run_logs_would_delete_and_never_done(caplog: pytest.LogCapture
     cleaner = disks.cleaner(disks.FakeClient({"z": [disks.disk("a")]}))
     begin("disk", dry_run=True)
     cleaner.plan(disks.ctx(dry_run=True))
-    runlog.finish()
+    logger.finish()
     assert run_lines(caplog) == [
         region("disk", "z", 1, 1),
         action("would_delete", "disk", "z", "a"),
@@ -199,7 +199,7 @@ def test_disk_exception_regex_and_missing_detach_reasons(caplog: pytest.LogCaptu
     cleaner = disks.cleaner(client, exception_regex=["tmp-"])
     begin("disk", dry_run=True)
     list(cleaner.plan_zone("z", lambda: disks.NOW))
-    runlog.finish()
+    logger.finish()
     lines = run_lines(caplog)
     assert skipped("disk", "exception_regex", 1) in lines
     assert skipped("disk", "never_detached", 1) in lines
@@ -213,7 +213,7 @@ def test_disk_adapter_failure_is_recorded(caplog: pytest.LogCaptureFixture) -> N
     adapter._clock = lambda: disks.NOW
     begin("disk")
     adapter.delete()
-    runlog.finish()
+    logger.finish()
     lines = run_lines(caplog)
     assert "FAILED cloud=gcp resource=disk region=z id=bad error=RuntimeError: denied" in lines
 
@@ -226,7 +226,7 @@ def test_ip_logs_regions_actions_and_skips(caplog: pytest.LogCaptureFixture) -> 
     cleaner = ips.cleaner(client, ["ip-"])
     begin("ip")
     cleaner.apply(cleaner.plan(ips.ctx()), ips.ctx())
-    runlog.finish()
+    logger.finish()
     assert run_lines(caplog) == [
         region("ip", "r1", 3, 1),
         region("ip", "r2", 0, 0),
@@ -248,7 +248,7 @@ def test_ip_dry_run_cleaner_and_adapter(caplog: pytest.LogCaptureFixture) -> Non
     begin("ip", dry_run=True)
     IpCleaner(client, ips.PROJECT, None, None).plan(ips.ctx(dry_run=True))
     IP(True, ips.PROJECT, None, None, client=client).delete()
-    runlog.finish()
+    logger.finish()
     assert run_lines(caplog).count(action("would_delete", "ip", "r", "a")) == 2  # noqa: PLR2004
 
 
@@ -263,7 +263,7 @@ def test_ip_delete_error_is_recorded_and_still_raises(caplog: pytest.LogCaptureF
     begin("ip")
     with pytest.raises(RuntimeError, match="quota"):
         IP(False, ips.PROJECT, None, None, client=client).delete()
-    runlog.finish()
+    logger.finish()
     assert "FAILED cloud=gcp resource=ip region=r id=a error=RuntimeError: quota" in run_lines(
         caplog
     )
@@ -293,7 +293,7 @@ def test_spot_real_run_logs_region_action_and_skipped(caplog: pytest.LogCaptureF
     cleaner = spot_cleaner(client)
     begin("spot_instances")
     cleaner.apply(cleaner.plan(spots.context(dry_run=False)), spots.context(dry_run=False))
-    runlog.finish()
+    logger.finish()
     assert run_lines(caplog) == [
         region("spot_instances", "z", 3, 1),
         action("deleted", "spot_instances", "z", "a"),
@@ -317,7 +317,7 @@ def test_spot_dry_run_leftover_disk_skip_is_debug_and_counted(
     settings = replace(spots.SETTINGS, exception_labels={"keep": ["yes"]})
     begin("spot_instances", dry_run=True)
     SpotVMCleaner(client, settings).plan(spots.context(dry_run=True))
-    runlog.finish()
+    logger.finish()
     skip_records = [r for r in caplog.records if r.getMessage().startswith("Skipping leftover")]
     assert [r.levelno for r in skip_records] == [logging.DEBUG]
     lines = run_lines(caplog)
@@ -335,7 +335,7 @@ def test_spot_listing_error_counts_a_skipped_region(caplog: pytest.LogCaptureFix
     client.list_instances = broken  # type: ignore[method-assign]
     begin("spot_instances")
     spot_cleaner(client).plan(spots.context(dry_run=False))
-    runlog.finish()
+    logger.finish()
     assert run_lines(caplog) == [
         result(
             "spot_instances",
@@ -360,7 +360,7 @@ def test_spot_failed_instance_delete_is_recorded(caplog: pytest.LogCaptureFixtur
     cleaner = spot_cleaner(client)
     begin("spot_instances")
     cleaner.apply(cleaner.plan(spots.context(dry_run=False)), spots.context(dry_run=False))
-    runlog.finish()
+    logger.finish()
     lines = run_lines(caplog)
     assert (
         "FAILED cloud=gcp resource=spot_instances region=z id=a error=RuntimeError: nope" in lines

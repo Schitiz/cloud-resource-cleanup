@@ -18,7 +18,7 @@ from google.cloud import compute_v1
 from googleapiclient import discovery
 
 from crc.core import age as core_age
-from crc.core import policy, runlog
+from crc.core import logger, policy
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext
 from crc.core.registry import register
 from crc.gcp._scan import ZoneScan, log_action
@@ -220,7 +220,7 @@ class DiskCleaner:
             scan.scanned += 1
             reason = self._reject(disk, clock)
             if reason is not None:
-                runlog.current().skip(reason)
+                logger.current().skip(reason)
                 continue
             scan.selected += 1
             yield Candidate(
@@ -251,7 +251,7 @@ class DiskCleaner:
             _record(deleted, self._settings, candidate.id, candidate.tags)
         except Exception as e:
             logging.error(f"Error occurred while deleting disk {candidate.id}: {e}")
-            runlog.current().fail(zone, candidate.id, e)
+            logger.current().fail(zone, candidate.id, e)
             return False
         log_action("delete", candidate, dry_run=dry_run)
         return True

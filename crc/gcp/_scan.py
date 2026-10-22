@@ -5,7 +5,7 @@ region pass and the ACTION kind of one resource. Log text only; nothing here sel
 
 import time
 
-from crc.core import runlog
+from crc.core import logger
 from crc.core.cleaner import Candidate
 
 
@@ -22,11 +22,11 @@ class ZoneScan:
     def finish(self) -> None:
         """Report the pass: the REGION line of the current run (nothing when none began)."""
         seconds = time.monotonic() - self._started
-        runlog.current().region(self._region, self.scanned, self.selected, seconds)
+        logger.current().region(self._region, self.scanned, self.selected, seconds)
 
 
 def log_action(verb: str, candidate: Candidate, *, dry_run: bool) -> None:
     """Log the ACTION line of one resource a `delete` or `stop` was done to, or would be in a
     dry run (`would_<verb>`; else `deleted` or `stopped`)."""
     kind = f"would_{verb}" if dry_run else ("deleted" if verb == "delete" else "stopped")
-    runlog.current().action(kind, candidate.region, candidate.id, candidate.name)
+    logger.current().action(kind, candidate.region, candidate.id, candidate.name)

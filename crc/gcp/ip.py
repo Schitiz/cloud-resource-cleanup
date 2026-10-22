@@ -14,7 +14,7 @@ from typing import Protocol
 
 from google.cloud import compute_v1
 
-from crc.core import policy, runlog
+from crc.core import logger, policy
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext, Skipped
 from crc.core.registry import register
 from crc.gcp._scan import ZoneScan
@@ -122,7 +122,7 @@ class IpCleaner:
             skipped.extend(region_plan.skipped)
         if context.dry_run:
             for c in candidates:
-                runlog.current().action("would_delete", c.region, c.id, c.name)
+                logger.current().action("would_delete", c.region, c.id, c.name)
             _log_summary([c.id for c in candidates], dry_run=True)
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
 
@@ -149,7 +149,7 @@ class IpCleaner:
             name = address.name
             if not policy.state_in(address.status, (self._state,)):
                 skipped.append(Skipped(id=name, reason=f"status is not {self._state}", name=name))
-                runlog.current().skip("state")
+                logger.current().skip("state")
                 continue
             matches_filter = self._matches_filter(name)
             excluded = self._excluded(name)
@@ -161,7 +161,7 @@ class IpCleaner:
             else:
                 reason = "no filter_regex match" if not matches_filter else "exception_regex"
                 skipped.append(Skipped(id=name, reason=reason, name=name))
-                runlog.current().skip("filter_mismatch" if not matches_filter else reason)
+                logger.current().skip("filter_mismatch" if not matches_filter else reason)
         scan.finish()
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
 
@@ -174,14 +174,14 @@ class IpCleaner:
             if not dry_run:
                 self._delete(region, candidate)
             kind = "would_delete" if dry_run else "deleted"
-            runlog.current().action(kind, region, candidate.id, candidate.name)
+            logger.current().action(kind, region, candidate.id, candidate.name)
         return [candidate.id for candidate in candidates]
 
     def _delete(self, region: str, candidate: Candidate) -> None:
         try:
             self._client.delete_address(self._project_id, region, candidate.id)
         except Exception as e:
-            runlog.current().fail(region, candidate.id, e)
+            logger.current().fail(region, candidate.id, e)
             raise
         logging.info(f"Deleting IP address: {candidate.id}")
 
