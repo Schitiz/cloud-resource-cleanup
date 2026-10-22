@@ -7,6 +7,7 @@ from typing import Any
 from crc.aws.snapshot import Snapshot
 from crc.cli.context import RunContext, make_crc
 from crc.cli.inputs import Options, Targets
+from crc.core import logger
 
 Handler = Callable[[Any, Any, Options, Targets], None]
 
@@ -89,8 +90,7 @@ def _kms(crc: Any, cloud: Any, options: Options, targets: Targets) -> None:
 def _spot_instance_requests(crc: Any, cloud: Any, options: Options, targets: Targets) -> None:
     if crc.cloud != "aws":
         logging.warning(
-            "spot_instance_requests is AWS-only; skipped for %s "
-            "(use --resource spot_instances)",
+            "spot_instance_requests is AWS-only; skipped for %s (use --resource spot_instances)",
             crc.cloud,
         )
         return
@@ -149,6 +149,38 @@ HANDLERS: dict[str, Handler] = {
 }
 
 
+def _run_options(options: Options) -> dict[str, Any]:
+    """The flags `RUN START` reports; `logger.begin` prints the non-empty ones."""
+    return {
+        "age": options.age,
+        "filter_tags": options.filter_tags,
+        "exception_tags": options.exception_tags,
+        "notags": options.notags,
+        "name_regex": options.name_regex,
+        "exception_regex": options.exception_regex,
+        "custom_age_tag_key": options.custom_age_tag_key,
+        "resource_group": options.resource_group,
+        "project_id": options.project_id,
+    }
+
+
+def _run_handler(
+    handler: Handler, crc: Any, cloud: Any, resource: Any, options: Options, targets: Targets
+) -> None:
+    """Run one cloud and resource pass between its RUN START and RESULT lines."""
+    logger.begin(
+        str(cloud),
+        str(resource),
+        str(options.operation_type or "delete"),
+        bool(options.dry_run),
+        _run_options(options),
+    )
+    try:
+        handler(crc, cloud, options, targets)
+    finally:
+        logger.finish()
+
+
 def run_dispatch(context: RunContext, options: Options, targets: Targets) -> None:
     """Run every selected resource on every selected cloud, in the order of `main`."""
     for cloud in targets.clouds:
@@ -156,4 +188,4 @@ def run_dispatch(context: RunContext, options: Options, targets: Targets) -> Non
         for resource in targets.resources:
             handler = HANDLERS.get(resource)
             if handler is not None:
-                handler(crc, cloud, options, targets)
+                _run_handler(handler, crc, cloud, resource, options, targets)

@@ -12,6 +12,7 @@ import pytest
 
 from crc.service import Service
 from tests.helpers_crc_service import both, load_oracle, make_oracle_cls
+from tests.helpers_log_fix import expected_outcome
 
 
 @pytest.fixture
@@ -91,14 +92,14 @@ def test_require_positive_age_parity(
     oracle_cls: type, caplog: pytest.LogCaptureFixture, age: Any, label: str
 ) -> None:
     old, new = both(oracle_cls, caplog, "require_positive_age", age, label)
-    assert new == old
+    assert new == expected_outcome(old, {"BUG-356"})
 
 
 def test_require_positive_age_default_label(
     oracle_cls: type, caplog: pytest.LogCaptureFixture
 ) -> None:
     old, new = both(oracle_cls, caplog, "require_positive_age", 0)
-    assert new == old
+    assert new == expected_outcome(old, {"BUG-356"})
     assert new[0] == "raise"
 
 
@@ -176,7 +177,7 @@ def test_tag_methods_parity(
     oracle_cls: type, caplog: pytest.LogCaptureFixture, method: str, tags: Any, key: str
 ) -> None:
     old, new = both(oracle_cls, caplog, method, tags, key)
-    assert new == old
+    assert new == expected_outcome(old, {"BUG-356"})
 
 
 @pytest.mark.parametrize(
@@ -188,7 +189,7 @@ def test_tag_methods_non_string_key_parity(
 ) -> None:
     for method in ("_lookup_custom_age_tag", "validated_retention_age", "get_retention_age"):
         old, new = both(oracle_cls, caplog, method, AWS_TAGS, key)
-        assert new == old
+        assert new == expected_outcome(old, {"BUG-356"})
 
 
 @pytest.mark.parametrize(
@@ -198,7 +199,7 @@ def test_parse_literal_parity(
     oracle_cls: type, caplog: pytest.LogCaptureFixture, value: str
 ) -> None:
     old, new = both(oracle_cls, caplog, "_parse_literal", value, "retain")
-    assert new == old
+    assert new == expected_outcome(old, {"BUG-356"})
 
 
 @pytest.mark.parametrize("value", [None, 5, b"x", "__import__('os')", "(" * 300])
@@ -206,7 +207,7 @@ def test_parse_literal_odd_values_parity(
     oracle_cls: type, caplog: pytest.LogCaptureFixture, value: Any
 ) -> None:
     old, new = both(oracle_cls, caplog, "_parse_literal", value, "retain")
-    assert new == old
+    assert new == expected_outcome(old, {"BUG-356"})
 
 
 MIN_AGE_CASES: list[tuple[Any, Any]] = [
@@ -236,6 +237,23 @@ def test_get_min_age_parity(
     oracle_cls: type, caplog: pytest.LogCaptureFixture, first: Any, second: Any
 ) -> None:
     old, new = both(oracle_cls, caplog, "get_min_age", first, second)
-    assert new == old
+    assert new == expected_outcome(old, {"BUG-356"})
     if new[0] == "return" and first is not None and second is not None:
         assert new[1] is first or new[1] is second
+
+
+def test_bug_356_retention_age_lines_differ_from_oracle_and_are_debug(
+    oracle_cls: type, caplog: pytest.LogCaptureFixture
+) -> None:
+    for tags, expected_old, expected_new in (
+        (AWS_TAGS, ["INFO", "INFO"], ["DEBUG", "INFO"]),
+        ({}, ["WARNING"], ["DEBUG"]),
+    ):
+        old, new = both(oracle_cls, caplog, "get_retention_age", tags, "retain")
+        assert old[2] != new[2]
+        assert new == expected_outcome(old, {"BUG-356"})
+        assert [level for level, _ in old[2]] == expected_old
+        assert [level for level, _ in new[2]] == expected_new
+        assert [text for _, text in new[2]] == [text for _, text in old[2]]
+
+

@@ -137,6 +137,15 @@ Engine (module engine.py). Orchestration only; Slack and Influx senders are inje
 - `Notifier`: protocol with name, fail_open and send(report, context); a fail_open notifier error is logged and swallowed, any other propagates.
 - `KIND_LABELS`: report label of each resource kind.
 
+Run log (module logger.py, imported as "from crc.core import logger"). Pure stdlib collector of the
+per-run lines of the LOG rungs; the contract is in docs/refactor/LOGGING.md. Log text only: it never
+decides what a cleaner selects or deletes.
+
+- `RunLog`: counters and log lines of one cleaner run (methods region, region_skipped, action, skip, fail, finish); a run made by `current()` without `begin()` is unattached and logs nothing.
+- `begin()`: start a run, make it current and log the RUN START line (non-empty options as sorted compact JSON); takes an injectable clock.
+- `current()`: the current run, or a fresh unattached `RunLog` so cleaners and tests never crash.
+- `finish()`: end the current run and log the SKIPPED lines per reason, the ERRORS and FAILED lines when a failure was recorded, then the RESULT line; a no-op when no run began.
+
 ## Safety Invariants
 
 - `is_old` with an empty age matches every resource (SAF-006). Destructive callers must
@@ -149,7 +158,9 @@ Engine (module engine.py). Orchestration only; Slack and Influx senders are inje
 - This package never imports `crc.aws`, `crc.azu`, `crc.gcp`, `crc.oci`,
   `crc.notifications`, `crc.notify`, `crc.service` or any cloud, Slack or Influx SDK
   (import-linter contracts in `pyproject.toml`).
-- Log messages are part of the behaviour; keep them identical.
+- Log messages are part of the behaviour; keep their text identical. The per-resource age-check
+  lines of `crc.core.age` are logged at DEBUG (BUG-356, LOG-0); levels only change in a LOG rung
+  (`docs/refactor/LOGGING.md`).
 - `Cleaner.plan()` never mutates cloud state, since `--dry_run` is `plan()` without `apply()`
   (ARCH-005 checks real implementations). `apply()` acts only on items of the plan it is given.
 - Report text and Influx data keep `crc.py` strings exactly (label spelling, "disks" in owner
