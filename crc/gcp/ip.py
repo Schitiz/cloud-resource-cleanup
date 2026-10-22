@@ -14,9 +14,10 @@ from typing import Protocol
 
 from google.cloud import compute_v1
 
-from crc.core import policy
+from crc.core import logger, policy
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext, Skipped
 from crc.core.registry import register
+from crc.gcp._scan import ZoneScan
 from crc.service import Service
 
 _RESERVED = "RESERVED"
@@ -120,6 +121,8 @@ class IpCleaner:
             candidates.extend(region_plan.candidates)
             skipped.extend(region_plan.skipped)
         if context.dry_run:
+            for c in candidates:
+                logger.current().action("would_delete", c.region, c.id, c.name)
             _log_summary([c.id for c in candidates], dry_run=True)
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
 
@@ -139,11 +142,14 @@ class IpCleaner:
         name, skip other states, then the filter and the (inverted) exception test."""
         candidates: list[Candidate] = []
         skipped: list[Skipped] = []
+        scan = ZoneScan(region)
         for address in self._client.list_addresses(self._project_id, region):
-            logging.info(address)
+            logging.debug(address)
+            scan.scanned += 1
             name = address.name
             if not policy.state_in(address.status, (self._state,)):
                 skipped.append(Skipped(id=name, reason=f"status is not {self._state}", name=name))
+                logger.current().skip("state")
                 continue
             matches_filter = self._matches_filter(name)
             excluded = self._excluded(name)
@@ -151,9 +157,12 @@ class IpCleaner:
                 candidates.append(
                     Candidate(id=name, name=name, region=region, state=address.status)
                 )
+                scan.selected += 1
             else:
                 reason = "no filter_regex match" if not matches_filter else "exception_regex"
                 skipped.append(Skipped(id=name, reason=reason, name=name))
+                logger.current().skip("filter_mismatch" if not matches_filter else reason)
+        scan.finish()
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
 
     def apply_region(
@@ -161,11 +170,20 @@ class IpCleaner:
     ) -> list[str]:
         """Delete `candidates` one by one and return their names (also in a dry run, where
         nothing is deleted). The caller records the names only once the whole region is done."""
-        if not dry_run:
-            for candidate in candidates:
-                self._client.delete_address(self._project_id, region, candidate.id)
-                logging.info(f"Deleting IP address: {candidate.id}")
+        for candidate in candidates:
+            if not dry_run:
+                self._delete(region, candidate)
+            kind = "would_delete" if dry_run else "deleted"
+            logger.current().action(kind, region, candidate.id, candidate.name)
         return [candidate.id for candidate in candidates]
+
+    def _delete(self, region: str, candidate: Candidate) -> None:
+        try:
+            self._client.delete_address(self._project_id, region, candidate.id)
+        except Exception as e:
+            logger.current().fail(region, candidate.id, e)
+            raise
+        logging.info(f"Deleting IP address: {candidate.id}")
 
     def _matches_filter(self, name: str) -> bool:
         return policy.filter_substring_matches(self._filter_regex or (), name)

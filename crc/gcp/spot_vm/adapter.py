@@ -5,7 +5,6 @@
 import datetime
 from typing import Any, ClassVar
 
-from crc.core.cleaner import Candidate
 from crc.gcp.spot_vm import disks as leftover_disks
 from crc.gcp.spot_vm import instances as spot_instances
 from crc.gcp.spot_vm.cleaner import SpotVMCleaner, log_summary
@@ -163,15 +162,13 @@ class SpotVM(Service):
         try:
             for zone_obj in cleaner.zones():
                 zone = zone_obj["name"]
-                for instance in cleaner.list_zone(zone):
-                    candidate: Candidate | None = cleaner.evaluate(instance, zone, self._clock)
-                    if candidate is not None:
-                        cleaner.apply_instance(
-                            candidate,
-                            self.instance_names_to_delete,
-                            self.disks_to_delete,
-                            dry_run=self.dry_run,
-                        )
+                for candidate in cleaner.scan_zone(zone, self._clock):
+                    cleaner.apply_instance(
+                        candidate,
+                        self.instance_names_to_delete,
+                        self.disks_to_delete,
+                        dry_run=self.dry_run,
+                    )
         finally:
             self._client.close()
         log_summary(self.instance_names_to_delete, self.disks_to_delete, dry_run=self.dry_run)

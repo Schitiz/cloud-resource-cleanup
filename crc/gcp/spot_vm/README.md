@@ -19,7 +19,7 @@ Modules:
 The package init re-exports the main names below, so the old import path of the `SpotVM` class keeps working.
 
 - `SpotVM`: adapter the CLI calls (delete(), get_deleted, delete_count, get_deleted_disks, instance_names_to_delete, disks_to_delete, service_name, service_version, default_instance_state, time_format, INSTANCE_DELETE_WAIT_SEC, INSTANCE_POLL_INTERVAL_SEC); the optional eighth and ninth constructor arguments inject a client and a clock.
-- `SpotVMCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus zones, list_zone, evaluate, preview_instance and apply_instance used by the adapter).
+- `SpotVMCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus zones, list_zone, scan_zone, evaluate, preview_instance and apply_instance used by the adapter).
 - `build_spot_cleaner()`: registry factory behind @register("gcp", "spot_instances").
 - `log_summary()`: the closing log lines (no VMs warning, VM list, leftover disk list).
 - `SpotSettings`: frozen dataclass with the fields main reads (project_id, filter_labels, exception_labels, notags, age, custom_age_tag_key, instance_states, wait_sec, poll_sec).
@@ -34,6 +34,7 @@ The package init re-exports the main names below, so the old import path of the 
 - `has_matching_filter_label()`: filter_labels, all keys; empty matches all.
 - `is_old_instance()`: custom age label (fail closed) or else age, through crc.core.age.
 - `is_selected()`: every instance filter in the order of main.
+- `reject_reason()`: the same filters, returning the skip reason (state, not_spot, managed_or_gke, exception_tag, filter_mismatch or too_young) of an instance to keep, or None when it is selected; `is_selected()` is true when it returns None.
 - `disk_ref_from_source()`: parse a zonal, regional or name-only disk source.
 - `non_autodelete_disks()`: references of the instance disks with autoDelete false.
 - `disk_label()`: the project/location/name recorded for a disk.

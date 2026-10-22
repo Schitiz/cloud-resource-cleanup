@@ -18,9 +18,10 @@ from google.cloud import compute_v1
 from googleapiclient import discovery
 
 from crc.core import age as core_age
-from crc.core import policy
+from crc.core import logger, policy
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext
 from crc.core.registry import register
+from crc.gcp._scan import ZoneScan, log_action
 from crc.service import Service
 
 _SERVICE_NAME = "compute"
@@ -79,8 +80,7 @@ class GcpDiskClient(Protocol):
 
 class ComputeDiskClient:
     """`GcpDiskClient` on google-api-python-client (zones, deletes) and google-cloud-compute
-    (disk listing). Like `main`, one discovery service serves a whole run and the disks
-    client is built right after the zones were listed."""
+    (disk listing); as on `main` one discovery service serves a run."""
 
     def __init__(self) -> None:
         self._service: Any = None
@@ -114,8 +114,7 @@ class ComputeDiskClient:
 
 @dataclass(frozen=True, slots=True)
 class DiskSettings:
-    """Filters and options of one run. Only the fields `main` reads are here: `age`, `notags`
-    and `name_regex` are accepted by `Disk` but never used."""
+    """Filters and options of one run: only the fields `main` reads."""
 
     project_id: str
     filter_labels: Mapping[str, Sequence[str]] | None
@@ -127,10 +126,6 @@ class DiskSettings:
     slack_user_label: str = ""
 
 
-def _owner_groups(deleted: Deleted) -> dict[str, list[str]]:
-    return cast(dict[str, list[str]], deleted)
-
-
 def _frozen_groups(groups: dict[str, list[str]] | None) -> dict[str, tuple[str, ...]] | None:
     if groups is None:
         return None
@@ -138,12 +133,11 @@ def _frozen_groups(groups: dict[str, list[str]] | None) -> dict[str, tuple[str, 
 
 
 def _record(deleted: Deleted, settings: DiskSettings, name: str, labels: Mapping[str, str]) -> None:
-    """Record a deleted (or, in a dry run, listed) disk the way `main` does: by name, or by
-    the value of `slack_user_label` with `not_tagged` for unlabelled disks."""
+    """Record a deleted (or listed) disk by name, or by `slack_user_label` (`not_tagged`)."""
     if not settings.slack_notify_users:
         cast(list[str], deleted).append(name)
         return
-    groups = _owner_groups(deleted)
+    groups = cast(dict[str, list[str]], deleted)
     label = settings.slack_user_label
     owner = labels.get(label, _NOT_TAGGED)
     groups.setdefault(owner, []).append(name)
@@ -196,11 +190,13 @@ class DiskCleaner:
         for candidate in candidates:
             _record(deleted, settings, candidate.id, candidate.tags)
         if context.dry_run:
+            for candidate in candidates:
+                log_action("delete", candidate, dry_run=True)
             _log_summary(deleted, dry_run=True)
         return Plan(candidates=tuple(candidates), by_owner=_frozen_groups(by_owner))
 
     def apply(self, plan: Plan, context: RunContext) -> Result:
-        """Delete the planned disks, one by one. A failed delete is logged and skipped."""
+        """Delete the planned disks one by one; a failed delete is logged and skipped."""
         settings = self._settings
         by_owner: dict[str, list[str]] | None = {} if settings.slack_notify_users else None
         deleted: Deleted = by_owner if by_owner is not None else []
@@ -217,30 +213,37 @@ class DiskCleaner:
         return Result(succeeded=tuple(succeeded), by_owner=_frozen_groups(by_owner))
 
     def plan_zone(self, zone: str, clock: Clock) -> Iterator[Candidate]:
-        """List one zone lazily and yield the disks to delete, in the order of `main`:
-        attached, exception regex and labels, filter labels, detach timestamp, age."""
+        """List one zone lazily and yield the disks to delete, in the order of `main`: attached,
+        exception regex and labels, filter labels, detach timestamp, age; then the REGION line."""
+        scan = ZoneScan(zone)
         for disk in self._client.list_disks(self._settings.project_id, zone):
-            if disk.users:
+            scan.scanned += 1
+            reason = self._reject(disk, clock)
+            if reason is not None:
+                logger.current().skip(reason)
                 continue
-            if self._should_skip(disk):
-                continue
-            if not self._has_matching_filter_label(disk):
-                continue
-            if not disk.last_detach_timestamp:
-                continue
-            if self._older_than_detach_age(disk, clock):
-                yield Candidate(
-                    id=disk.name,
-                    name=disk.name,
-                    region=zone,
-                    tags=policy.normalize_tags(disk.labels),
-                )
+            scan.selected += 1
+            yield Candidate(
+                id=disk.name, name=disk.name, region=zone, tags=policy.normalize_tags(disk.labels)
+            )
+        scan.finish()
+
+    def _reject(self, disk: DiskView, clock: Clock) -> str | None:
+        if disk.users:
+            return "attached"
+        if reason := self._exception_reason(disk):
+            return reason
+        if not self._has_matching_filter_label(disk):
+            return "filter_mismatch"
+        if not disk.last_detach_timestamp:
+            return "never_detached"
+        return None if self._older_than_detach_age(disk, clock) else "too_young"
 
     def apply_disk(
         self, zone: str, candidate: Candidate, deleted: Deleted, *, dry_run: bool
     ) -> bool:
-        """Delete one disk (nothing in a dry run) and record it. Any error is logged and the
-        disk is not recorded; returns whether it was recorded."""
+        """Delete one disk (nothing in a dry run) and record it; an error is logged and the
+        disk is not recorded. Returns whether it was recorded."""
         try:
             if not dry_run:
                 self._client.delete_disk(self._settings.project_id, zone, candidate.id)
@@ -248,19 +251,22 @@ class DiskCleaner:
             _record(deleted, self._settings, candidate.id, candidate.tags)
         except Exception as e:
             logging.error(f"Error occurred while deleting disk {candidate.id}: {e}")
+            logger.current().fail(zone, candidate.id, e)
             return False
+        log_action("delete", candidate, dry_run=dry_run)
         return True
 
-    def _should_skip(self, disk: DiskView) -> bool:
+    def _exception_reason(self, disk: DiskView) -> str | None:
         settings = self._settings
         if settings.exception_regex:
-            patterns = [f"{pattern}" for pattern in settings.exception_regex]
+            patterns = [f"{p}" for p in settings.exception_regex]
             if policy.exception_regex_match_matches(patterns, disk.name):
-                return True
+                return "exception_regex"
         if settings.exception_labels:
             tags = policy.normalize_tags(disk.labels)
-            return policy.exception_tags_any(tags, settings.exception_labels)
-        return False
+            if policy.exception_tags_any(tags, settings.exception_labels):
+                return "exception_tag"
+        return None
 
     def _has_matching_filter_label(self, disk: DiskView) -> bool:
         if not self._settings.filter_labels:
@@ -271,7 +277,7 @@ class DiskCleaner:
     def _older_than_detach_age(self, disk: DiskView, clock: Clock) -> bool:
         detached = datetime.datetime.strptime(disk.last_detach_timestamp, _TIME_FORMAT)
         now = clock().astimezone(detached.tzinfo)
-        logging.info(disk.labels)
+        logging.debug(disk.labels)
         settings = self._settings
         retention_age = core_age.get_retention_age(
             cast(dict[str, str], disk.labels), settings.custom_age_tag_key
@@ -360,8 +366,7 @@ class Disk(Service):
 
     @property
     def count(self) -> int:
-        """Number of entries of `disk_names_to_delete` (owners with `slack_notify_users`);
-        logs the count."""
+        """Entries of `disk_names_to_delete` (owners with `slack_notify_users`); logs it."""
         count = len(self.disk_names_to_delete)
         logging.info(f"count of items in disk_names_to_delete: {count}")
         return count

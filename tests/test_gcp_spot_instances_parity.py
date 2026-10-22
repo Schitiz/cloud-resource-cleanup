@@ -26,11 +26,14 @@ from google.auth.exceptions import DefaultCredentialsError
 from crc.core.cleaner import Operation, RunContext
 from crc.core.registry import get
 from crc.gcp.spot_vm import SpotVM
+from tests.helpers_log_fix import expected_logs
+from tests.log_fix_gcp import RULES
 
 ORACLE = Path(__file__).parent / "legacy" / "gcp_spot_vm.txt"
 UTC = datetime.UTC
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=UTC)
 PROJECT = "proj-1"
+BUGS = {"BUG-358"}
 DAY = {"days": 1}
 LABELS = {"yb_task": "itest"}
 SLEEP = 5
@@ -759,7 +762,7 @@ def test_matches_main(
     assert new.deleted == old.deleted
     assert new.disks == old.disks
     assert new.count == old.count
-    assert new.logs == old.logs
+    assert new.logs == expected_logs(old.logs, BUGS, RULES)
     assert new.stdout == old.stdout
 
 
@@ -852,10 +855,11 @@ def test_cleaner_protocol_matches_main(
     assert [c for c in new.calls if c[0] == "instances.list"] == [
         c for c in old.calls if c[0] == "instances.list"
     ]
-    assert Counter(new.logs) == Counter(old.logs)
-    assert new.logs[-2:] == old.logs[-2:]
+    expected = expected_logs(old.logs, BUGS, RULES)
+    assert Counter(new.logs) == Counter(expected)
+    assert new.logs[-2:] == expected[-2:]
     if _listed_instances(case) <= 1:
-        assert new.logs == old.logs
+        assert new.logs == expected_logs(old.logs, BUGS, RULES)
 
 
 def _find(case_id: str) -> Case:
@@ -1008,3 +1012,23 @@ def test_quirk_is_the_same_on_main_and_new(
     new = _run(_new, case, monkeypatch, caplog, capsys)
     assert check(old), f"main does not show the quirk of {case_id}"
     assert check(new), f"new code does not show the quirk of {case_id}"
+
+
+def test_bug_358_leftover_disk_skip_is_debug_not_info(
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    case = _find("disk-labels-exception-keeps")
+    old = _run(_legacy, case, monkeypatch, caplog, capsys)
+    new = _run(_new, case, monkeypatch, caplog, capsys)
+    assert old.logs != new.logs
+    assert new.logs == expected_logs(old.logs, BUGS, RULES)
+    assert [m for _, _, m in new.logs] == [m for _, _, m in old.logs]
+    assert new.calls == old.calls
+    assert new.stdout == old.stdout
+    info = [m for _, level, m in new.logs if level == logging.INFO]
+    assert not [m for m in info if m.startswith(("{", "namespace(", "Skipping leftover"))]
+    dumps = [m for _, level, m in old.logs if level == logging.INFO]
+    assert any(m.startswith("Skipping leftover") for m in dumps)

@@ -9,6 +9,7 @@ GCP cleaners (google-cloud-compute). They delete or stop leftover instances, dis
 Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.md`):
 
 - `_base.py` (PL-GCP, refactored): `get_gcp_regions`
+- `_scan.py` (LOG-GCP): `ZoneScan` and `log_action`, the run-log helpers shared by the four cleaners
 - `disk.py`: `DiskCleaner` (registered as `gcp` / `disk`) and the `Disk` adapter: deletes unattached disks by `last_detach_timestamp` (zonal disks of every zone); label any-key filter; `notags`, `name_regex` and `age` are not used
 - `ip.py`: `IpCleaner` (registered as `gcp` / `ip`) and the `IP` adapter: deletes RESERVED addresses (`AddressesClient().delete`); substring name filters, exception filter inverted
 - `spot_vm/`: subpackage (GCP-4) with its own README; the import path `crc.gcp.spot_vm` is unchanged
@@ -21,6 +22,8 @@ subpackage documents its own API in its own README. The plumbing modules (PL-GCP
 
 - `get_gcp_regions()`: returns the region names of a project (one Compute Engine regions client list call), a plain list in listing order. It builds a new client per call, has no fallback and lets every SDK error propagate. No caller on this branch (`ComputeIpClient` lists regions through its own client).
 
+- `ZoneScan`: counts the resources listed and selected in one zone or region and logs the REGION line through the current run log when finished; log text only (LOG-GCP, BUG-361).
+- `log_action`: logs the ACTION line (would_delete, deleted, would_stop or stopped) of one candidate through the current run log (LOG-GCP).
 - `AddressView`: Protocol of the two address fields read (name, status); tests pass fakes.
 - `GcpIpClient`: Protocol of the three Compute Engine calls used (list_regions, list_addresses, delete_address); tests pass fakes.
 - `ComputeIpClient`: the google-cloud-compute implementation of `GcpIpClient`; like main it builds a new RegionsClient or AddressesClient for every call.
@@ -57,6 +60,8 @@ subpackage documents its own API in its own README. The plumbing modules (PL-GCP
 ### spot_vm
 
 `crc/gcp/spot_vm/` (GCP-4) is a subpackage with its own README (public names, safety invariants). `SpotVMCleaner` is registered as `gcp` / `spot_instances` (`build_spot_cleaner`); `SpotVM` is the adapter the CLI calls (`delete()`, `get_deleted`, `delete_count`, `get_deleted_disks`; same constructor plus two optional trailing arguments). It deletes Spot or preemptible VMs (RUNNING, TERMINATED, SUSPENDED) that match `filter_labels` (all keys) and the age gate, skips GKE nodes and managed instance group members, then deletes `autoDelete=false` disks after the instance operation completes (SAF-039, SAF-044, SAF-045). Behaviour is the same as `main`; any change needs `tests/test_gcp_spot_instances_parity.py` (oracle `tests/legacy/gcp_spot_vm.txt`, a frozen copy of `main`, never edit it) to stay green. Quirks are in `docs/refactor/BUGS.md` (`BUG-228` to `BUG-243`).
+
+- Logging (LOG-GCP, `docs/refactor/LOGGING.md`; BUG-358, BUG-361, BUG-362): log text and levels only, no selection, call or order change. The label dump of every listed disk and instance (`logging.info(labels)`), the address dump of the IP cleaner and the per-disk `Skipping leftover Spot disk ...` line are DEBUG. Every zone or region pass logs one `REGION` line when its listing is exhausted (`ZoneScan`); every delete or stop (or, in a dry run, every would-be one) logs one `ACTION` line, in `apply_*()` and, for a dry-run `plan()`, in `plan()`; skipped resources are counted with `logger.current().skip(reason)` (`state`, `exception_tag`, `exception_regex`, `filter_mismatch`, `attached`, `never_detached`, `too_young`, `not_spot`, `managed_or_gke`, `disk_exception_tag`); a swallowed per-resource error is also recorded with `fail()` (the IP cleaner records and re-raises). A Spot zone whose listing fails calls `region_skipped()` and logs no `REGION` line.
 
 ## Extension Rules
 
