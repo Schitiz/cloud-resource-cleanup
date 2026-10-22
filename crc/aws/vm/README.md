@@ -2,14 +2,14 @@
 
 ## Purpose
 
-AWS EC2 VM cleaner (rung AWS-3, moved into a subpackage by ST-AWS-VM). `VmCleaner` is a registered `Cleaner` (`@register("aws", "vm")`): `plan()` lists the running instances of every region (`describe_instances`, `describe_network_interfaces`) and applies the tag and age policy; `apply()` calls `terminate_instances` or `stop_instances`. `VM` is the legacy entry point `crc.py` uses; `from crc.aws.vm import VM` keeps working, and so does every other name the old sibling modules exported (`crc.aws.vm_cleaner`, `crc.aws.vm_api` and `crc.aws.vm_scan` are now `crc.aws.vm.cleaner`, `crc.aws.vm.client` and `crc.aws.vm.scan`).
+AWS EC2 VM cleaner (rung AWS-3, moved into a subpackage by ST-AWS-VM). `VmCleaner` is a registered `Cleaner` (`@register("aws", "vm")`): `plan()` lists the running instances of every region (`describe_instances`, `describe_network_interfaces`) and applies the tag and age policy; `apply()` calls `terminate_instances` or `stop_instances`. `VM` is the adapter entry point `crc.py` uses; `from crc.aws.vm import VM` keeps working, and so does every other name the old sibling modules exported (`crc.aws.vm_cleaner`, `crc.aws.vm_api` and `crc.aws.vm_scan` are now `crc.aws.vm.cleaner`, `crc.aws.vm.client` and `crc.aws.vm.scan`).
 
 Modules, one per responsibility:
 
 - `cleaner.py`: settings, default factories, summary logging, `VmCleaner` and the registry factory.
 - `client.py`: typed Protocols of the boto3 EC2 calls used by the cleaner and the tag scan.
 - `scan.py`: the read-only scan of instances by tag across regions.
-- `adapter.py`: the legacy `VM` class and its `VmRuntime`, a thin adapter that drives the cleaner region by region.
+- `adapter.py`: the `VM` class and its `VmRuntime`, a thin adapter that drives the cleaner region by region.
 
 ## Public API
 

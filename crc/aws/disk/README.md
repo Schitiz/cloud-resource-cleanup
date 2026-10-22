@@ -2,7 +2,7 @@
 
 ## Purpose
 
-AWS EBS disk cleaner (AWS-4). Deletes available (unattached) EBS volumes in every region that pass the tag, name and age rules, with an optional CloudWatch detach-age guard. The old import path `crc.aws.disk` keeps working: the package `__init__.py` holds the legacy `Disk` class `crc.py` uses.
+AWS EBS disk cleaner (AWS-4). Deletes available (unattached) EBS volumes in every region that pass the tag, name and age rules, with an optional CloudWatch detach-age guard. The old import path `crc.aws.disk` keeps working: the package `__init__.py` holds the `Disk` class `crc.py` uses.
 
 Modules, one per responsibility:
 
@@ -14,7 +14,7 @@ Modules, one per responsibility:
 
 ## Public API
 
-- `Disk`: legacy adapter that crc.py calls (delete(), get_deleted, count, disks_to_delete, age, detach_age); runs the cleaner region by region in the order of main.
+- `Disk`: adapter that crc.py calls (delete(), get_deleted, count, disks_to_delete, age, detach_age); runs the cleaner region by region in the order of main.
 - `DiskCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus plan_region, note_dry_run, apply_region, region_guard and log_summary used by the adapter).
 - `DiskRuntime`: frozen dataclass with the injected EC2 and CloudWatch client factories and the region lister.
 - `build_disk_cleaner()`: registry factory behind the aws / disk registration; reads filter_tags, exception_tags, notags, name_regex, exception_regex, custom_age_tag_key, age and detach_age from RunContext.options.

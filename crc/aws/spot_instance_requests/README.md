@@ -9,7 +9,7 @@ behaviour change. Split by responsibility: `model.py` (settings, state, constant
 `client.py` (SDK Protocol), `rules.py` (pure tag and marker decisions), `requests.py` (list,
 filter, age), `volumes.py` (read-only instance and volume lookups, sweep gates), `preview.py`
 (dry-run path, reads only), `leftover.py` (marker tags, wait and delete), `cleanup.py` (one
-request, region sweep), `cleaner.py` (`plan()` / `apply()`), `adapter.py` (legacy class).
+request, region sweep), `cleaner.py` (`plan()` / `apply()`), `adapter.py` (the `SpotInstanceRequests` adapter).
 
 ## Public API
 

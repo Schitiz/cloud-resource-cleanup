@@ -4,7 +4,7 @@
 
 OCI compute instance cleaner (`--cloud oci --resource vm`). `VmCleaner` is a registered `Cleaner`
 (`@register("oci", "vm")`): `plan()` lists the instances of every region and decides on each one,
-`apply()` terminates (`delete`) or stops (`stop`) the selected instances. `VM` is the legacy entry
+`apply()` terminates (`delete`) or stops (`stop`) the selected instances. `VM` is the adapter entry
 point `crc.py` uses; `from crc.oci.vm import VM` keeps working. Converted in rung ST-OCI-VM from
 the sibling files `crc/oci/vm.py` and `crc/oci/vm_api.py` (pure move, no behaviour change); the old
 `crc.oci.vm_api` path is gone, its names are exported by this package.

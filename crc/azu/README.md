@@ -2,18 +2,18 @@
 
 ## Purpose
 
-Legacy Azure cleaners (azure-mgmt SDK). They delete or stop leftover VMs, disks, IPs and NICs in one resource group.
+Azure cleaners (azure-mgmt SDK). They delete or stop leftover VMs, disks, IPs and NICs in one resource group.
 
-**Refactored.** `ip.py` (rung AZ-1), `nic.py` (rung AZ-2), `disk.py` (rung AZ-3), `vm/` (rung AZ-4) and `spot_vm/` (rung AZ-5) are refactored into registered `Cleaner`s; `vm_delete_helpers.py` and `__init__.py` (rung PL-AZ) are strict-typed plumbing with the same behaviour as on `main`. `_base.py` is strict-clean too; its `os.environ` credential read is an owner-approved ARCH-003 allowlist entry (`tests/archtest/bans.py`), so the credentials are still read when an Azure cleaner is built, as on `main`. Any change must follow `ARCHITECTURE.md` and the refactor rung for this package in `docs/refactor/PLAN.md` (Rung R4+), with `make check` green.
+**Refactored.** Every module is strict-checked and none is in the legacy ratchet: `ip.py` (rung AZ-1), `nic.py` (rung AZ-2), `disk.py` (rung AZ-3), `vm/` (rung AZ-4) and `spot_vm/` (rung AZ-5) are refactored into registered `Cleaner`s; `vm_delete_helpers.py` and `__init__.py` (rung PL-AZ) are strict-typed plumbing with the same behaviour as on `main`. `_base.py` is strict-clean too; its `os.environ` credential read is an owner-approved ARCH-003 allowlist entry (`tests/archtest/bans.py`), so the credentials are still read when an Azure cleaner is built, as on `main`. Any change must follow `ARCHITECTURE.md` and the refactor rung for this package in `docs/refactor/PLAN.md` (Rung R4+), with `make check` green.
 
 Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.md`):
 
 - `_base.py`: `Base`: Azure credential from the `AZURE_CREDENTIALS_*` variables, and lazily built compute and network clients for a resource group (rung PL-AZ)
-- `disk.py`: `AzureDiskCleaner` (registered as `azure`/`disk`) and the legacy adapter `Disk`: deletes unattached managed disks (`begin_delete`); any-key tag filter, age gate
-- `ip.py`: `AzureIpCleaner` (registered as `azure`/`ip`) and the legacy adapter `IP`: deletes IPs without an IP configuration (`begin_delete`); any-key tag filter
-- `nic.py`: `AzureNicCleaner` (registered as `azure`/`nic`) and the legacy adapter `NIC`: deletes NICs not attached to a VM (`begin_delete(...).result()`, three attempts); plain substring name filters
-- `spot_vm/`: `AzureSpotVmCleaner` (registered as `azure`/`spot_instances`) and the legacy adapter `SpotVM`: deletes stopped or deallocated Spot VMs and their leftover disks and NICs (subpackage with its own README, rung AZ-5)
-- `vm/`: subpackage (own README): `VmCleaner` (registered as `azure`/`vm`) and the legacy adapter `VM`: deletes (via `vm_delete_helpers`) or stops (`begin_power_off`) VMs by status; `from crc.azu.vm import VM` still works
+- `disk.py`: `AzureDiskCleaner` (registered as `azure`/`disk`) and the adapter `Disk`: deletes unattached managed disks (`begin_delete`); any-key tag filter, age gate
+- `ip.py`: `AzureIpCleaner` (registered as `azure`/`ip`) and the adapter `IP`: deletes IPs without an IP configuration (`begin_delete`); any-key tag filter
+- `nic.py`: `AzureNicCleaner` (registered as `azure`/`nic`) and the adapter `NIC`: deletes NICs not attached to a VM (`begin_delete(...).result()`, three attempts); plain substring name filters
+- `spot_vm/`: `AzureSpotVmCleaner` (registered as `azure`/`spot_instances`) and the adapter `SpotVM`: deletes stopped or deallocated Spot VMs and their leftover disks and NICs (subpackage with its own README, rung AZ-5)
+- `vm/`: subpackage (own README): `VmCleaner` (registered as `azure`/`vm`) and the adapter `VM`: deletes (via `vm_delete_helpers`) or stops (`begin_power_off`) VMs by status; `from crc.azu.vm import VM` still works
 - `vm_delete_helpers.py`: `begin_delete_vm_and_wait`, `delete_vm_primary_nic`: delete helpers, no filtering (rung PL-AZ)
 
 ## Public API
@@ -29,20 +29,20 @@ copyright comment and declares no export list.
 - `PublicIpOperations`: Protocol of the two public IP calls used, list_all and begin_delete; tests pass fakes.
 - `IpNetworkClient`: Protocol of the network client part used (the public_ip_addresses operations).
 - `AzureIpCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus list_ips, decide and delete_candidate used by the adapter); the client factory is injected through the constructor.
-- `build_ip_cleaner()`: registry factory behind @register("azure", "ip"); reads resource_group, filter_tags, exception_tags and notags from RunContext.options and builds the client from the legacy Base.
+- `build_ip_cleaner()`: registry factory behind @register("azure", "ip"); reads resource_group, filter_tags, exception_tags and notags from RunContext.options and builds the client from `Base`.
 - `IP`: adapter crc.py calls (delete(), get_deleted, count, deleted_ips, base); runs the cleaner IP by IP in the order of main.
 - `DeletePoller`: Protocol of the handle begin_delete returns (result()).
 - `NicOperations`: Protocol of the two network_interfaces calls used, list_all and begin_delete (positional arguments); tests pass fakes.
 - `NicNetworkClient`: Protocol of the network client part used (the network_interfaces operations).
 - `AzureNicCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus list_nics, decide and attempt_delete used by the adapter); the client factory is injected through the constructor.
-- `build_nic_cleaner()`: registry factory behind @register("azure", "nic"); reads resource_group, name_regex and exception_regex from RunContext.options and builds the client from the legacy Base.
+- `build_nic_cleaner()`: registry factory behind @register("azure", "nic"); reads resource_group, name_regex and exception_regex from RunContext.options and builds the client from `Base`.
 - `NIC`: adapter crc.py calls (delete(), get_deleted, delete_count, nics_names_to_delete, base); runs the cleaner NIC by NIC in the order of main.
 - `SdkDisk`: Protocol of the Azure disk fields read (name, tags, time_created, disk_state).
 - `DiskOperations`: Protocol of the two disks calls used, list and begin_delete (positional arguments); tests pass fakes.
 - `DiskComputeClient`: Protocol of the compute client part used (the disks operations).
 - `DiskSettings`: frozen dataclass of the filters and age gate (filter_tags, exception_tags, notags, age, custom_age_tag_key, disk_states).
 - `AzureDiskCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus list_disks, decide and delete_disk used by the adapter); the client factory is injected through the constructor.
-- `build_disk_cleaner()`: registry factory behind @register("azure", "disk"); reads resource_group, filter_tags, exception_tags, notags, age and custom_age_tag_key from RunContext.options and builds the client from the legacy Base.
+- `build_disk_cleaner()`: registry factory behind @register("azure", "disk"); reads resource_group, filter_tags, exception_tags, notags, age and custom_age_tag_key from RunContext.options and builds the client from `Base`.
 - `Disk`: adapter crc.py calls (delete(), get_deleted, count, disks_names_to_delete, base, clock); runs the cleaner disk by disk in the order of main, reading the clock once per listed disk (main reads it once per tag-matching disk).
 
 ## Safety Invariants
@@ -63,8 +63,7 @@ copyright comment and declares no export list.
 1. Do not edit these modules to add features or fix bugs in a refactor rung; behaviour fixes are
    separate rungs (`docs/refactor/PLAN.md`).
 2. New resources go in a new module with the `Cleaner` contract (`ARCHITECTURE.md`, "Add a resource
-   cleaner"), not as another legacy class.
-3. A new or refactored module follows `ip.py`, `nic.py`, `disk.py`, `vm/` and `spot_vm/`: a Cleaner with an injected client Protocol, `@register("azure", ...)`, a parity test against a frozen oracle in `tests/legacy/`. Refactoring a module means removing it from the ruff `extend-exclude` and mypy override lists in
-   the same change (the legacy ratchet only shrinks), then updating this README and its symbol list.
+   cleaner"): a `Cleaner` registered with `@register("azure", ...)`.
+3. A new or refactored module follows `ip.py`, `nic.py`, `disk.py`, `vm/` and `spot_vm/`: a Cleaner with an injected client Protocol, `@register("azure", ...)`, a parity test against a frozen oracle in `tests/legacy/`. No module of this package is in the legacy ratchet (`pyproject.toml` lists only five hash-locked safety test files); never add one. Update this README and its symbol list with any public change.
 4. Keep `Base`, the delete helpers and their call order, environment variables, log lines and swallowed errors as they are; a cleaner narrows the `Any` clients with its own Protocol instead of changing the plumbing's return types.
 5. Record every new bug or quirk in `docs/refactor/BUGS.md` with its `main` file:line.

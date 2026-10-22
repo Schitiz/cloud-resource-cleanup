@@ -12,7 +12,7 @@ Modules:
 - `operations.py`: waiting for a zone or region operation.
 - `disks.py`: leftover disk references, label check and delete.
 - `cleaner.py`: `SpotVMCleaner`, its summary log and the registry factory.
-- `adapter.py`: the legacy `SpotVM` class.
+- `adapter.py`: the `SpotVM` class, the adapter `crc/cli` uses.
 
 ## Public API
 

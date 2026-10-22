@@ -2,9 +2,9 @@
 
 ## Purpose
 
-Legacy AWS cleaners (boto3). They delete or stop leftover EC2, EBS, network, key and KMS resources across regions.
+AWS cleaners (boto3). They delete or stop leftover EC2, EBS, network, key and KMS resources across regions.
 
-**Partly refactored.** `_base.py`, `connectivity.py` and `__init__.py` (PL-AWS, strict typing and parity oracles, no behaviour change; they are not `Cleaner`s and register nothing), `keypairs.py` (R4a), `elastic_ips.py` (R4b), `kms.py` (R4c), `vpc/` (AWS-1, subpackage since ST-AWS-VPC), `snapshot.py` (AWS-2) and `vm/` (AWS-3, subpackage) are `Cleaner`s (no behaviour change); every other module is legacy, not yet refactored, and the same as on `main`. Any change must follow `ARCHITECTURE.md` and the refactor rung for this package in `docs/refactor/PLAN.md` (Rung R4+), with `make check` green.
+**Refactored.** Every module is strict-checked and none is in the legacy ratchet. `_base.py`, `connectivity.py` and `__init__.py` (PL-AWS, strict typing and parity oracles, no behaviour change; they are not `Cleaner`s and register nothing) are shared plumbing; `keypairs.py` (R4a), `elastic_ips.py` (R4b), `kms.py` (R4c), `snapshot.py` (AWS-2), `vpc/` (AWS-1, subpackage since ST-AWS-VPC), `vm/` (AWS-3, subpackage since ST-AWS-VM), `disk/` (AWS-4) and `spot_instance_requests/` (AWS-5) are `Cleaner`s registered under `aws` (no behaviour change). The adapter classes (`KeyPairs`, `ElasticIPs`, `Kms`, `Snapshot`, `VPC`, `VM`, `Disk`, `SpotInstanceRequests`) remain the entry point `crc/cli` uses. Any change must follow `ARCHITECTURE.md` and the refactor rung for this package in `docs/refactor/PLAN.md`, with `make check` green.
 
 Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.md`):
 
@@ -15,13 +15,13 @@ Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.
 - `keypairs.py`: `KeyPairCleaner` (registered as `aws` / `keypair`) and the `KeyPairs` adapter: deletes key pairs by name regex (`delete_key_pair`)
 - `kms.py`: `KmsCleaner` (registered as `aws` / `kms`) and the `Kms` adapter: schedules key deletion (`schedule_key_deletion`) for keys matching description and user ARN
 - `snapshot.py`: `SnapshotCleaner` (registered as `aws` / `snapshot`) and the `Snapshot` adapter: deletes snapshots older than `age_days` (`delete_snapshot`) that carry no exception tag and back no AMI
-- `spot_instance_requests.py`: `SpotInstanceRequests`: cancels spot requests, terminates instances, deletes leftover volumes
+- `spot_instance_requests/`: package (`__init__.py` keeps the import path `crc.aws.spot_instance_requests`): `SpotRequestCleaner` (registered as `aws` / `spot_instance_requests`) and the `SpotInstanceRequests` adapter: cancels spot requests, terminates instances, deletes leftover volumes. See `crc/aws/spot_instance_requests/README.md`
 - `vm/`: package (`__init__.py` keeps the import path `crc.aws.vm`): `VmCleaner` (registered as `aws` / `vm`; terminates (`terminate_instances`) or stops (`stop_instances`) running instances), the `VM` adapter (`delete()`, `stop()`, `find_instances_with_tag()`) with its `VmRuntime`, the typed EC2 Protocols and the read-only tag scan. See `crc/aws/vm/README.md`
 - `vpc/`: package (`__init__.py` keeps the import path `crc.aws.vpc`): `VpcCleaner` (registered as `aws` / `vpc`) and the `VPC` adapter: tears down and deletes VPCs matching an EC2 `tag:key` filter (`delete_vpc`). See `crc/aws/vpc/README.md`
 
 ## Public API
 
-_base.py, connectivity.py, keypairs.py, elastic_ips.py, kms.py and snapshot.py are refactored (the vm and vpc subpackages list their names in their own READMEs), so the names below are synced with this README by ARCH-002.
+Every module is refactored. The modules directly in this package (_base.py, connectivity.py, keypairs.py, elastic_ips.py, kms.py and snapshot.py) are synced with this README by ARCH-002; the disk, spot_instance_requests, vm and vpc subpackages list their names in their own READMEs.
 __init__.py holds only a copyright comment and declares no __all__ (no export list).
 
 - `get_all_regions()`: (_base.py) regions of an AWS service from describe_regions on a client in the default region; a connectivity error falls back to the static botocore region list (Session get_available_regions), every other error propagates.
@@ -61,7 +61,7 @@ Extension Rules: changes need tests/test_aws_spot_instance_requests_parity.py (o
 
 ### disk
 
-The EBS disk cleaner is a subpackage with its own README (crc/aws/disk/README.md) that lists its public names. It exports the Cleaner (registered as aws / disk), the legacy adapter class that crc.py calls, the runtime dataclass and the registry factory, with the typed Protocols of the boto3 EC2 and CloudWatch calls it uses in client.py.
+The EBS disk cleaner is a subpackage with its own README (crc/aws/disk/README.md) that lists its public names. It exports the Cleaner (registered as aws / disk), the adapter class that crc.py calls, the runtime dataclass and the registry factory, with the typed Protocols of the boto3 EC2 and CloudWatch calls it uses in client.py.
 
 ## Safety Invariants
 
@@ -87,10 +87,9 @@ The EBS disk cleaner is a subpackage with its own README (crc/aws/disk/README.md
 1. Do not edit these modules to add features or fix bugs in a refactor rung; behaviour fixes are
    separate rungs (`docs/refactor/PLAN.md`).
 2. New resources go in a new module with the `Cleaner` contract (`ARCHITECTURE.md`, "Add a resource
-   cleaner"), not as another legacy class.
+   cleaner"): a `Cleaner` registered with `@register("aws", ...)`, as every module here is.
 3. VM changes need `tests/test_aws_vm_parity.py` (oracle `tests/legacy/aws_vm.txt`, a frozen copy of `main`, never edit it) and `tests/test_aws_vm.py` to stay green; snapshot changes need `tests/test_aws_snapshot_parity.py` (oracle `tests/legacy/aws_snapshot.txt`, a frozen copy of `main`, never edit it) and `tests/test_aws_snapshot.py` to stay green; VPC changes: see `crc/aws/vpc/README.md`; key pair changes need `tests/test_aws_keypair_parity.py` (oracle `tests/legacy/aws_keypairs.txt`, a frozen copy of `main`, never edit it) to stay green; Elastic IP changes need `tests/test_aws_ip_parity.py` (oracle `tests/legacy/aws_elastic_ips.txt`); KMS changes need `tests/test_aws_kms_parity.py` (oracle `tests/legacy/aws_kms.txt`); `_base.py` changes need `tests/test_aws_base_parity.py` and `tests/test_aws_base.py` (oracle `tests/legacy/aws_base.txt`), `connectivity.py` changes need `tests/test_aws_connectivity_parity.py` and `tests/test_aws_connectivity.py` (oracle `tests/legacy/aws_connectivity.txt`); oracles are frozen copies of `main`, never edit them.
-4. Refactoring a module means removing it from the ruff `extend-exclude` and mypy override lists in
-   the same change (the legacy ratchet only shrinks), then updating this README and its symbol list.
+4. No module of this package is in the legacy ratchet (`pyproject.toml` lists only five hash-locked safety test files); never add one. Update this README and its symbol list with any public change.
 5. Record every new bug or quirk in `docs/refactor/BUGS.md` with its `main` file:line.
 
 ### disk
@@ -99,4 +98,4 @@ Disk changes need tests/test_aws_disk_parity.py (oracle tests/legacy/aws_disk.tx
 
 ### vpc
 
-The VPC cleaner is a subpackage with its own README (`crc/aws/vpc/README.md`) that lists its public names. It exports the Cleaner (registered as aws / vpc), the legacy `VPC` adapter that crc.py calls, the runtime dataclass, the registry factory and the typed Protocols of the boto3 EC2 client, resource and resource objects (in `client.py`).
+The VPC cleaner is a subpackage with its own README (`crc/aws/vpc/README.md`) that lists its public names. It exports the Cleaner (registered as aws / vpc), the `VPC` adapter that crc.py calls, the runtime dataclass, the registry factory and the typed Protocols of the boto3 EC2 client, resource and resource objects (in `client.py`).

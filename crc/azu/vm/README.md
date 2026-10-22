@@ -6,13 +6,13 @@ Azure virtual machine cleaner (rung AZ-4). `VmCleaner` is a registered `Cleaner`
 (`@register("azure", "vm")`): `plan()` lists the VMs of the whole subscription, applies the tag and
 age policy and reads each selected VM's instance view; `apply()` deletes the VM and waits for it,
 then removes its `<vm>-NIC` NIC (through `crc/azu/vm_delete_helpers.py`), or powers the VM off.
-`VM` is the legacy entry point `crc.py` uses; `from crc.azu.vm import VM` keeps working.
+`VM` is the adapter entry point `crc.py` uses; `from crc.azu.vm import VM` keeps working.
 
 Modules (split by responsibility):
 
 - `client.py`: the Azure SDK calls used, as typed Protocols
 - `cleaner.py`: settings, name tally, summary logging, `VmCleaner` and the registry factory
-- `adapter.py`: the legacy `VM` class, a thin adapter that drives the cleaner VM by VM
+- `adapter.py`: the `VM` class, a thin adapter that drives the cleaner VM by VM
 
 ## Public API
 
@@ -28,7 +28,7 @@ Modules (split by responsibility):
 - `Tally`: the VM, stopped VM and NIC names recorded so far.
 - `log_summary()`: the closing log lines of main for an operation.
 - `VmCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus list_vms, decide, state_allowed, process and act used by the adapter).
-- `build_vm_cleaner()`: registry factory behind @register("azure", "vm"); reads resource_group, filter_tags, exception_tags, notags, age, custom_age_tag_key and instance_state from RunContext.options and builds the clients from the legacy Base.
+- `build_vm_cleaner()`: registry factory behind @register("azure", "vm"); reads resource_group, filter_tags, exception_tags, notags, age, custom_age_tag_key and instance_state from RunContext.options and builds the clients from Base.
 - `VM`: adapter crc.py calls (delete(), stop(), get_deleted, delete_count, get_deleted_nic, nic_delete_count, get_stopped, stopped_count, base); runs the cleaner VM by VM in the order of main.
 
 ## Safety Invariants

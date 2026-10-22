@@ -2,16 +2,16 @@
 
 ## Purpose
 
-AWS VPC cleaner (AWS-1, subpackage since ST-AWS-VPC). Tears down and deletes the VPCs of every region that match an EC2 `tag:key` filter and are not protected by `exception_tags` / `notags`. The old import path `crc.aws.vpc` keeps working: the package `__init__.py` re-exports every public name, including the legacy `VPC` class `crc.py` uses.
+AWS VPC cleaner (AWS-1, subpackage since ST-AWS-VPC). Tears down and deletes the VPCs of every region that match an EC2 `tag:key` filter and are not protected by `exception_tags` / `notags`. The old import path `crc.aws.vpc` keeps working: the package `__init__.py` re-exports every public name, including the `VPC` class `crc.py` uses.
 
 Modules:
 
-- `cleaner.py`: `VpcCleaner` (`plan()` lists and decides protection, `apply()` tears down and deletes), its registry factory, the runtime dataclass and the legacy `VPC` adapter.
+- `cleaner.py`: `VpcCleaner` (`plan()` lists and decides protection, `apply()` tears down and deletes), its registry factory, the runtime dataclass and the `VPC` adapter.
 - `client.py`: typed Protocols of the boto3 EC2 client, resource and resource objects the VPC teardown walks.
 
 ## Public API
 
-- `VPC`: legacy adapter that crc.py calls (delete(), get_deleted, delete_count, vpc_ids_to_delete, get_vpc_ids); runs the cleaner region by region, VPC by VPC, in the order of main.
+- `VPC`: adapter that crc.py calls (delete(), get_deleted, delete_count, vpc_ids_to_delete, get_vpc_ids); runs the cleaner region by region, VPC by VPC, in the order of main.
 - `VpcCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus build_filter, list_vpcs, plan_region, apply_region, is_protected, should_skip and delete_vpc used by the adapter).
 - `VpcRuntime`: frozen dataclass with the injected client factory, resource factory and region lister of VPC (no clock: the module has no age gate).
 - `build_vpc_cleaner()`: registry factory behind @register("aws", "vpc"); reads filter_tags, exception_tags and notags from RunContext.options.

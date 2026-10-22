@@ -2,9 +2,9 @@
 
 ## Purpose
 
-Legacy GCP cleaners (google-cloud-compute). They delete or stop leftover instances, disks and addresses.
+GCP cleaners (google-cloud-compute). They delete or stop leftover instances, disks and addresses.
 
-**Partly refactored.** `ip.py` (GCP-1), `disk.py` (GCP-2), `vm.py` (GCP-3) and `spot_vm/` (GCP-4) are `Cleaner`s (no behaviour change); `_base.py` and `__init__.py` (PL-GCP) are refactored plumbing (strict-clean, no behaviour change). No legacy module is left in this package. Any change must follow `ARCHITECTURE.md` and the refactor rung for this package in `docs/refactor/PLAN.md` (Rung R4+), with `make check` green.
+**Refactored.** Every module is strict-checked and none is in the legacy ratchet: `ip.py` (GCP-1), `disk.py` (GCP-2), `vm.py` (GCP-3) and `spot_vm/` (GCP-4) are `Cleaner`s (no behaviour change); `_base.py` and `__init__.py` (PL-GCP) are refactored plumbing (strict-clean, no behaviour change). The adapter classes (`IP`, `Disk`, `VM`, `SpotVM`) remain the entry point `crc/cli` uses. Any change must follow `ARCHITECTURE.md` and the refactor rung for this package in `docs/refactor/PLAN.md` (Rung R4+), with `make check` green.
 
 Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.md`):
 
@@ -63,9 +63,8 @@ subpackage documents its own API in its own README. The plumbing modules (PL-GCP
 1. Do not edit these modules to add features or fix bugs in a refactor rung; behaviour fixes are
    separate rungs (`docs/refactor/PLAN.md`).
 2. New resources go in a new module with the `Cleaner` contract (`ARCHITECTURE.md`, "Add a resource
-   cleaner"), not as another legacy class.
-3. Refactoring a module means removing it from the ruff `extend-exclude` and mypy override lists in
-   the same change (the legacy ratchet only shrinks), then updating this README and its symbol list.
+   cleaner"): a `Cleaner` registered with `@register("gcp", ...)`.
+3. No module of this package is in the legacy ratchet (`pyproject.toml` lists only five hash-locked safety test files); never add one. Update this README and its symbol list with any public change.
 4. GCP IP changes need `tests/test_gcp_ip_parity.py` (oracle `tests/legacy/gcp_ip.txt`, a frozen copy of `main`, never edit it) to stay green.
 5. GCP disk changes need `tests/test_gcp_disk_parity.py` (oracle `tests/legacy/gcp_disk.txt`, a frozen copy of `main`, never edit it) to stay green.
 6. GCP VM changes need `tests/test_gcp_vm_parity.py` (oracle `tests/legacy/gcp_vm.txt`, a frozen copy of `main`, never edit it) to stay green.

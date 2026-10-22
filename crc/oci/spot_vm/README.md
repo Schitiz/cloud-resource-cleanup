@@ -46,7 +46,7 @@ Modules, split by responsibility:
 - `SpotVmCleaner`: the Cleaner (supports delete only, read-only plan, mutating apply, plus list_region, consider and terminate used by the adapter).
 - `build_spot_vm_cleaner()`: registry factory behind @register("oci", "spot_instances"); reads filter_tags, exception_tags, notags, age (required, positive) and custom_age_tag_key from RunContext.options.
 - `SpotVmRuntime`: frozen dataclass with the injected clients factory, region lister, pager and clock (now) of `SpotVM`; unset parts come from Base and the SDK.
-- `SpotVM`: adapter crc.py calls (delete(), get_deleted, get_deleted_volumes, delete_count, instance_names_to_delete, volumes_to_delete, and the private hooks the legacy tests use); subclasses Service and Base; acts instance by instance in the order of main.
+- `SpotVM`: adapter crc.py calls (delete(), get_deleted, get_deleted_volumes, delete_count, instance_names_to_delete, volumes_to_delete, and the private hooks the hash-locked safety test uses); subclasses Service and Base; acts instance by instance in the order of main.
 
 ## Safety Invariants
 

@@ -4,7 +4,7 @@
 
 OCI cleaners (oci SDK). They delete or stop leftover instances and volumes across regions.
 
-**Refactored.** `disk/` (rung OCI-1, a subpackage since rung ST-OCI-DISK) is a `Cleaner` registered as `oci` / `disk` (no behaviour change; see its README); `vm/` (rungs OCI-2 and ST-OCI-VM) is a subpackage with a `Cleaner` registered as `oci` / `vm` (no behaviour change; see its README); `spot_vm/` (rung OCI-3) is a subpackage with a `Cleaner` registered as `oci` / `spot_instances` (no behaviour change; see its README); the shared helpers `connectivity.py` and `__init__.py` (rung PL-OCI) are strict-clean (no behaviour change); `_base.py` (rung PL-OCI) is strict-clean too; its `os.environ` read of the private key is an owner-approved ARCH-003 allowlist entry (`tests/archtest/bans.py`), so the key is still read when an OCI cleaner is built, as on `main`. Any change must follow `ARCHITECTURE.md` and the refactor rung for this package in `docs/refactor/PLAN.md` (Rung R4+), with `make check` green.
+**Refactored.** Every module is strict-checked and none is in the legacy ratchet: `disk/` (rung OCI-1, a subpackage since rung ST-OCI-DISK) is a `Cleaner` registered as `oci` / `disk` (no behaviour change; see its README); `vm/` (rungs OCI-2 and ST-OCI-VM) is a subpackage with a `Cleaner` registered as `oci` / `vm` (no behaviour change; see its README); `spot_vm/` (rung OCI-3) is a subpackage with a `Cleaner` registered as `oci` / `spot_instances` (no behaviour change; see its README); the shared helpers `connectivity.py` and `__init__.py` (rung PL-OCI) are strict-clean (no behaviour change); `_base.py` (rung PL-OCI) is strict-clean too; its `os.environ` read of the private key is an owner-approved ARCH-003 allowlist entry (`tests/archtest/bans.py`), so the key is still read when an OCI cleaner is built, as on `main`. Any change must follow `ARCHITECTURE.md` and the refactor rung for this package in `docs/refactor/PLAN.md` (Rung R4+), with `make check` green.
 
 Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.md`):
 
@@ -39,11 +39,10 @@ no __all__.
 1. Do not edit the modules to add features or fix bugs in a refactor rung; behaviour fixes are
    separate rungs (`docs/refactor/PLAN.md`).
 2. New resources go in a new module with the `Cleaner` contract (`ARCHITECTURE.md`, "Add a resource
-   cleaner"), not as another legacy class. Follow the `disk/` or `vm/` subpackage: pure policy from `crc.core.policy`,
+   cleaner"): a `Cleaner` registered with `@register("oci", ...)`. Follow the `disk/` or `vm/` subpackage: pure policy from `crc.core.policy`,
    age from `crc.core.age`, SDK calls behind a Protocol in a `*_api.py` module, injected through the
    constructor.
 3. `plan()` of `DiskCleaner` (`disk/`) and `VmCleaner` (`vm/`) stays read-only: every mutating call belongs in `apply()` / `remove()`.
-4. Refactoring a module means removing it from the ruff `extend-exclude` and mypy override lists in
-   the same change (the legacy ratchet only shrinks), then updating this README and its symbol list.
+4. No module of this package is in the legacy ratchet (`pyproject.toml` lists only five hash-locked safety test files); never add one. Update this README and its symbol list with any public change.
 5. Record every new bug or quirk in `docs/refactor/BUGS.md` with its `main` file:line (parallel
    lanes use `docs/refactor/bugs/pending/`).
