@@ -4,7 +4,7 @@
 
 GCP cleaners (google-cloud-compute). They delete or stop leftover instances, disks and addresses.
 
-**Refactored.** Every module is strict-checked and none is in the legacy ratchet: `ip.py` (GCP-1), `disk.py` (GCP-2), `vm.py` (GCP-3) and `spot_vm/` (GCP-4) are `Cleaner`s (no behaviour change); `_base.py` and `__init__.py` (PL-GCP) are refactored plumbing (strict-clean, no behaviour change). The adapter classes (`IP`, `Disk`, `VM`, `SpotVM`) remain the entry point `crc/cli` uses. Any change must follow `ARCHITECTURE.md` and the refactor rung for this package in `docs/refactor/PLAN.md` (Rung R4+), with `make check` green.
+**Refactored.** Every module is strict-checked and none is in the legacy ratchet: `ip.py` (GCP-1), `disk.py` (GCP-2), `vm.py` (GCP-3) and `spot_vm/` (GCP-4) are `Cleaner`s (no behaviour change); `_base.py` and `__init__.py` (PL-GCP) are refactored plumbing (strict-clean, no behaviour change). The adapter classes (`IP`, `Disk`, `VM`, `SpotVM`) remain the entry point `crc/cli` uses. Any change must follow `ARCHITECTURE.md`; a behaviour change needs a behaviour-fix rung in `docs/refactor/PLAN.md` (`.cursor/skills/crc-python-refactor/BEHAVIOUR_FIX.md`), with `make check` green.
 
 Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.md`):
 

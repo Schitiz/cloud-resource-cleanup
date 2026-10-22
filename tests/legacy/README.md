@@ -4,7 +4,7 @@
 
 Frozen copies of `main` code, used as parity oracles. They are `.txt` files so they are never
 linted, imported by the product or collected by pytest. Each oracle is the exact output of
-`git show main:<path>` for the module named below (the `crc_*` ones are the pieces of `crc.py`,
+`git show main:<path>` for the module named below (the `crc_*` ones are copies of `crc.py`,
 `crc/service.py` and `crc/utils.py`). Every refactored module is pinned by a parity test that
 loads its oracle under another module name and runs it and the refactored code on the same fake
 SDK clients, comparing calls, logs, output and errors. The oracles are kept after the refactor:
@@ -27,9 +27,9 @@ behaviour-fix rungs mark each diverging parity case with its bug ID instead of e
 | `azu_ip.txt` | `crc/azu/ip.py` | `tests/test_azure_ip_parity.py` |
 | `azu_nic.txt` | `crc/azu/nic.py` | `tests/test_azure_nic_parity.py` |
 | `azu_spot_vm.txt` | `crc/azu/spot_vm.py` | `tests/test_azure_spot_instances_parity.py` |
-| `azu_vm.txt` | `crc/azu/vm.py` | `tests/test_azure_vm_parity.py`, `tests/test_azure_vm_delete_helpers_parity.py` |
+| `azu_vm.txt` | `crc/azu/vm.py` | `tests/test_azure_vm_parity.py` |
 | `azu_vm_delete_helpers.txt` | `crc/azu/vm_delete_helpers.py` | `tests/test_azure_vm_delete_helpers_parity.py` |
-| `crc_main.txt` | `crc.py` (argument parser, `main()`, `CRC`) | `tests/test_cli_args_parity.py`, `tests/test_cli_crc_parity.py`, `tests/test_cli_main_parity.py` |
+| `crc_main.txt` | `crc.py` (whole file: argument parser, `main()`, `CRC`) | `tests/test_cli_args_parity.py`, `tests/test_cli_crc_parity.py`, `tests/test_cli_main_parity.py` |
 | `crc_service.txt` | `crc/service.py` | `tests/test_crc_service_parity.py`, `tests/test_crc_service_is_old_parity.py` (both through `tests/helpers_crc_service.py`) |
 | `crc_utils.txt` | `crc/utils.py` | `tests/test_crc_utils_parity.py` |
 | `gcp_base.txt` | `crc/gcp/_base.py` | `tests/test_gcp_base_parity.py` |
