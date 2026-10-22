@@ -389,7 +389,7 @@ def test_spot_vm_adapter_reports_instance_and_volume_actions(
             logging.INFO,
             f"ACTION {kind} cloud=oci resource=spot_instances region=r1 id=a name=name-a",
         ),
-        (logging.INFO, f"ACTION {kind} cloud=oci resource=spot_instances region=- id=v-a name=-"),
+        (logging.INFO, f"ACTION {kind} cloud=oci resource=spot_instances region=r1 id=v-a name=-"),
         (
             logging.INFO,
             "REGION cloud=oci resource=spot_instances region=r1 scanned=3 selected=1 seconds=0",
@@ -437,7 +437,7 @@ def test_spot_vm_attachment_failure_is_a_listed_failure(caplog: pytest.LogCaptur
         (logging.ERROR, "ERRORS count=1"),
         (
             logging.ERROR,
-            "FAILED cloud=oci resource=spot_instances region=- id=a "
+            "FAILED cloud=oci resource=spot_instances region=r1 id=a "
             "error=RuntimeError: no attachments",
         ),
         (
@@ -448,9 +448,12 @@ def test_spot_vm_attachment_failure_is_a_listed_failure(caplog: pytest.LogCaptur
     ]
 
 
-def test_spot_vm_cleaner_plan_apply_reports(caplog: pytest.LogCaptureFixture) -> None:
+@pytest.mark.parametrize(("dry_run", "kind"), [(False, "deleted"), (True, "would_delete")])
+def test_spot_vm_cleaner_plan_apply_reports(
+    caplog: pytest.LogCaptureFixture, dry_run: bool, kind: str
+) -> None:
     caplog.set_level(logging.INFO)
-    _begin("spot_instances", dry_run=False)
+    _begin("spot_instances", dry_run=dry_run)
     client = SpotClient([spot_inst("a")])
     cleaner = SpotVmCleaner(
         lambda region: RegionClients(client, client, "cmp"),
@@ -458,7 +461,7 @@ def test_spot_vm_cleaner_plan_apply_reports(caplog: pytest.LogCaptureFixture) ->
         SpotVmSettings(filter_tags=FILTER, age=AGE),
         _paginate,
     )
-    context = RunContext(dry_run=False, operation=Operation.DELETE, options={}, now=NOW)
+    context = RunContext(dry_run=dry_run, operation=Operation.DELETE, options={}, now=NOW)
     cleaner.apply(cleaner.plan(context), context)
     runlog.finish()
     assert _lines(caplog, "ACTION", "REGION") == [
@@ -468,9 +471,9 @@ def test_spot_vm_cleaner_plan_apply_reports(caplog: pytest.LogCaptureFixture) ->
         ),
         (
             logging.INFO,
-            "ACTION deleted cloud=oci resource=spot_instances region=r1 id=a name=name-a",
+            f"ACTION {kind} cloud=oci resource=spot_instances region=r1 id=a name=name-a",
         ),
-        (logging.INFO, "ACTION deleted cloud=oci resource=spot_instances region=r1 id=v-a name=-"),
+        (logging.INFO, f"ACTION {kind} cloud=oci resource=spot_instances region=r1 id=v-a name=-"),
     ]
 
 

@@ -51,3 +51,22 @@ Left / notes:
   ACTION lines if the dry-run pipeline expects instances only.
 - No locked safety test (`tests/test_oci_spot_vm.py`) asserts these levels; none was touched.
 - The runlog API had everything needed; no workaround.
+
+## Round 1 (Argon)
+
+### Findings
+
+1. **FIXED (in-scope consistency): `crc/oci/spot_vm/{adapter,cleaner,leftovers}.py` region propagation on leftover volume `ACTION` and `FAILED` lines.**
+   - Before this fix, `SpotVmCleaner.terminate()` (live run) emitted `ACTION deleted ... region=<region> id=<volume_id> name=-`, whereas `SpotVmCleaner.apply()` (dry run) and `SpotVM._delete_volume()` (adapter) emitted `region=-` for the same leftover volumes, and `leftovers.py` (`attached_volume_ids`, `wait_terminated`, `volume_passes_tag_check`, `delete_leftover`) always recorded `fail(None, ...)` (`region=-`) even when called inside a regional pass.
+   - Threaded `region: str | None = None` through `leftovers.py` and `SpotVM._region` (with class default `None` so direct unit-test calls without `delete()` still work and hook signatures for `tests/test_oci_spot_vm.py` remain unchanged), and aligned `SpotVmCleaner.apply()` dry-run volume `ACTION` lines to pass `region=candidate.region` in per-candidate order. Updated `tests/test_oci_runlog.py` and parametrized `test_spot_vm_cleaner_plan_apply_reports` over live and dry-run modes.
+
+### Checklist
+
+1. **Behaviour / log-only contract**: Verified against `git diff 7437ac5..HEAD` and the oracle parity suites. Only log levels (`logging.info(tags)` -> `logging.debug(tags)` in `crc/oci/disk/cleaner.py` and `crc/oci/vm/cleaner.py`; `"Skipping leftover volume ..."` -> `logging.debug` in `crc/oci/spot_vm/leftovers.py`) and `crc.core.runlog` reporting calls (`crc/oci/_runlog.py`) changed. Selection, deletion/stopping, SDK call order, Slack messages, InfluxDB points, CLI flags, and exit codes are unchanged.
+2. **Line formats**: `REGION`, `ACTION`, `SKIPPED`, `ERRORS`, `FAILED`, and `RESULT` lines match `docs/refactor/LOGGING.md` and `crc/core/runlog.py` key names, order, and log levels.
+3. **Parity tests**: `tests/legacy/oci_{disk,vm,spot_vm}.txt` are untouched. All log comparisons go through `expected_logs(old.logs, BUGS)` with in-scope bug IDs (`BUG-353`, `BUG-358`, `BUG-361`, `BUG-362`), changing only the level of the documented lines to `DEBUG` without dropping or altering message text. Each parity module includes a `test_*_diverges_from_oracle` test proving `old.logs != new.logs` on matching cases while calls and message texts remain identical.
+4. **Locked safety tests**: `tests/archtest/safety_lock.json` and all 5 locked safety test files (`tests/test_oci_spot_vm.py`, etc.) are untouched.
+5. **READMEs & docs (ARCH-002)**: `crc/oci/README.md` documents `_runlog.py` and its symbols; `crc/oci/{disk,vm,spot_vm}/README.md` remain in sync. Protected files (`AGENTS.md`, `ARCHITECTURE.md`, `CLEANUP_SAFETY.md`, `docs/refactor/PLAN.md`, `docs/refactor/BUGS.md`, `docs/refactor/STATUS.md`, `.cursor/**`, `tests/archtest/**`, `crc/core/**`, `crc/cli/**`) are untouched.
+6. **Gates & test count**: `make check` passed (`ruff check .`, `mypy` on 209 source files, `lint-imports` 5/5 contracts kept, `pytest -q`: **42277 passed**).
+
+VERDICT: APPROVE
