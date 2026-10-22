@@ -100,7 +100,7 @@ def test_finish_without_begin_is_a_noop(caplog: pytest.LogCaptureFixture) -> Non
 def test_dry_run_flow_lines_and_result(caplog: pytest.LogCaptureFixture) -> None:
     clock = Clock()
     run = logger.begin("aws", "vm", "delete", True, {"age": {"days": 1}}, clock=clock)
-    caplog.set_level(logging.INFO)
+    caplog.set_level(logging.DEBUG)
     caplog.clear()
     run.region("us-east-1", 10, 2, 3.9)
     run.action("would_delete", "us-east-1", "i-1", "web")
@@ -122,7 +122,7 @@ def test_dry_run_flow_lines_and_result(caplog: pytest.LogCaptureFixture) -> None
         ),
         (logging.INFO, "ACTION would_delete cloud=aws resource=vm region=us-east-1 id=i-2 name=-"),
         (
-            logging.INFO,
+            logging.DEBUG,
             "REGION cloud=aws resource=vm region=us-west-2 scanned=0 selected=0 seconds=0",
         ),
         (logging.INFO, "SKIPPED cloud=aws resource=vm reason=exception_tag count=1"),
@@ -222,3 +222,24 @@ def test_default_clock_is_monotonic_and_duration_is_an_int(
     logger.begin("aws", "vm", "delete", False, {})
     logger.finish()
     assert caplog.messages[-1].rsplit("duration_s=", 1)[1].isdigit()
+
+
+def test_region_with_nothing_selected_is_debug_and_still_counted(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    run = logger.begin("gcp", "disk", "delete", True, {}, clock=Clock())
+    caplog.set_level(logging.INFO)
+    caplog.clear()
+    run.region("us-central1-a", 0, 0, 0.1)
+    run.region("us-central1-b", 4, 0, 0.1)
+    run.region("us-central1-c", 4, 1, 0.1)
+    assert _records(caplog) == [
+        (
+            logging.INFO,
+            "REGION cloud=gcp resource=disk region=us-central1-c scanned=4 selected=1 seconds=0",
+        )
+    ]
+    caplog.set_level(logging.DEBUG)
+    caplog.clear()
+    logger.finish()
+    assert "regions=3 regions_skipped=0" in caplog.messages[-1]
