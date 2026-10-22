@@ -65,3 +65,47 @@ pytest) green on Python 3.12.3.
 - No locked safety test asserts these log levels (`tests/test_azu_spot_vm.py` has no level
   assertion and stays untouched). No `## Owner action` needed.
 - No bugs found beyond those already in BUGS.md.
+
+## Round 1 (Argon)
+
+Scope reviewed: `git diff 7437ac5..HEAD` (`crc/azu/README.md`, `crc/azu/_runlog.py`, `crc/azu/disk.py`, `crc/azu/ip.py`, `crc/azu/nic.py`, `crc/azu/spot_vm/__init__.py`, `crc/azu/spot_vm/cleaner.py`, `crc/azu/spot_vm/removal.py`, `crc/azu/vm/adapter.py`, `crc/azu/vm/cleaner.py`, `crc/azu/vm_delete_helpers.py`, `docs/refactor/reviews/LOG-AZU.md`, `tests/helpers_log_fix.py`, `tests/test_azure_disk_parity.py`, `tests/test_azure_runlog.py`, `tests/test_azure_spot_instances_parity.py`, `tests/test_azure_vm_parity.py`) against `docs/refactor/LOGGING.md` and `crc/core/runlog.py`.
+
+### Verification
+
+1. **Behaviour and log-only contract:**
+   - Only log levels (`BUG-358` raw `disk.tags` / `vm.tags` dumps at `crc/azu/disk.py:180` and `crc/azu/vm/cleaner.py:270`; `BUG-356` leftover Spot disk skip lines at `crc/azu/spot_vm/removal.py:76,116`) and `crc.core.runlog.current()` reporting calls (`crc/azu/_runlog.py`) changed.
+   - Resource selection, deletion/power-off behaviour, SDK call order, summary log lines (`_log_summary` / `log_summary`), Slack notifications, InfluxDB points, CLI flags, and exit codes are unchanged.
+   - Both legacy adapter paths (`Disk`, `IP`, `NIC`, `VM`, `SpotVM`) and `Cleaner` protocol paths (`plan()` / `apply()`) report one `REGION` line per resource group (`region=<resource_group>`), one `ACTION` line (`deleted`, `would_delete`, `stopped`, `would_stop`) per acted/previewed resource (with `record=not context.dry_run` in `AzureDiskCleaner.apply` and `AzureNicCleaner.apply`, and early return in `AzureIpCleaner.apply`, `VmCleaner.apply`, and `AzureSpotVmCleaner.apply`, preventing duplicate dry-run `ACTION` lines), short snake_case `SKIPPED` reasons, and `FAILED` entries for swallowed per-resource errors (`NIC` after 3 attempts, `delete_vm_primary_nic` after 24 attempts, VM status/action errors, Spot VM delete/preview errors, leftover Spot disk delete errors).
+2. **Line formats (`docs/refactor/LOGGING.md`):**
+   - `crc/azu/_runlog.py` delegates to `crc.core.runlog.current().region`, `.action`, `.skip`, and `.fail`, producing exact contract formats for `REGION`, `ACTION`, `SKIPPED`, `ERRORS`, `FAILED`, and `RESULT` (verified in `tests/test_azure_runlog.py`). When no run is begun, `runlog.current()` is unattached and logs nothing extra.
+3. **Parity tests and oracles:**
+   - All frozen oracles in `tests/legacy/*.txt` (`azu_disk.txt`, `azu_ip.txt`, `azu_nic.txt`, `azu_spot_vm.txt`, `azu_vm.txt`, `azu_vm_delete_helpers.txt`, `azu_base.txt`) are untouched.
+   - `tests/helpers_log_fix.py` rewrites only log levels to `logging.DEBUG` for `BUG-356` (`^Skipping leftover Spot disk `) and `BUG-358` (`_is_tag_dump`), never dropping or altering message text.
+   - `tests/test_azure_disk_parity.py`, `tests/test_azure_vm_parity.py`, and `tests/test_azure_spot_instances_parity.py` compare logs via `expected_logs(old.logs, BUGS)`, keep exact equality on all non-log fields (`calls`, `deleted`, `stopped`, `nics`, `disks`, `counts`, `stdout`, `error`), and assert `new != old` on at least one case per bug ID.
+4. **Locked safety tests and forbidden files:**
+   - `tests/archtest/safety_lock.json` and all five hash-locked safety test files (including `tests/test_azu_spot_vm.py`) are untouched.
+   - `docs/refactor/BUGS.md`, `docs/refactor/STATUS.md`, `docs/refactor/PLAN.md`, `crc/core/**`, `crc/cli/**`, and other cloud packages are untouched.
+5. **READMEs and guardrails (`ARCH-001..005`):**
+   - `crc/azu/README.md` lists `started()`, `region_done()`, `skip()`, `acted()`, `failed()`, and `reason_slug()` under `## Public API` and documents the `LOG-AZU` logging invariant under `## Safety Invariants`.
+
+### Findings
+
+- **BLOCKING:** none.
+- **NIT (`tests/test_azure_spot_instances_parity.py:44`):** `BUGS = {"BUG-356", "BUG-358"}` includes `BUG-358` even though `crc/azu/spot_vm` does not log raw tag dicts (only `BUG-356` leftover-disk skip lines diverge in Spot VM parity; `BUG-358` is exercised and asserted in `test_azure_disk_parity.py` and `test_azure_vm_parity.py`). Harmless since `_bug_358` is a no-op on non-dict messages.
+- **NIT (`crc/azu/vm/README.md`, `crc/azu/spot_vm/README.md`):** The subpackage READMEs do not repeat the `LOG-AZU` logging bullet documented in `crc/azu/README.md:60`.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`:
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed! |
+| `mypy` (`crc`, `tests`) | Success: no issues found in 204 source files |
+| `lint-imports` | Contracts: 5 kept, 0 broken |
+| `pytest -q` | 42272 passed in 161.56s |
+
+Test count: 42256 passed on base (`7437ac5`), 42272 passed on `HEAD` (+16).
+
+VERDICT: APPROVE
+
