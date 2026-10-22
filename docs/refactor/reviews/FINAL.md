@@ -86,3 +86,54 @@ Ran `pip install -r requirements.txt -r requirements-dev.txt` then `make check`:
 Test count: 42213 passed (unchanged from 42213 before this rung).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git show 4ecf41a` (driver's Final docs commit) and `git diff 4ecf41a..HEAD` (coder sweep `7bd3202` and Round 1 fixes `4d84933`).
+
+### Round 1 fixes and findings re-checked
+
+- The stale `docs/refactor/bugs/pending/*.md` paths are gone: `docs/refactor/bugs/pending/` holds only `README.md` and `.gitkeep`, and no README links a pending file. Confirmed.
+- `tests/legacy/README.md` Extension Rule 2 (never delete or edit an oracle) now matches `AGENTS.md` rule 5 and `BEHAVIOUR_FIX.md` section 3. Confirmed.
+- `STATUS.md` `Final (docs)` row: accurate (commits `4ecf41a`, `7bd3202`, pytest 42213).
+- Round 1 NITs on `BEHAVIOUR_FIX.md:70` (`fixed (<rung>)` against `BUGS.md:16` `fixed in <rung>`) and on `ARCHITECTURE.md` / `PLAN.md` layout: agreed, still open (owner files).
+- Round 1 said there are "28 `*_parity.py` files"; there are 34 (`ls tests/*parity*.py`). `tests/README.md` lists all 34 (CLI 3, service 2, utils 1, notify 1, AWS 10, Azure 7, GCP 5, OCI 5), so only the review text was wrong.
+
+### Independent checks
+
+1. **Statements against the current tree.**
+   - The ratchet in `pyproject.toml`: ruff `extend-exclude` and the mypy `ignore_errors` override both list exactly the five hash-locked files. mypy has `files = ["crc", "tests"]` and `exclude = ['^crc\.py$']`. These are the same five files that `tests/archtest/safety_lock.json` locks. The README statements are true.
+   - `ARCH003_ALLOWLIST` (`tests/archtest/bans.py:14`) holds `crc/azu/_base.py` and `crc/oci/_base.py` with `env`; the `crc/azu` and `crc/oci` READMEs match it.
+   - The archtest rule names in the READMEs (ARCH-001 to ARCH-005, SAF-LOCK) match the files in `tests/archtest/`.
+   - `crc/core/README.md`: its list of registered cleaners equals the `@register(...)` calls under `crc/` (8 AWS, 5 Azure, 4 GCP, 3 OCI).
+   - `crc/README.md`: `crc/__init__.py` is one copyright line; `crc.py` (104 lines) imports `main`, `CRC`, the constants and the adapter names from `crc/cli`; `notifications.py` exists. The "Not synced with ARCH-002" reason is true.
+   - Oracles: all 30 `tests/legacy/*.txt` files are byte-identical to `git show origin/main:<path>` for the paths in the table (checked with `cmp`). `crc_main.txt` is the whole `crc.py`.
+   - **Fixed:** the `tests/legacy/README.md` `azu_vm.txt` row listed `tests/test_azure_vm_delete_helpers_parity.py`, but that test loads only `azu_vm_delete_helpers.txt`; I removed it. I also changed "the `crc_*` ones are the pieces of" to "copies of", because each `crc_*` oracle is a whole file.
+2. **Legacy wording.** No README calls refactored code legacy or partly refactored. The word "legacy" now appears only for the ratchet, the `tests/legacy/` oracles and the archtest internals.
+   - **Fixed:** `crc/{aws,azu,gcp,oci}/README.md:7` still said "Any change must follow ... the refactor rung for this package in `docs/refactor/PLAN.md` (Rung R4+)". Those rungs are done, so the line now sends a behaviour change to a behaviour-fix rung and `BEHAVIOUR_FIX.md`.
+3. **`BEHAVIOUR_FIX.md`.** It is consistent with `AGENTS.md` rules 1, 5 and 12, with `CLEANUP_SAFETY.md` (fail closed; a SAF change goes to the owner) and with the SAF-LOCK workflow in `tests/archtest/README.md` (the owner runs `update_safety_lock.py`; a new `[SAF-NNN]` tag goes to the owner). It is enough to fix one BUGS.md row without weakening a test. Gaps:
+   - **NIT** `.cursor/skills/crc-python-refactor/BEHAVIOUR_FIX.md:11-13` and `:70-71`, together with `AGENTS.md:70` (rule 11). Section 1 says a newly found bug is recorded in `BUGS.md`, and section 5 has the rung edit `BUGS.md` status directly. `docs/refactor/bugs/README.md` says parallel lanes never edit `BUGS.md`; they write `docs/refactor/bugs/pending/<rung>.md` and the integrator folds the rows in. Proposed text for line 13: "`BUGS.md` (in a parallel lane: `docs/refactor/bugs/pending/<rung>.md`, see `docs/refactor/bugs/README.md`), not fixed." Proposed text for line 70: "Set the `Status` of each fixed row in `docs/refactor/BUGS.md` to `fixed in <rung>` (in a parallel lane, the integrator does it); keep the row."
+   - **NIT** `BEHAVIOUR_FIX.md:26-28`: add "or the `Found in` column of the `BUGS.md` row" after "the rung that found it" (the column exists, `BUGS.md:30`).
+   - **NIT** `BEHAVIOUR_FIX.md:63-67`: also say that a locked test that asserts the buggy behaviour keeps passing until the owner relocks it. The rung must not mark it skip or xfail, because SAF-LOCK fails on that. The rung stays blocked, or the bug moves to a later rung.
+4. **Coder diff scope.** `git diff --name-only 4ecf41a..HEAD` contains only `.md` files: no `.py`, `pyproject.toml`, `Makefile`, `tests/legacy/*.txt` or `tests/archtest/*` change.
+5. **Other guardrail-file NITs (not edited):**
+   - **NIT** `AGENTS.md:10` and `:84`: the branch name `refactor/python-agentic` is right for the integration branch, but lanes push to `refactor/lane-*`. Proposed text: "...push to the branch your task names (lanes: `refactor/lane-<rung>`; integration: `refactor/python-agentic`)".
+   - **NIT** `pyproject.toml:45-47` and `:51-52` (CODEOWNERS): comments still say "the CLI rung must resolve that" and "Each rung removes the modules it refactors". Proposed text: "crc.py is a thin entry point; its code lives in crc/cli/ and is checked" and "LEGACY RATCHET: may only shrink; it holds only the five hash-locked safety test files."
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt`, then `make check`:
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | `All checks passed!` |
+| `mypy` | `Success: no issues found in 202 source files` |
+| `lint-imports` | `Contracts: 5 kept, 0 broken.` |
+| `pytest -q` | `42213 passed in 160.56s` |
+| `pytest -q tests/archtest` (re-run after the README fixes) | `92 passed` |
+
+Test count: 42213 passed (same as Round 1 and before this rung).
+
+No finding is BLOCKING. The README errors are fixed in this round. The open items are NITs in owner files: `BEHAVIOUR_FIX.md`, `AGENTS.md` and `pyproject.toml` comments, plus the `ARCHITECTURE.md` and `PLAN.md` items from Round 1.
+
+ROUND 2 VERDICT: APPROVE
