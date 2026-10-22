@@ -14,6 +14,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import cast
 
+from crc.azu import _runlog
 from crc.azu._base import Base
 from crc.azu.vm.client import ComputeFactory, NetworkFactory, SdkVm
 from crc.azu.vm_delete_helpers import begin_delete_vm_and_wait, delete_vm_primary_nic
@@ -138,7 +139,10 @@ class VmCleaner:
         mutating call."""
         candidates: list[Candidate] = []
         skipped: list[Skipped] = []
+        started = _runlog.started()
+        scanned = 0
         for vm in self.list_vms():
+            scanned += 1
             decision = self.decide(vm, lambda: context.now)
             if isinstance(decision, Candidate):
                 decision = self._with_status(decision)
@@ -146,8 +150,12 @@ class VmCleaner:
                 candidates.append(decision)
             else:
                 skipped.append(decision)
+        _runlog.region_done(self._resource_group, scanned, len(candidates), started)
         tally = _tally_of(context.operation, (c.id for c in candidates))
         if context.dry_run:
+            kind = "would_delete" if context.operation is Operation.DELETE else "would_stop"
+            for candidate in candidates:
+                _runlog.acted(kind, self._resource_group, candidate.id)
             log_summary(context.operation, tally, dry_run=True)
         related = {NIC_LABEL: tuple(tally.nics)} if context.operation is Operation.DELETE else {}
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped), related=related)
@@ -165,6 +173,7 @@ class VmCleaner:
                 self.act(candidate.id, context.operation, tally, dry_run=False)
             except Exception as e:
                 _log_processing_error(candidate.id, e)
+                _runlog.failed(self._resource_group, candidate.id, e)
                 failed.append(Failure(id=candidate.id, error=str(e)))
         log_summary(context.operation, tally, dry_run=False)
         if context.operation is Operation.DELETE:
@@ -185,6 +194,7 @@ class VmCleaner:
         tags = policy.normalize_tags(vm.tags)
         reason = self._skip_reason(vm, tags, clock)
         if reason is not None:
+            _runlog.skip(reason)
             return Skipped(id=getattr(vm, "name", ""), reason=reason)
         return Candidate(id=vm.name, name=vm.name, launch_time=vm.time_created, tags=tags)
 
@@ -194,14 +204,18 @@ class VmCleaner:
         view = self._compute().virtual_machines.instance_view(self._resource_group, vm_name)
         return policy.status_contains_any_allowed(view.statuses[1].display_status, states)
 
-    def process(self, vm_name: str, operation: Operation, tally: Tally, *, dry_run: bool) -> None:
+    def process(self, vm_name: str, operation: Operation, tally: Tally, *, dry_run: bool) -> bool:
         """Status check and action for one VM that passed `decide()`. Any error is logged and
-        swallowed, as on main."""
+        swallowed, as on main. Returns True when the VM was acted on (or would be)."""
         try:
             if self.state_allowed(vm_name, self._settings.instance_states):
                 self.act(vm_name, operation, tally, dry_run=dry_run)
+                return True
+            _runlog.skip("status does not contain an allowed state")
         except Exception as e:
             _log_processing_error(vm_name, e)
+            _runlog.failed(self._resource_group, vm_name, e)
+        return False
 
     def act(self, vm_name: str, operation: Operation, tally: Tally, *, dry_run: bool) -> None:
         """Delete (with the NIC) or power off one VM and record its name, also in a dry run,
@@ -216,6 +230,7 @@ class VmCleaner:
             logging.info("Deleting virtual machine: %s", vm_name)
             begin_delete_vm_and_wait(self._compute(), self._resource_group, vm_name)
         tally.deleted.append(vm_name)
+        _runlog.acted("would_delete" if dry_run else "deleted", self._resource_group, vm_name)
         delete_vm_primary_nic(self._network(), self._resource_group, vm_name, dry_run, tally.nics)
 
     def _power_off(self, vm_name: str, tally: Tally, *, dry_run: bool) -> None:
@@ -223,6 +238,7 @@ class VmCleaner:
             self._compute().virtual_machines.begin_power_off(self._resource_group, vm_name)
             logging.info("Stopping virtual machine: %s", vm_name)
         tally.stopped.append(vm_name)
+        _runlog.acted("would_stop" if dry_run else "stopped", self._resource_group, vm_name)
 
     def _with_status(self, candidate: Candidate) -> Candidate | Skipped:
         try:
@@ -230,7 +246,9 @@ class VmCleaner:
                 return candidate
         except Exception as e:
             _log_processing_error(candidate.id, e)
+            _runlog.failed(self._resource_group, candidate.id, e)
             return Skipped(id=candidate.id, reason="status unavailable")
+        _runlog.skip("status does not contain an allowed state")
         return Skipped(id=candidate.id, reason="status does not contain an allowed state")
 
     def _skip_reason(self, vm: SdkVm, tags: policy.Tags, clock: Clock) -> str | None:
@@ -249,7 +267,7 @@ class VmCleaner:
         """Older than `age`, or than the VM's own custom age tag (capped by MAX_AGE)."""
         created = vm.time_created
         now = clock().astimezone(created.tzinfo)
-        logging.info(vm.tags)
+        logging.debug(vm.tags)
         retention_age = core_age.get_retention_age(
             cast(dict[str, str], vm.tags), self._settings.custom_age_tag_key
         )

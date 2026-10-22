@@ -12,6 +12,7 @@ import logging
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, Protocol
 
+from crc.azu import _runlog
 from crc.azu._base import Base
 from crc.core import policy
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext, Skipped
@@ -82,13 +83,19 @@ class AzureIpCleaner:
         """List every public IP of the subscription and filter. Makes no mutating call."""
         candidates: list[Candidate] = []
         skipped: list[Skipped] = []
+        started = _runlog.started()
+        scanned = 0
         for ip in self.list_ips():
+            scanned += 1
             candidate, reason = self.decide(ip)
             if candidate is not None:
                 candidates.append(candidate)
             else:
                 skipped.append(Skipped(id=getattr(ip, "name", ""), reason=reason))
+        _runlog.region_done(self._resource_group, scanned, len(candidates), started)
         if context.dry_run:
+            for candidate in candidates:
+                _runlog.acted("would_delete", self._resource_group, candidate.id)
             _log_summary([c.id for c in candidates], dry_run=True)
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
 
@@ -113,6 +120,12 @@ class AzureIpCleaner:
             public_ip_address_name=candidate.id,
         )
         logging.info(f"Deleted IP address: {candidate.id}")
+        _runlog.acted("deleted", self._resource_group, candidate.id)
+
+    @staticmethod
+    def _kept(reason: str) -> tuple[None, str]:
+        _runlog.skip(reason)
+        return None, reason
 
     def decide(self, ip: Any) -> tuple[Candidate | None, str]:
         """Select one SDK address: the candidate, or None with the reason it was kept."""
@@ -127,11 +140,11 @@ class AzureIpCleaner:
         )
         notags_match = bool(notags) and policy.should_skip_by_tags(ip.tags, {}, notags)
         if not filter_match:
-            return None, "no filter_tags match"
+            return self._kept("no filter_tags match")
         if exception_match or notags_match:
-            return None, "matches exception_tags or notags"
+            return self._kept("matches exception_tags or notags")
         if ip.ip_configuration is not None:
-            return None, "attached to an IP configuration"
+            return self._kept("attached to an IP configuration")
         tags = policy.normalize_tags(getattr(ip, "tags", None))
         return Candidate(id=ip.name, name=ip.name, tags=tags), ""
 
@@ -212,11 +225,18 @@ class IP(Service):
         Delete public IP addresses that match the filter and exception tags.
         """
         cleaner = self._cleaner()
+        started = _runlog.started()
+        scanned = selected = 0
         for ip in cleaner.list_ips():
+            scanned += 1
             candidate, _ = cleaner.decide(ip)
             if candidate is None:
                 continue
+            selected += 1
             if not self.dry_run:
                 cleaner.delete_candidate(candidate)
+            else:
+                _runlog.acted("would_delete", self.base.resource_group, candidate.id)
             self.deleted_ips.append(candidate.id)
+        _runlog.region_done(self.base.resource_group, scanned, selected, started)
         _log_summary(self.deleted_ips, dry_run=self.dry_run)

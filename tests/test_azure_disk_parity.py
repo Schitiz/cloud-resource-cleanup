@@ -25,9 +25,12 @@ from crc.azu.disk import AzureDiskCleaner, Disk, build_disk_cleaner
 from crc.core.cleaner import Cleaner, Operation, RunContext
 from crc.core.registry import get
 from tests.helpers_azure_disk import NOW, FakeAzure, ago, disk
+from tests.helpers_log_fix import expected_logs
 
 _ADDRESS = re.compile(r"0x[0-9a-f]+")
 ORACLE = Path(__file__).parent / "legacy" / "azu_disk.txt"
+
+BUGS = {"BUG-358"}  # log-only divergences of the LOG-AZU rung
 
 
 class _FrozenDatetime(datetime.datetime):
@@ -379,7 +382,7 @@ def test_matches_main(
     assert new.error == old.error
     assert new.deleted == old.deleted
     assert new.count == old.count
-    assert new.logs == old.logs
+    assert new.logs == expected_logs(old.logs, BUGS)
     assert new.count_logs == old.count_logs
     assert new.stdout == old.stdout
     assert (new.error is not None) == (case.error_phase is not None)
@@ -454,11 +457,11 @@ def test_cleaner_protocol_matches_main(
         return
     assert _only(new.calls, "begin_delete") == _only(old.calls, "begin_delete")
     if case.error_phase == "apply":
-        assert _groups(new.logs)[1:] == _groups(old.logs)[1:]
+        assert _groups(new.logs)[1:] == _groups(expected_logs(old.logs, BUGS))[1:]
         return
     assert new.deleted == old.deleted
     assert new.count == old.count
-    assert _groups(new.logs) == _groups(old.logs)
+    assert _groups(new.logs) == _groups(expected_logs(old.logs, BUGS))
 
 
 def _find(case_id: str) -> Case:
@@ -569,8 +572,11 @@ def test_repeated_delete_accumulates_like_main(
                 [(r.levelno, r.getMessage()) for r in caplog.records],
             )
         )
-    assert results[0] == results[1]
-    assert results[1][1] == ["a", "c", "a", "c"]
+    old, new = results
+    assert new[:2] == old[:2]
+    assert new[2] == expected_logs(old[2], BUGS)
+    assert new[2] != old[2]
+    assert new[1] == ["a", "c", "a", "c"]
 
 
 def test_registered_factory_builds_cleaner(monkeypatch: pytest.MonkeyPatch) -> None:

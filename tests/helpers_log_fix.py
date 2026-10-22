@@ -6,6 +6,7 @@ line or insert documented new lines; it never drops an oracle line or changes it
 Contract: ``docs/refactor/LOGGING.md``.
 """
 
+import ast
 import logging
 import re
 from collections.abc import Callable, Sequence
@@ -19,6 +20,7 @@ _AGE_CHECK_PATTERNS = (
     re.compile(r"^The resource is not older than the threshold specified in the age argument$"),
     re.compile(r"^No tags provided to search for custom_age_tag_key\.$"),
     re.compile(r"^Searching for custom_age_tag_key: "),
+    re.compile(r"^Skipping leftover Spot disk "),
 )
 
 
@@ -41,8 +43,29 @@ def _bug_356(records: list[LogRecordKey]) -> list[LogRecordKey]:
     ]
 
 
+def _is_tag_dump(message: str) -> bool:
+    """A raw tag or label dump: the str() of a dict, or of None for an untagged resource."""
+    if message == "None":
+        return True
+    if not (message.startswith("{") and message.endswith("}")):
+        return False
+    try:
+        return isinstance(ast.literal_eval(message), dict)
+    except (ValueError, SyntaxError):
+        return False
+
+
+def _bug_358(records: list[LogRecordKey]) -> list[LogRecordKey]:
+    """BUG-358: the raw tag/label dump of every listed resource becomes DEBUG, text unchanged."""
+    return [
+        _with_level(record, logging.DEBUG) if _is_tag_dump(str(record[-1])) else record
+        for record in records
+    ]
+
+
 RULES: dict[str, Callable[[list[LogRecordKey]], list[LogRecordKey]]] = {
     "BUG-356": _bug_356,
+    "BUG-358": _bug_358,
 }
 
 

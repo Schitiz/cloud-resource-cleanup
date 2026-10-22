@@ -13,6 +13,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
+from crc.azu import _runlog
 from crc.azu._base import Base
 from crc.azu.spot_vm.client import ComputeFactory, NetworkFactory
 from crc.azu.spot_vm.disks import DiskSlot, detached_disk_refs, disk_slots
@@ -101,7 +102,10 @@ class AzureSpotVmCleaner:
         candidates: list[Candidate] = []
         skipped: list[Skipped] = []
         previewed = Removed()
+        started = _runlog.started()
+        scanned = 0
         for vm in self.list_vms():
+            scanned += 1
             candidate, reason = self.decide(vm, context.now)
             if candidate is None:
                 skipped.append(Skipped(id=getattr(vm, "name", ""), reason=reason))
@@ -110,6 +114,7 @@ class AzureSpotVmCleaner:
             candidates.append(candidate)
             if context.dry_run:
                 self._preview(candidate, previewed)
+        _runlog.region_done(self._config.resource_group, scanned, len(candidates), started)
         related: dict[str, tuple[str, ...]] = {}
         if context.dry_run:
             log_summary(previewed, dry_run=True)
@@ -129,6 +134,7 @@ class AzureSpotVmCleaner:
                 self.remover.remove_vm(candidate.name, leftovers, removed)
             except Exception as e:
                 logging.error("Error deleting Spot VM %s: %s", candidate.name, e)
+                _runlog.failed(self._config.resource_group, candidate.id, e)
                 failed.append(Failure(id=candidate.id, error=str(e)))
         log_summary(removed, dry_run=False)
         return Result(
@@ -143,6 +149,7 @@ class AzureSpotVmCleaner:
         try:
             leftovers = detached_disk_refs(candidate.name, slots, self._config.resource_group)
             previewed.vms.append(candidate.name)
+            _runlog.acted("would_delete", self._config.resource_group, candidate.name)
             for resource_group, disk_name, _ in leftovers:
                 if not self.remover.disk_protected(resource_group, disk_name):
                     previewed.disks.append(f"{resource_group}/{disk_name}")
@@ -150,6 +157,7 @@ class AzureSpotVmCleaner:
             previewed.nics.append(f"{candidate.name}-NIC")
         except Exception as e:
             logging.error("Error deleting Spot VM %s: %s", candidate.name, e)
+            _runlog.failed(self._config.resource_group, candidate.name, e)
 
     def list_vms(self) -> list[Any]:
         """The VMs of the resource group; a failure is logged and re-raised."""
@@ -192,14 +200,17 @@ class AzureSpotVmCleaner:
         """Select one SDK VM: the candidate, or None with the reason it was kept."""
         reason, power_status = self._kept_before_age(vm)
         if reason:
+            _runlog.skip(reason)
             return None, reason
         time_created = getattr(vm, "time_created", None)
         if not time_created:
+            _runlog.skip("no creation time")
             logging.warning(
                 "Skipping Spot VM %s: no creation time (age check not possible)", vm.name
             )
             return None, "no creation time"
         if not self._old_enough(vm, now, time_created):
+            _runlog.skip("younger than the age threshold or invalid custom age tag")
             return None, "younger than the age threshold or invalid custom age tag"
         return (
             Candidate(

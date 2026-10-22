@@ -6,6 +6,7 @@ import datetime
 import logging
 from typing import ClassVar
 
+from crc.azu import _runlog
 from crc.azu._base import Base
 from crc.azu.vm.cleaner import Clock, TagSpec, Tally, VmCleaner, VmSettings, log_summary
 from crc.core import age as core_age
@@ -125,8 +126,13 @@ class VM(Service):
         tally = Tally(
             self.instance_names_to_delete, self.instance_names_to_stop, self.nics_names_to_delete
         )
+        started = _runlog.started()
+        scanned = selected = 0
         for vm in cleaner.list_vms():
+            scanned += 1
             decision = cleaner.decide(vm, self._clock)
             if isinstance(decision, Candidate):
-                cleaner.process(decision.id, operation, tally, dry_run=self.dry_run)
+                acted = cleaner.process(decision.id, operation, tally, dry_run=self.dry_run)
+                selected += int(acted)
+        _runlog.region_done(self.base.resource_group, scanned, selected, started)
         log_summary(operation, tally, dry_run=self.dry_run)

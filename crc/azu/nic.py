@@ -12,6 +12,7 @@ import logging
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any, Protocol
 
+from crc.azu import _runlog
 from crc.azu._base import Base
 from crc.core import policy
 from crc.core.cleaner import (
@@ -106,13 +107,19 @@ class AzureNicCleaner:
             return Plan()
         candidates: list[Candidate] = []
         skipped: list[Skipped] = []
+        started = _runlog.started()
+        scanned = 0
         for nic in self.list_nics():
+            scanned += 1
             candidate, reason = self.decide(nic)
             if candidate is not None:
                 candidates.append(candidate)
             else:
                 skipped.append(Skipped(id=getattr(nic, "name", ""), reason=reason))
+        _runlog.region_done(self._resource_group, scanned, len(candidates), started)
         if context.dry_run:
+            for candidate in candidates:
+                _runlog.acted("would_delete", self._resource_group, candidate.id)
             _log_summary([c.id for c in candidates], dry_run=True)
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
 
@@ -123,7 +130,9 @@ class AzureNicCleaner:
         deleted: list[str] = []
         failed: list[Failure] = []
         for candidate in plan.candidates:
-            error = self.attempt_delete(candidate.id, dry_run=context.dry_run)
+            error = self.attempt_delete(
+                candidate.id, dry_run=context.dry_run, record=not context.dry_run
+            )
             if error is None:
                 deleted.append(candidate.id)
             else:
@@ -136,14 +145,16 @@ class AzureNicCleaner:
         self._client_factory().network_interfaces.list_all()
         return self._client_factory().network_interfaces.list_all()
 
-    def attempt_delete(self, nic_name: str, *, dry_run: bool) -> str | None:
+    def attempt_delete(self, nic_name: str, *, dry_run: bool, record: bool = True) -> str | None:
         """Delete one NIC with up to three attempts, logging as main does.
 
         Returns None once it is deleted (always in a dry run), else the last error text.
-        Errors are swallowed.
+        Errors are swallowed; they are recorded for the end-of-run list. `record` False leaves
+        the ACTION line to the caller (`plan()` logs it in a dry run).
         """
         failure_count = DELETE_ATTEMPTS
         last_error = ""
+        last_exception: Exception | None = None
         while failure_count:
             try:
                 if not dry_run:
@@ -151,20 +162,30 @@ class AzureNicCleaner:
                         self._resource_group, nic_name
                     ).result()
                     logging.info(f"Deleted NIC: {nic_name}")
+                if record:
+                    kind = "would_delete" if dry_run else "deleted"
+                    _runlog.acted(kind, self._resource_group, nic_name)
                 return None
             except Exception as e:
                 failure_count -= 1
                 last_error = str(e)
+                last_exception = e
                 logging.error(f"Error occurred while deleting NIC {nic_name}: {e}")
                 if failure_count:
                     logging.info(f"Retrying deletion of NIC {nic_name}")
         logging.error(f"Failed to delete the NIC - {nic_name}")
+        _runlog.failed(self._resource_group, nic_name, last_exception or last_error)
         return last_error
+
+    @staticmethod
+    def _kept(reason: str) -> tuple[None, str]:
+        _runlog.skip(reason)
+        return None, reason
 
     def decide(self, nic: Any) -> tuple[Candidate | None, str]:
         """Select one SDK NIC: the candidate, or None with the reason it was kept."""
         if nic.virtual_machine:
-            return None, "attached to a VM"
+            return self._kept("attached to a VM")
         included = policy.nic_name_included(self._name_regex or (), nic.name)
         excluded = (
             policy.nic_name_excluded(self._exception_regex, nic.name)
@@ -172,9 +193,9 @@ class AzureNicCleaner:
             else False
         )
         if not included:
-            return None, "no name_regex match"
+            return self._kept("no name_regex match")
         if excluded:
-            return None, "matches exception_regex"
+            return self._kept("matches exception_regex")
         return Candidate(id=nic.name, name=nic.name), ""
 
 
@@ -256,11 +277,16 @@ class NIC(Service):
             return
 
         cleaner = self._cleaner()
+        started = _runlog.started()
+        scanned = selected = 0
         for nic in cleaner.list_nics():
+            scanned += 1
             candidate, _ = cleaner.decide(nic)
             if candidate is None:
                 continue
+            selected += 1
             if cleaner.attempt_delete(candidate.id, dry_run=self.dry_run) is None:
                 self.nics_names_to_delete.append(candidate.id)
+        _runlog.region_done(self.base.resource_group, scanned, selected, started)
 
         _log_summary(self.nics_names_to_delete, dry_run=self.dry_run)
