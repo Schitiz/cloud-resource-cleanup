@@ -80,3 +80,86 @@ Gates (`pip install -r requirements.txt -r requirements-dev.txt && make check`):
 
 VERDICT: APPROVE
 
+
+## Round 2 (Opus)
+
+Scope reviewed: `git diff 7437ac5..HEAD` (commits `87ba285`, `aac2d93`, `1fb7fb0`), with round 1's
+findings re-checked. Round 1 reported no findings. Its checks (1) to (5) hold, apart from the
+count bug below, which round 1 missed.
+
+Fixed in this round (commit "LOG-AWS2 round 2: do not count a KMS key that stays selected as
+skipped"):
+
+- BLOCKING (fixed) `crc/aws/kms.py:199-207`: `plan_keys` counted `skip("not_ours")` /
+  `skip("unreadable")` for every key that reached the bare `except`. That includes a key that the
+  first statement had already appended to `active` for `kms_user` before a later statement without
+  `Principal.AWS` raised (parity case `policy-match-then-statement-without-aws-stays-selected`).
+  That key still gets an `ACTION would_delete` / `deleted` line, so one resource was counted in
+  both `selected` and `skipped` of `RESULT`, against the contract ("skip counts a skipped
+  resource"). The fix counts the skip only when `active` did not grow for that key. The
+  `KEY SKIPPED <id>` DEBUG line, the bare-except behaviour, the selection and the SDK calls are
+  unchanged. New test:
+  `tests/test_aws_misc_runlog.py::test_kms_key_selected_before_the_error_is_not_counted_as_skipped`.
+
+Open findings (not fixed; none of them change behaviour):
+
+- NIT `tests/helpers_log_fix.py:23`: `Keypair <name> is in exception_regex ...` is not an
+  age-check line, but it is rewritten under BUG-356 ("per-resource age-check lines"). The same goes
+  for `tests/helpers_log_fix.py:28`: `Snap <id> has tag <key>` is rewritten under BUG-359, whose
+  row covers only "used by AMI". Moving both lines to DEBUG is right (contract rule 1, "skipping X
+  because Y" lines), but the bug tags are stretched. Proposed for the integrator (in `BUGS.md`,
+  which this lane can't edit): either widen the BUG-356 and BUG-359 rows, for example "BUG-359 AWS
+  snapshots log one INFO line per snapshot skipped (used by an AMI or carrying an exception tag)",
+  or add a row "per-resource skip-reason lines at INFO (AWS keypair exception_regex, AWS snapshot
+  exception tag)" and move the two patterns to its own rule. I left the shared BUG-356 rule alone
+  to avoid a merge conflict with other LOG lanes. Both patterns are anchored (`^Keypair `,
+  `^Snap `), so other lanes' oracles are not affected.
+- NIT `crc/aws/snapshot.py:179` (the same pattern exists in the Cleaner `apply` of keypairs and
+  Elastic IPs): a region that `plan()` reported with `REGION` and that then hits a connectivity
+  error in `apply()` is also counted by `region_skipped`, so `regions + regions_skipped` can exceed
+  the number of regions. In the same way, a delete that raises a connectivity error is recorded by
+  `fail()` and the region loop then counts it again with `region_skipped`. Both are rare and
+  correct line by line. Note this for the dry-run comparison pipeline; no change proposed.
+- NIT `crc/aws/vpc/cleaner.py:340`: in a dry run, `ACTION would_delete` lists protected VPCs too,
+  because `main` does not decide protection in a dry run (BUG-012, BUG-015, BUG-056; already in
+  the coding summary). So for the same account state, a dry run's `selected` can be higher than a
+  real run's `done`. This is expected; the comparison pipeline should allow for it on `aws/vpc`.
+- NIT KMS: keys rejected by `filter_tags`, state, description, age or a different `kms_user` are
+  not counted by any skip reason, so `selected + skipped < scanned`. The contract does not ask for
+  every skip to be counted; recorded for the owner.
+- NIT `tests/test_aws_keypair_parity.py:220`: the `get_available_regions` lambda was reformatted
+  onto one line, a test-only change unrelated to the rung. Harmless.
+
+Checks:
+
+1. Log text, levels and documented runlog calls only. No change to selection, deletion,
+   stop, SDK call order, Slack, InfluxDB, CLI flags or exit codes. Every new `try/except` around
+   an SDK call re-raises the same exception after `fail()`. The VPC teardown move to `teardown.py`
+   is byte-identical in behaviour (same helpers, same order). `delete_one` and `delete_vpc` gained
+   only keyword-only `region` arguments with a `None` default.
+2. Formats: `REGION`, `ACTION`, `SKIPPED`, `ERRORS`, `FAILED` and `RESULT` are produced only by
+   `crc.core.runlog`, so their key names, order and levels are the contract's. The lane passes
+   valid kinds (`would_delete`, `deleted`) and snake_case reasons. Exact lines are asserted in
+   `tests/test_aws_misc_runlog.py`.
+3. Parity: `tests/legacy/` is untouched. Every log divergence goes through `expected_logs` with an
+   in-scope ID (BUG-357 for KMS, BUG-359 for snapshots, BUG-356 for keypairs; see the first NIT
+   above). The rules only change the level, never drop or rewrite an oracle line. Each bug has an
+   `oracle != new` case. Calls, results, stdout and errors are still compared exactly, with no
+   global loosening.
+4. `tests/archtest/safety_lock.json` and the five locked safety tests are untouched. None of them
+   mentions `KEY SKIPPED`, `used by AMI` or the keypair lines.
+5. ARCH-002: `crc/aws/README.md` documents `_regionlog.start/region_done/region_skipped`, and
+   `crc/aws/vpc/README.md` documents `tear_down`. `crc/core`, `crc/cli`, other cloud packages,
+   `crc/aws/_base.py`, `crc/aws/connectivity.py` and `docs/refactor/{BUGS,STATUS,PLAN}.md` are
+   untouched.
+
+Gates (`pip install -r requirements.txt -r requirements-dev.txt && make check`, Python 3.12, after
+the fix):
+
+- `ruff check`: passed
+- `mypy`: passed (`Success: no issues found in 210 source files`)
+- `lint-imports`: passed (5 kept, 0 broken)
+- `pytest -q`: `42285 passed` (42284 after round 1 plus the new KMS test; 42256 at `7437ac5`);
+  `make check` exit 0
+
+ROUND 2 VERDICT: APPROVE
