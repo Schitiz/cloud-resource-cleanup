@@ -238,7 +238,9 @@ class SlackNotifier:
         """
         try:
             if link_names:
-                self.client.chat_postMessage(channel="#" + self.channel, text=text, link_names=True)
+                self.client.chat_postMessage(
+                    channel="#" + self.channel, text=text, link_names=True
+                )
             else:
                 self.client.chat_postMessage(channel="#" + self.channel, text=text)
         except Exception as e:

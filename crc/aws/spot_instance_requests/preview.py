@@ -34,10 +34,12 @@ def preview_request(
     region: str | None = None,
 ) -> None:
     """Record what a real run would do for one request (reads only)."""
-    inspection = inspect_instance(client, match)
+    inspection = inspect_instance(client, match, region)
     if inspection is None:
         return
-    deletable = filter_deletable_leftover_volumes(settings, client, inspection.leftover_volumes)
+    deletable = filter_deletable_leftover_volumes(
+        settings, client, inspection.leftover_volumes, region
+    )
     state.spot_requests_to_delete.append(match.request_id)
     if match.instance_id and not inspection.instance_done:
         state.instance_ids_to_delete.append(match.instance_id)

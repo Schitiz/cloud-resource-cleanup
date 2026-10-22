@@ -51,7 +51,9 @@ class Selection:
     warnings: tuple[str, ...] = ()
 
 
-def _validate(cloud: str, resource: str, operation: Operation, options: SelectionOptions) -> None:
+def _validate(
+    cloud: str, resource: str, operation: Operation, options: SelectionOptions
+) -> None:
     if cloud != "all" and cloud not in CLOUDS:
         raise ValueError(f"unknown cloud {cloud!r}; expected one of {[*CLOUDS, 'all']}")
     if resource != "all" and resource not in RESOURCES + EXTRA_RESOURCES:

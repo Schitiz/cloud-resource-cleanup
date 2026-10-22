@@ -72,3 +72,25 @@ Test count: 42256 at 7437ac5 (LOG-0 review), 42271 after (`make check` green: ru
 Nothing. BUG rows in `docs/refactor/BUGS.md` are not edited here (other lanes edit it); the status
 of BUG-358 (AWS VM part), BUG-361 and BUG-362 (AWS VM, disk, spot parts) should be set at
 integration.
+
+## Round 1 (Argon)
+
+### Findings and fixes
+
+- **Out-of-scope formatting edits (fixed)**: `11e31d2` included formatting-only edits across 17 files outside the LOG-AWS1 lane (`crc/cli/inputs.py`, `crc/core/{engine,policy,report,selection}.py`, `crc/notify/{influx,slack}.py`, `tests/test_aws_{keypair,snapshot}_parity.py`, `tests/test_core_{engine,policy,registry,report,selection}.py`, `tests/test_notify_{influx,parity,slack}.py`). Reverted all 17 files to `7437ac5` so the branch only touches in-scope files and avoids merge conflicts with sibling lanes.
+- **Swallowed errors and region propagation in `crc/aws/spot_instance_requests` (fixed)**:
+  - `describe_tagged_leftover_volumes()` and `live_spot_request_tags()` (`crc/aws/spot_instance_requests/volumes.py`) logged `ERROR` and swallowed `ClientError` / `BotoCoreError` without calling `runlog.current().fail()`. Added `fail()` calls at both sites (BUG-362).
+  - `volume_ok_to_delete()`, `inspect_instance()`, and `wait_volume_available_then_delete()` passed `region=None` to `fail()` even when called from `cleanup_one()`, `sweep_region()`, or `preview_request()` where the region is known. Threaded optional `region: str | None = None` through those helpers so `FAILED` lines report the region; added `test_spot_volume_and_sweep_failures_carry_region` in `tests/test_aws_log_fix.py`.
+- **Missing `InstanceId` fallback in `crc/aws/vm/cleaner.py` (fixed)**: passed `decision.id or "-"` and `_safe_id(inst) or "-"` to `runlog.current().fail()` so malformed instance dicts without `InstanceId` emit `id=-` instead of an empty `id=`.
+- **Package re-exports in `crc/aws/vm/__init__.py` (fixed)**: re-exported `note_dry_run` and `note_region` in `crc/aws/vm/__init__.py` and `__all__` to match `crc/aws/vm/README.md` Extension Rule 5.
+
+### Checks and gates
+
+1. **Behaviour invariance**: Only log levels (`logging.debug` for VM tag dumps and disk/spot per-resource INFO skip lines) and `crc.core.runlog` collector calls changed. Selection, deletion/stop decisions, SDK call order, Slack messages, InfluxDB points, CLI flags, and exit codes are unchanged.
+2. **Contract formats**: `RUN START`, `REGION`, `ACTION`, `SKIPPED`, `ERRORS`, `FAILED`, and `RESULT` lines match `docs/refactor/LOGGING.md` key names, order, and log levels.
+3. **Parity tests**: Oracles in `tests/legacy/` are untouched; all log level changes go through `expected_logs()` with `BUG-356` / `BUG-358`, `oracle_logs != new_logs` is asserted for each cleaner, and all non-log outcomes match the oracle.
+4. **Safety lock**: `tests/archtest/safety_lock.json` and all locked safety tests are untouched.
+5. **READMEs / ARCH-002**: `crc/aws/vm/README.md`, `crc/aws/disk/README.md`, and `crc/aws/spot_instance_requests/README.md` are synced with all public symbols.
+6. **`make check`**: ruff, mypy, import-linter (5/5 contracts kept), and `pytest -q` all pass with **42272 passed** (up from 42256 at `7437ac5`).
+
+VERDICT: APPROVE

@@ -249,7 +249,7 @@ class VmCleaner:
         the missing Name tag is logged at ERROR, so it is also a failure."""
         run = runlog.current()
         if decision.reason == "no Name tag":
-            run.fail(region or None, decision.id, "instance doesn't have Name Tag")
+            run.fail(region or None, decision.id or "-", "instance doesn't have Name Tag")
         elif decision.reason in _SKIP_REASONS:
             run.skip(_SKIP_REASONS[decision.reason])
 
@@ -312,7 +312,7 @@ class VmCleaner:
             return self._judge(client, inst, (name, region), tags, now)
         except Exception as e:
             logging.error(f"Error occurred while processing {name} instance: {e}")
-            runlog.current().fail(region or None, _safe_id(inst), e)
+            runlog.current().fail(region or None, _safe_id(inst) or "-", e)
             return Skipped(id=_safe_id(inst), reason=f"error: {e}")
 
     def _screen(self, inst: Mapping[str, Any]) -> Skipped | tuple[str, Any]:

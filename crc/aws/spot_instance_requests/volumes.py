@@ -79,12 +79,14 @@ def prefixed_scope_keys_on_volume(client: SpotClient, volume_id: str) -> list[st
     return sorted(k for k in keys if k.startswith(LEFTOVER_SCOPE_PREFIX))
 
 
-def volume_ok_to_delete(settings: SpotSettings, client: SpotClient, volume_id: str) -> bool:
+def volume_ok_to_delete(
+    settings: SpotSettings, client: SpotClient, volume_id: str, region: str | None = None
+) -> bool:
     """Fail closed: skip when tags cannot be read or protect the volume."""
     tags = describe_volume_tag_list(client, volume_id)
     if tags is None:
         logging.error("Skipping leftover volume %s: could not read tags (fail closed)", volume_id)
-        runlog.current().fail(None, volume_id, "could not read volume tags (fail closed)")
+        runlog.current().fail(region, volume_id, "could not read volume tags (fail closed)")
         return False
     if volume_tags_protect(settings, own_volume_tags(tags)):
         logging.debug(
@@ -98,9 +100,12 @@ def volume_ok_to_delete(settings: SpotSettings, client: SpotClient, volume_id: s
 
 
 def filter_deletable_leftover_volumes(
-    settings: SpotSettings, client: SpotClient, volume_ids: Sequence[str]
+    settings: SpotSettings,
+    client: SpotClient,
+    volume_ids: Sequence[str],
+    region: str | None = None,
 ) -> list[str]:
-    return [vid for vid in volume_ids if volume_ok_to_delete(settings, client, vid)]
+    return [vid for vid in volume_ids if volume_ok_to_delete(settings, client, vid, region)]
 
 
 def instance_state_and_dot_false_volumes(
@@ -150,6 +155,7 @@ def describe_tagged_leftover_volumes(
     client: SpotClient,
     request_id: str | None = None,
     statuses: Sequence[str] | None = None,
+    region: str | None = None,
 ) -> list[Mapping[str, Any]]:
     """describe_volumes for crc_leftover_of, optionally one request id and given states."""
     filters: list[dict[str, Any]] = [
@@ -166,21 +172,26 @@ def describe_tagged_leftover_volumes(
             volumes.extend(page.get("Volumes") or [])
     except ERRORS as e:
         logging.error("describe_volumes for %s leftovers failed: %s", LEFTOVER_FROM_TAG, e)
+        runlog.current().fail(region, request_id or "-", e)
     return volumes
 
 
-def volumes_tagged_leftover(client: SpotClient, request_id: str | None = None) -> list[str]:
+def volumes_tagged_leftover(
+    client: SpotClient, request_id: str | None = None, region: str | None = None
+) -> list[str]:
     """Volumes marked crc_leftover_of in available or in-use state."""
     return [
         vol["VolumeId"]
         for vol in describe_tagged_leftover_volumes(
-            client, request_id=request_id, statuses=["available", "in-use"]
+            client, request_id=request_id, statuses=["available", "in-use"], region=region
         )
         if vol.get("VolumeId")
     ]
 
 
-def inspect_instance(client: SpotClient, match: RequestMatch) -> Inspection | None:
+def inspect_instance(
+    client: SpotClient, match: RequestMatch, region: str | None = None
+) -> Inspection | None:
     """Instance state and leftover volumes of a request; None when cleanup must not go on."""
     instance_state: str | None = None
     leftover_volumes: list[str] = []
@@ -197,11 +208,11 @@ def inspect_instance(client: SpotClient, match: RequestMatch) -> Inspection | No
                 match.request_id,
                 match.instance_id,
             )
-            runlog.current().fail(None, match.request_id, "describe_instances failed")
+            runlog.current().fail(region, match.request_id, "describe_instances failed")
             return None
         volumes_from_bdm = bool(leftover_volumes)
     if not leftover_volumes:
-        leftover_volumes = volumes_tagged_leftover(client, match.request_id)
+        leftover_volumes = volumes_tagged_leftover(client, match.request_id, region)
     inspection = Inspection(instance_state, leftover_volumes, volumes_from_bdm)
     if match.already_cancelled and inspection.instance_done and not leftover_volumes:
         logging.debug(
@@ -215,7 +226,9 @@ def inspect_instance(client: SpotClient, match: RequestMatch) -> Inspection | No
     return inspection
 
 
-def live_spot_request_tags(client: SpotClient, request_id: str) -> LiveLookup:
+def live_spot_request_tags(
+    client: SpotClient, request_id: str, region: str | None = None
+) -> LiveLookup:
     """("live", tags, create_time), ("gone", None, None) or ("error", None, None)."""
     try:
         resp = client.describe_spot_instance_requests(SpotInstanceRequestIds=[request_id])
@@ -225,6 +238,7 @@ def live_spot_request_tags(client: SpotClient, request_id: str) -> LiveLookup:
         logging.error(
             "describe_spot_instance_requests for %s failed during sweep: %s", request_id, e
         )
+        runlog.current().fail(region, request_id, e)
         return "error", None, None
     except BotoCoreError as e:
         logging.error(
@@ -232,6 +246,7 @@ def live_spot_request_tags(client: SpotClient, request_id: str) -> LiveLookup:
             request_id,
             e,
         )
+        runlog.current().fail(region, request_id, e)
         return "error", None, None
     reqs = resp.get("SpotInstanceRequests") or []
     if not reqs:
@@ -249,7 +264,11 @@ def _tags_pass(settings: SpotSettings, tags: TagList, create_time: Any, now: Any
 
 
 def volume_passes_sweep_gates(
-    settings: SpotSettings, client: SpotClient, volume: Mapping[str, Any], now: datetime.datetime
+    settings: SpotSettings,
+    client: SpotClient,
+    volume: Mapping[str, Any],
+    now: datetime.datetime,
+    region: str | None = None,
 ) -> bool:
     """Same gates as spot requests plus the volume's own exception/notags/yb_task."""
     request_id = tag_map(volume.get("Tags") or []).get(LEFTOVER_FROM_TAG)
@@ -257,7 +276,7 @@ def volume_passes_sweep_gates(
         return False
     if volume_tags_protect(settings, own_tags_for_protect(volume)):
         return False
-    status, live_tags, create_time = live_spot_request_tags(client, request_id)
+    status, live_tags, create_time = live_spot_request_tags(client, request_id, region)
     if status == "error":
         return False
     if status == "live":
@@ -278,12 +297,14 @@ def run_sweep(
 
     An error on one volume is logged and does not abort the rest.
     """
-    for volume in describe_tagged_leftover_volumes(client, statuses=["available"]):
+    for volume in describe_tagged_leftover_volumes(
+        client, statuses=["available"], region=region
+    ):
         volume_id = volume.get("VolumeId")
         if not volume_id:
             continue
         try:
-            if not volume_passes_sweep_gates(settings, client, volume, now):
+            if not volume_passes_sweep_gates(settings, client, volume, now, region):
                 logging.debug(
                     "Skipping tagged leftover volume %s in %s (filters/exceptions)",
                     volume_id,

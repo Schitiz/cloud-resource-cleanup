@@ -169,7 +169,11 @@ def _volume_step(client: SpotClient, volume_id: str) -> str | None:
 
 
 def wait_volume_available_then_delete(
-    settings: SpotSettings, waiter: Waiter, client: SpotClient, volume_id: str
+    settings: SpotSettings,
+    waiter: Waiter,
+    client: SpotClient,
+    volume_id: str,
+    region: str | None = None,
 ) -> str | None:
     """Wait for available and delete. "deleted" when this run issued delete_volume,
     "already_gone" when the volume is already missing, or None on failure."""
@@ -184,13 +188,13 @@ def wait_volume_available_then_delete(
             if code == "InvalidVolume.NotFound":
                 return "already_gone"
             logging.error("Error waiting/deleting volume %s: %s", volume_id, e)
-            runlog.current().fail(None, volume_id, e)
+            runlog.current().fail(region, volume_id, e)
             return None
         except BotoCoreError as e:
             logging.error("Transport error waiting/deleting volume %s: %s", volume_id, e)
-            runlog.current().fail(None, volume_id, e)
+            runlog.current().fail(region, volume_id, e)
             return None
         waiter.sleep(settings.poll_interval_sec)
     logging.error("Timed out waiting for volume %s to become available; not deleted", volume_id)
-    runlog.current().fail(None, volume_id, "timed out waiting for the volume to become available")
+    runlog.current().fail(region, volume_id, "timed out waiting for the volume to become available")
     return None

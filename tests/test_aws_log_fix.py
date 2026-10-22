@@ -23,7 +23,16 @@ from crc.aws.vm.cleaner import VmCleaner, VmSettings
 from crc.core import registry, runlog
 from crc.core.cleaner import Operation, RunContext
 from tests.test_aws_disk_cleaner import FakeCloudWatch, FakeEc2, volume
-from tests.test_aws_spot_instance_requests_parity import Case, FakeAws, Spec, ce, one, req, std
+from tests.test_aws_spot_instance_requests_parity import (
+    Case,
+    FakeAws,
+    Spec,
+    ce,
+    one,
+    req,
+    std,
+    swept,
+)
 from tests.test_aws_vm import NOW as VM_NOW
 from tests.test_aws_vm import FakeClient as VmFakeClient
 from tests.test_aws_vm import instance
@@ -380,3 +389,20 @@ def test_spot_skip_reasons_and_connectivity_skip(
         "selected=0 done=0 failed=0 skipped=1 regions=1 regions_skipped=1 duration_s=0"
     )
     assert any("Region eu-west-1: skipped" in r.getMessage() for r in caplog.records)
+
+
+def test_spot_volume_and_sweep_failures_carry_region(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    begin(caplog, "spot_instance_requests")
+    spec = swept(
+        key_errors={("describe_spot_instance_requests", "sir-gone"): ce("RequestLimitExceeded")}
+    )
+    cleaner, ctx = spot_cleaner(Case("x", one(spec)), monkeypatch, False)
+    cleaner.apply(cleaner.plan(ctx), ctx)
+    out = lines(caplog)
+    assert "ERRORS count=1" in out
+    assert any(line.startswith(f"FAILED {SPOT} id=sir-gone error=ClientError: ") for line in out)
+    assert out[-1].endswith(
+        "selected=0 done=0 failed=1 skipped=1 regions=1 regions_skipped=0 duration_s=0"
+    )

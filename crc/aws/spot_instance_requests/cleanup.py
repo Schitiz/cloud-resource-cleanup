@@ -169,8 +169,12 @@ def _terminate(
 
 def _delete_leftover_volumes(env: CleanupEnv, client: SpotClient, volumes: list[str]) -> bool:
     deleted_any = False
-    for volume_id in filter_deletable_leftover_volumes(env.settings, client, volumes):
-        result = wait_volume_available_then_delete(env.settings, env.waiter, client, volume_id)
+    for volume_id in filter_deletable_leftover_volumes(
+        env.settings, client, volumes, env.region
+    ):
+        result = wait_volume_available_then_delete(
+            env.settings, env.waiter, client, volume_id, env.region
+        )
         if result == "deleted":
             env.state.volumes_to_delete.append(volume_id)
             runlog.current().action("deleted", env.region, volume_id)
@@ -181,7 +185,7 @@ def _delete_leftover_volumes(env: CleanupEnv, client: SpotClient, volumes: list[
 
 def cleanup_one(env: CleanupEnv, client: SpotClient, match: RequestMatch) -> None:
     """Cancel first, then terminate, then delete the DeleteOnTermination=false volumes."""
-    inspection = inspect_instance(client, match)
+    inspection = inspect_instance(client, match, env.region)
     if inspection is None:
         return
     # Tag BDM volumes before cancel so a CreateTags failure leaves the request untouched.
@@ -218,7 +222,9 @@ def sweep_region(env: CleanupEnv, client: SpotClient, now: datetime.datetime) ->
     """Delete available volumes tagged crc_leftover_of whose gates still allow it."""
 
     def act(volume_id: str) -> None:
-        result = wait_volume_available_then_delete(env.settings, env.waiter, client, volume_id)
+        result = wait_volume_available_then_delete(
+            env.settings, env.waiter, client, volume_id, env.region
+        )
         if result == "deleted" and volume_id not in env.state.volumes_to_delete:
             env.state.volumes_to_delete.append(volume_id)
             runlog.current().action("deleted", env.region, volume_id)

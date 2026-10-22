@@ -216,7 +216,9 @@ class FakeAws:
 
     def session(self) -> Any:
         self.calls.append(("session",))
-        return types.SimpleNamespace(get_available_regions=lambda service: list(self.case.regions))
+        return types.SimpleNamespace(
+            get_available_regions=lambda service: list(self.case.regions)
+        )
 
 
 @dataclass
