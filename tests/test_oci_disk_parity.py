@@ -21,6 +21,7 @@ from oci.exceptions import ConnectTimeout, RequestException, ServiceError
 from crc.core.cleaner import Operation, RunContext
 from crc.oci.disk import Disk, DiskRuntime, build_disk_cleaner
 from tests.helpers_log_fix import expected_logs
+from tests.log_fix_oci import RULES
 
 BUGS = {"BUG-353", "BUG-358"}
 ORACLE = Path(__file__).parent / "legacy" / "oci_disk.txt"
@@ -631,7 +632,7 @@ def test_matches_main(
     assert new.error == old.error
     assert new.deleted == old.deleted
     assert new.count == old.count
-    assert new.logs == expected_logs(old.logs, BUGS)
+    assert new.logs == expected_logs(old.logs, BUGS, RULES)
     assert new.stdout == old.stdout
 
 
@@ -705,7 +706,9 @@ def test_cleaner_protocol_matches_main(
     ]
     assert [c for c in new.calls if _is_delete(c)] == [c for c in old.calls if _is_delete(c)]
     old_logs = [
-        log for log in expected_logs(old.logs, BUGS) if not log[2].startswith("count of items")
+        log
+        for log in expected_logs(old.logs, BUGS, RULES)
+        if not log[2].startswith("count of items")
     ]
     plan_logs = [log for log in old_logs if not _is_apply_log(log) and not _is_summary_log(log)]
     apply_logs = [log for log in old_logs if _is_apply_log(log)]

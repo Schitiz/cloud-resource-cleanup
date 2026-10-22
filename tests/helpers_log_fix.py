@@ -8,10 +8,11 @@ Contract: ``docs/refactor/LOGGING.md``.
 
 import logging
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 LogRecordKey = tuple[Any, ...]
+Rule = Callable[[list[LogRecordKey]], list[LogRecordKey]]
 
 _AGE_CHECK_PATTERNS = (
     re.compile(r"^Validating resource age with threshold: "),
@@ -41,57 +42,18 @@ def _bug_356(records: list[LogRecordKey]) -> list[LogRecordKey]:
     ]
 
 
-RULES: dict[str, Callable[[list[LogRecordKey]], list[LogRecordKey]]] = {
+# Core rules only. Each cloud lane keeps its own rules in tests/log_fix_<lane>.py and passes
+# them as ``rules`` (``{**RULES, ...}``), so lanes never edit this file and merge cleanly.
+RULES: dict[str, Rule] = {
     "BUG-356": _bug_356,
 }
 
 
-def _is_tag_dump(message: str) -> bool:
-    """OCI dumps `str(freeform_tags)`: a bare dict repr with no other text."""
-    return message.startswith("{") and message.endswith("}")
-
-
-_LEFTOVER_SKIP = re.compile(r"^Skipping leftover volume .+: exception_tags/notags$")
-
-
-def _bug_353(records: list[LogRecordKey]) -> list[LogRecordKey]:
-    """BUG-353: the OCI age-check freeform tag dict becomes DEBUG, text unchanged."""
-    return [
-        _with_level(record, logging.DEBUG) if _is_tag_dump(str(record[-1])) else record
-        for record in records
-    ]
-
-
-def _bug_358(records: list[LogRecordKey]) -> list[LogRecordKey]:
-    """BUG-358: raw tag dumps and the OCI per-resource "Skipping leftover volume" line become
-    DEBUG, text unchanged."""
-    return [
-        _with_level(record, logging.DEBUG)
-        if _is_tag_dump(str(record[-1])) or _LEFTOVER_SKIP.search(str(record[-1]))
-        else record
-        for record in _bug_353(records)
-    ]
-
-
-def _inserted_lines_only(records: list[LogRecordKey]) -> list[LogRecordKey]:
-    """BUG-361 and BUG-362 only add RUN START/REGION/ACTION/SKIPPED/ERRORS/FAILED/RESULT lines
-    in an attached run (`logger.begin`). A parity run is unattached, so the oracle list is
-    unchanged; the new lines are asserted exactly in the logger unit tests, never dropped here."""
-    return list(records)
-
-
-RULES.update(
-    {
-        "BUG-353": _bug_353,
-        "BUG-358": _bug_358,
-        "BUG-361": _inserted_lines_only,
-        "BUG-362": _inserted_lines_only,
-    }
-)
-
-
-def expected_logs(oracle_logs: Sequence[LogRecordKey], bugs: set[str]) -> list[LogRecordKey]:
-    """Rewrite the oracle log records with the rule of each bug ID.
+def expected_logs(
+    oracle_logs: Sequence[LogRecordKey], bugs: set[str], rules: Mapping[str, Rule] | None = None
+) -> list[LogRecordKey]:
+    """Rewrite the oracle log records with the rule of each bug ID (from ``rules``, default
+    the core ``RULES``).
 
     A record is a tuple whose last item is the message and whose second to last is the level
     (``levelno`` or ``levelname``); any items before them (for example the logger name) are kept.
@@ -99,11 +61,15 @@ def expected_logs(oracle_logs: Sequence[LogRecordKey], bugs: set[str]) -> list[L
     """
     records = [tuple(record) for record in oracle_logs]
     for bug in sorted(bugs):
-        records = RULES[bug](records)
+        records = (RULES if rules is None else rules)[bug](records)
     return records
 
 
-def expected_outcome(oracle: tuple[Any, Any, Sequence[LogRecordKey]], bugs: set[str]) -> Any:
+def expected_outcome(
+    oracle: tuple[Any, Any, Sequence[LogRecordKey]],
+    bugs: set[str],
+    rules: Mapping[str, Rule] | None = None,
+) -> Any:
     """Rewrite the log list (third item) of a ``(kind, result, logs)`` parity outcome."""
     kind, result, logs = oracle
-    return kind, result, expected_logs(logs, bugs)
+    return kind, result, expected_logs(logs, bugs, rules)

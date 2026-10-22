@@ -475,24 +475,3 @@ def test_spot_vm_cleaner_plan_apply_reports(
         ),
         (logging.INFO, f"ACTION {kind} cloud=oci resource=spot_instances region=r1 id=v-a name=-"),
     ]
-
-
-def test_helper_rules_change_only_the_level_of_tag_dumps() -> None:
-    from tests.helpers_log_fix import expected_logs
-
-    oracle = [
-        ("root", logging.INFO, "{'env': 'ci'}"),
-        ("root", logging.INFO, "Skipping leftover volume v1: exception_tags/notags"),
-        ("root", logging.INFO, "Deleting instance x"),
-    ]
-    assert expected_logs(oracle, {"BUG-353"}) == [
-        ("root", logging.DEBUG, "{'env': 'ci'}"),
-        oracle[1],
-        oracle[2],
-    ]
-    assert expected_logs(oracle, {"BUG-358"}) == [
-        ("root", logging.DEBUG, "{'env': 'ci'}"),
-        ("root", logging.DEBUG, "Skipping leftover volume v1: exception_tags/notags"),
-        oracle[2],
-    ]
-    assert expected_logs(oracle, {"BUG-361", "BUG-362"}) == oracle

@@ -22,6 +22,7 @@ from oci.exceptions import ConnectTimeout, RequestException, ServiceError
 from crc.core.cleaner import Operation, RunContext
 from crc.oci.vm import VM, VmRuntime, build_vm_cleaner
 from tests.helpers_log_fix import expected_logs
+from tests.log_fix_oci import RULES
 
 BUGS = {"BUG-358"}
 ORACLE = Path(__file__).parent / "legacy" / "oci_vm.txt"
@@ -579,7 +580,7 @@ def test_adapter_matches_main(
     assert new.error == old.error
     assert new.acted == old.acted
     assert new.count == old.count
-    assert new.logs == expected_logs(old.logs, BUGS)
+    assert new.logs == expected_logs(old.logs, BUGS, RULES)
     assert new.stdout == old.stdout
 
 
@@ -658,7 +659,9 @@ def test_cleaner_protocol_matches_main(
     ]
     assert [c for c in new.calls if _is_mutation(c)] == [c for c in old.calls if _is_mutation(c)]
     old_logs = [
-        log for log in expected_logs(old.logs, BUGS) if not log[2].startswith("count of items")
+        log
+        for log in expected_logs(old.logs, BUGS, RULES)
+        if not log[2].startswith("count of items")
     ]
     plan_logs = [log for log in old_logs if not _is_apply_log(log) and not _is_summary_log(log)]
     apply_logs = [log for log in old_logs if _is_apply_log(log)]
@@ -699,7 +702,7 @@ def test_delete_then_stop_then_delete_shares_name_lists_as_main(
     new_logs = [(r.levelno, r.getMessage()) for r in caplog.records]
     assert new == old
     assert world.calls == old_calls
-    assert new_logs == expected_logs(old_logs, BUGS)
+    assert new_logs == expected_logs(old_logs, BUGS, RULES)
 
 
 QUIRKS: Sequence[tuple[str, str, Callable[[Outcome], bool]]] = [

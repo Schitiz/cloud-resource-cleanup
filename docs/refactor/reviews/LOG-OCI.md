@@ -145,3 +145,12 @@ Python 3.12.3:
 - `pytest -q`: **42277 passed** (42256 at 7437ac5).
 
 ROUND 2 VERDICT: APPROVE
+
+## Rule move
+
+The lane's bug rules (BUG-353, BUG-358, BUG-361, BUG-362 and their helpers) moved from
+`tests/helpers_log_fix.py` to `tests/log_fix_oci.py`; `RULES = {**helpers_log_fix.RULES, ...}`. The
+`test_oci_*_parity.py` tests pass `rules=RULES` to `expected_logs`. The rule unit test moved from
+`tests/test_oci_logger.py` to `tests/test_log_fix_oci.py`. `tests/helpers_log_fix.py` and
+`tests/test_log_fix_helpers.py` are identical to `logging/core` (7c27986). The lane did not change
+the core BUG-356 rule, so it keeps the core entry. No production code changed.

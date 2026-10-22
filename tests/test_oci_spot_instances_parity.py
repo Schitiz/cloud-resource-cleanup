@@ -25,6 +25,7 @@ import crc.oci.spot_vm.leftovers as leftovers_module
 from crc.core.cleaner import Operation, RunContext
 from crc.oci.spot_vm import SpotVM, SpotVmRuntime, build_spot_vm_cleaner
 from tests.helpers_log_fix import expected_logs
+from tests.log_fix_oci import RULES
 
 BUGS = {"BUG-358"}
 ORACLE = Path(__file__).parent / "legacy" / "oci_spot_vm.txt"
@@ -735,7 +736,7 @@ def test_adapter_matches_main(
     assert new.error == old.error
     assert new.acted == old.acted
     assert new.volumes == old.volumes
-    assert new.logs == expected_logs(old.logs, BUGS)
+    assert new.logs == expected_logs(old.logs, BUGS, RULES)
     assert new.stdout == old.stdout
 
 
@@ -814,7 +815,7 @@ def test_cleaner_protocol_matches_main(
     for name in sorted(names):
         assert _of(new.calls, [name]) == _of(old.calls, [name]), name
     assert _of(new.calls, MUTATING) == _of(old.calls, MUTATING)
-    old_logs = expected_logs(old.logs, BUGS)
+    old_logs = expected_logs(old.logs, BUGS, RULES)
     assert Counter(new.logs) == Counter(old_logs)
     assert [log for log in new.logs if _is_summary(log)] == [
         log for log in old_logs if _is_summary(log)
@@ -852,7 +853,9 @@ def test_repeated_delete_accumulates_as_main(
     new = _sequence(_new, case, world)
     assert new == old
     assert world.calls == old_calls
-    assert [(r.levelno, r.getMessage()) for r in caplog.records] == expected_logs(old_logs, BUGS)
+    assert [(r.levelno, r.getMessage()) for r in caplog.records] == expected_logs(
+        old_logs, BUGS, RULES
+    )
 
 
 QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [

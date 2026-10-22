@@ -88,7 +88,10 @@ RESULT cloud=<c> resource=<r> operation=<op> dry_run=<true|false> selected=<n> d
 Oracles in `tests/legacy/*.txt` stay frozen. Parity tests compare `(logger, levelno,
 message)` of the new code with the oracle through `tests/helpers_log_fix.py`:
 `expected_logs(oracle_logs, bugs)` rewrites the oracle log list deterministically, one rule
-per bug ID (for example BUG-356: the age-check messages become `logging.DEBUG`). A rule may
+per bug ID (for example BUG-356: the age-check messages become `logging.DEBUG`). That file
+holds the core rules only; each cloud lane keeps its rules in `tests/log_fix_<lane>.py`
+(`RULES = {**helpers_log_fix.RULES, ...}`) and passes them as `expected_logs(..., rules=RULES)`,
+so no lane edits the shared helper and the lane branches merge without conflicts. A rule may
 only change a level or insert the documented new lines; it never drops an oracle line or
 changes its text. Each parity test asserts `new_logs == expected_logs(oracle_logs,
 {<bug IDs this lane fixes>})` and `oracle_logs != new_logs` for at least one case per bug.
