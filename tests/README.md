@@ -5,17 +5,18 @@
 Offline pytest suite (`pytest -q`, part of `make check`). No test calls a real cloud API or uses
 credentials; SDK clients are mocked. Layout:
 
-- `test_core_*.py`: pure tests of `crc/core` (age, policy, cleaner, registry, report, selection, engine).
+- `test_core_*.py`: pure tests of `crc/core` (age, policy, cleaner, registry, report, selection, engine, logger).
   Some compare against `crc.py` itself, loaded under another module name.
 - `test_notify_slack.py`, `test_notify_influx.py`: `crc/notify` with fake clients asserting the exact calls.
   `test_notify_parity.py` runs the same inputs through `legacy_crc_notify_reference.txt` (a frozen
   copy of the old `crc.py` Slack and Influx methods, not a Python module), the current `crc.py` and
   the notifiers.
-- `test_cli_args_parity.py`, `test_cli_crc_parity.py`, `test_cli_main_parity.py`: `crc/cli` (flags, the
-  `CRC` class, `main()`) against `legacy/crc_main.txt`, on recording fakes.
-- `test_crc_service_parity.py`, `test_crc_service_is_old_parity.py` (with `helpers_crc_service.py`) and
-  `test_crc_utils_parity.py`, `test_crc_utils.py`: `crc/service.py` and `crc/utils.py` against
-  `legacy/crc_service.txt` and `legacy/crc_utils.txt`.
+- `test_cli_args_parity.py`, `test_cli_crc_parity.py`, `test_cli_main_parity.py`, `test_cli_logger.py`: `crc/cli` (flags, the
+  `CRC` class, `main()`, `logger` header/footer wiring) against `legacy/crc_main.txt`, on recording fakes.
+- `test_crc_service_parity.py`, `test_crc_service_is_old_parity.py` (with `helpers_crc_service.py`),
+  `helpers_log_fix.py`, `test_log_fix_helpers.py` and `test_crc_utils_parity.py`, `test_crc_utils.py`:
+  `crc/service.py` and `crc/utils.py` against `legacy/crc_service.txt` and `legacy/crc_utils.txt`, plus the
+  per-bug oracle log rewriter of the LOG rungs (`docs/refactor/LOGGING.md`).
 - `test_aws_*.py`, `test_azure_*.py`, `test_azu_spot_vm.py`, `test_gcp_*.py`, `test_oci_*.py`: mocked tests of the
   refactored cloud cleaners (`crc/aws`, `crc/azu`, `crc/gcp`, `crc/oci`). A `*_parity.py` file runs the frozen
   `main` oracle in `legacy/` (see `legacy/README.md` for the full table) and the refactored module (adapter

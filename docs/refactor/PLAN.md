@@ -94,7 +94,7 @@ levels only; their contract (formats, levels, parity-test rule) is in `docs/refa
 
 | Rung | Bugs | May edit CLEANUP_SAFETY.md |
 |------|------|----------------------------|
-| LOG-0 | BUG-356, BUG-360, BUG-362 (runlog plumbing; CLI header/footer) | no |
+| LOG-0 | BUG-356, BUG-360, BUG-362 (logger plumbing; CLI header/footer) | no |
 | LOG-AWS1 | BUG-358, BUG-361, BUG-362 (aws vm, spot_instance_requests, disk) | no |
 | LOG-AWS2 | BUG-357, BUG-359, BUG-361, BUG-362 (aws kms, snapshot, keypairs, elastic_ips, vpc) | no |
 | LOG-AZU | BUG-358, BUG-361, BUG-362 | no |
