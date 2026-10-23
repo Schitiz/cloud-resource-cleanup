@@ -11,6 +11,9 @@ credentials; SDK clients are mocked. Layout:
   `test_notify_parity.py` runs the same inputs through `legacy_crc_notify_reference.txt` (a frozen
   copy of the old `crc.py` Slack and Influx methods, not a Python module), the current `crc.py` and
   the notifiers.
+- `helpers_oracle.py` (tested by `test_helpers_oracle.py`): loads `legacy/crc_main.txt` with its adapter
+  imports bound to the module oracles (`legacy/<cloud>_<kind>.txt`), so a parity test's legacy side never
+  needs a current adapter class.
 - `test_cli_args_parity.py`, `test_cli_crc_parity.py`, `test_cli_bridge_parity.py`, `test_cli_main_parity.py`, `test_cli_logger.py`, `test_cli_logging_init.py` (with `helpers_cli_routes.py`): `crc/cli` (flags, the
   `CRC` class, `bridge` to `crc.core.engine`, `main()`, `logger` header/footer wiring and BUG-363 root handler initialisation) against `legacy/crc_main.txt`, on recording fakes.
 - `test_crc_service_parity.py`, `test_crc_service_is_old_parity.py` (with `helpers_crc_service.py`),
