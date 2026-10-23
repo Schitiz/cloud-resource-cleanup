@@ -19,7 +19,7 @@ Wave W2 lane W2-AWS-B: structure-only split of the four large AWS files, no beha
 
 **READMEs** updated: `spot_instance_requests`, `vm`, `vpc` (module lists, new public names, 250-line target).
 
-**Tests / gates.** `pytest -q`: 43010 passed at `cea0a8a`, 43010 passed after (same count, no test added or removed). `make check` (ruff, mypy strict, lint-imports, pytest incl. ARCH-001..005 and SAF-LOCK) green: 3m00s at the base commit run, 3m00s after (real 3m34s with install-warm at base, 3m00s after).
+**Tests / gates.** `pytest -q`: 43010 passed at `cea0a8a`, 43010 passed after (same count, no test added or removed). `make check` (ruff, mypy strict, lint-imports, pytest incl. ARCH-001..005 and SAF-LOCK) green. Runtime of `make check`: 3m34s at the base commit (pytest 193s), 3m00s after (pytest 174s).
 
 ## Owner action
 
