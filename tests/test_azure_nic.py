@@ -31,14 +31,14 @@ def test_plan_lists_and_never_deletes() -> None:
     azure = FakeAzure([nic("nic-a"), nic("nic-b", VM)])
     plan = _cleaner(azure).plan(_context(dry_run=False))
     assert [c.id for c in plan.candidates] == ["nic-a"]
-    assert [(s.id, s.reason) for s in plan.skipped] == [("nic-b", "attached to a VM")]
+    assert [(s.id, s.reason) for s in plan.skipped] == [("nic-b", "in_use")]
     assert _names(azure.calls, "begin_delete", "result") == []
 
 
 def test_plan_requests_the_listing_twice_like_main() -> None:
     azure = FakeAzure([nic("nic-a")])
     _cleaner(azure).plan(_context(dry_run=True))
-    assert _names(azure.calls, "list_all") == [("list_all",), ("list_all",)]
+    assert _names(azure.calls, "list", "list_all") == [("list", "rg"), ("list", "rg")]
 
 
 def test_plan_records_skip_reasons() -> None:
@@ -48,7 +48,7 @@ def test_plan_records_skip_reasons() -> None:
     assert [(s.id, s.reason) for s in plan.skipped] == [
         ("other", "no name_regex match"),
         ("nic-keep", "matches exception_regex"),
-        ("nic-a", "attached to a VM"),
+        ("nic-a", "in_use"),
     ]
 
 

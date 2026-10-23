@@ -2,10 +2,10 @@
 
 """Azure NIC cleaner.
 
-`AzureNicCleaner` implements the `crc.core.cleaner.Cleaner` contract: `plan()` lists the NICs
-(`list_all`) and filters them, `apply()` calls `begin_delete(...).result()` with the three
-attempts of the original. `NIC` is the legacy class `crc.py` uses; it keeps its constructor and
-attributes and runs the cleaner NIC by NIC, in the exact call order of the original.
+`AzureNicCleaner` implements the `crc.core.cleaner.Cleaner` contract: `plan()` lists the NICs of
+the configured resource group (`list(resource_group)`) and filters them, `apply()` calls
+`begin_delete(...).result()` with the three attempts of the original. `NIC` is the legacy class
+`crc.py` uses; it keeps its constructor and attributes and runs the cleaner NIC by NIC.
 """
 
 import logging
@@ -42,8 +42,8 @@ class DeletePoller(Protocol):
 class NicOperations(Protocol):
     """The two `network_interfaces` calls this cleaner uses."""
 
-    def list_all(self) -> Iterable[Any]:
-        """List the NICs of the whole subscription."""
+    def list(self, resource_group_name: str, /) -> Iterable[Any]:
+        """List the NICs of one resource group."""
         ...
 
     def begin_delete(
@@ -65,6 +65,34 @@ class NicNetworkClient(Protocol):
 ClientFactory = Callable[[], NicNetworkClient]
 
 
+def _compile(
+    entries: Sequence[str] | str | None, label: str, *, allow_empty: bool
+) -> tuple[str, ...]:
+    """Compile `name_regex` / `exception_regex` entries (BUG-113); `ValueError` on a bad one.
+
+    An empty list or string gives no patterns. An empty-string entry is dropped when
+    `allow_empty` (`name_regex`: it must never match everything) and refused otherwise
+    (`exception_regex`: dropping it would delete NICs main keeps). A bare string (main iterated
+    it character by character) and a non-string entry are refused.
+    """
+    if not entries:
+        return ()
+    if isinstance(entries, str):
+        raise ValueError(
+            f"{label} must be a list of regular expressions, got the string {entries!r}"
+        )
+    usable: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, str):
+            raise ValueError(f"Invalid {label} entry {entry!r}: not a string")
+        if entry:
+            usable.append(entry)
+        elif not allow_empty:
+            raise ValueError(f"Invalid {label} entry '': an empty pattern would match every NIC")
+    policy.compile_patterns(usable, label)
+    return tuple(usable)
+
+
 def _log_none_to_delete() -> None:
     logging.warning("No Azure NICs to delete.")
 
@@ -79,8 +107,9 @@ def _log_summary(deleted: Sequence[str], *, dry_run: bool) -> None:
 
 
 class AzureNicCleaner:
-    """Deletes NICs not attached to a VM whose name contains any `name_regex` entry (plain
-    substring, not a regex) and none of the `exception_regex` entries."""
+    """Deletes NICs that are not in use (no VM, private endpoint or private link service) whose
+    name matches (`re.search`) any `name_regex` entry and none of the `exception_regex` entries.
+    Only the configured resource group is listed."""
 
     cloud = "azure"
     kind = "nic"
@@ -96,13 +125,26 @@ class AzureNicCleaner:
         self._resource_group = resource_group
         self._name_regex = name_regex
         self._exception_regex = exception_regex
+        self._include: tuple[str, ...] | None = None
+        self._exclude: tuple[str, ...] = ()
+
+    def prepare(self) -> bool:
+        """Compile the patterns before any SDK call (`ValueError` if invalid).
+
+        False when no usable `name_regex` entry is left: nothing can be selected, so the caller
+        logs "No Azure NICs to delete." and does not list.
+        """
+        if self._include is None:
+            self._include = _compile(self._name_regex, "name_regex", allow_empty=True)
+            self._exclude = _compile(self._exception_regex, "exception_regex", allow_empty=False)
+        return bool(self._include)
 
     def supports(self, operation: Operation) -> bool:
         return operation is Operation.DELETE
 
     def plan(self, context: RunContext) -> Plan:
-        """List every NIC of the subscription and filter. Makes no mutating call."""
-        if not self._name_regex:
+        """List every NIC of the resource group and filter. Makes no mutating call."""
+        if not self.prepare():
             _log_none_to_delete()
             return Plan()
         candidates: list[Candidate] = []
@@ -125,7 +167,7 @@ class AzureNicCleaner:
 
     def apply(self, plan: Plan, context: RunContext) -> Result:
         """Delete the planned NICs in plan order, retrying each up to three times."""
-        if not self._name_regex:
+        if not self.prepare():
             return Result()
         deleted: list[str] = []
         failed: list[Failure] = []
@@ -141,9 +183,10 @@ class AzureNicCleaner:
         return Result(succeeded=tuple(deleted), failed=tuple(failed))
 
     def list_nics(self) -> Iterable[Any]:
-        """The (lazy) subscription-wide listing. Main requests it twice and drops the first."""
-        self._client_factory().network_interfaces.list_all()
-        return self._client_factory().network_interfaces.list_all()
+        """The (lazy) listing of the configured resource group (BUG-111). Main requests its
+        listing twice and drops the first; so does this."""
+        self._client_factory().network_interfaces.list(self._resource_group)
+        return self._client_factory().network_interfaces.list(self._resource_group)
 
     def attempt_delete(self, nic_name: str, *, dry_run: bool, record: bool = True) -> str | None:
         """Delete one NIC with up to three attempts, logging as main does.
@@ -184,19 +227,27 @@ class AzureNicCleaner:
 
     def decide(self, nic: Any) -> tuple[Candidate | None, str]:
         """Select one SDK NIC: the candidate, or None with the reason it was kept."""
-        if nic.virtual_machine:
-            return self._kept("attached to a VM")
-        included = policy.nic_name_included(self._name_regex or (), nic.name)
-        excluded = (
-            policy.nic_name_excluded(self._exception_regex, nic.name)
-            if self._exception_regex
-            else False
+        if (
+            nic.virtual_machine
+            or getattr(nic, "private_endpoint", None)
+            or getattr(nic, "private_link_service", None)
+        ):
+            return self._kept("in_use")
+        self.prepare()
+        name = nic.name
+        if not isinstance(name, str):
+            raise TypeError(f"argument of type '{type(name).__name__}' is not iterable")
+        included = bool(self._include) and policy.name_regex_search_matches(
+            self._include or (), name
         )
+        excluded = policy.exception_regex_search_matches(
+            self._exclude, name
+        ) or policy.nic_name_excluded(self._exclude, name)
         if not included:
             return self._kept("no name_regex match")
         if excluded:
             return self._kept("matches exception_regex")
-        return Candidate(id=nic.name, name=nic.name), ""
+        return Candidate(id=name, name=name), ""
 
 
 @register("azure", "nic")
@@ -215,7 +266,7 @@ def build_nic_cleaner(context: RunContext) -> Cleaner:
 class NIC(Service):
     """
     This class provides an implementation of the Service class for managing NICs on Azure Cloud.
-    By default, it cleans all unattached NICs.
+    By default, it cleans all NICs of the resource group that are not in use.
 
     Attributes: `nics_names_to_delete` (names deleted, or listed in a dry run), `base`,
     `dry_run`, `name_regex`, `exception_regex`. `get_deleted` and `delete_count` read the result.
@@ -272,11 +323,10 @@ class NIC(Service):
         Deletes NICs that match name_regex and do not match exception_regex.
         In dry_run mode it only lists the matching NICs and performs no operation on them.
         """
-        if not self.name_regex:
+        cleaner = self._cleaner()
+        if not cleaner.prepare():
             _log_none_to_delete()
             return
-
-        cleaner = self._cleaner()
         started = _logger.started()
         scanned = selected = 0
         for nic in cleaner.list_nics():
