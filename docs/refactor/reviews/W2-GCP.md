@@ -43,3 +43,25 @@ list, `is_old_enough` in Public API).
 ## New bugs
 
 None found.
+
+## Round 1 (Argon)
+
+### Findings
+
+1. **No behaviour change**: Verified hunk by hunk against `cea0a8a` (`git diff --color-moved=zebra cea0a8a..HEAD -- crc/gcp/`). All conditions, defaults, SDK call ordering, exception handling, and log messages in `disk`, `ip`, and `vm` are preserved verbatim. The shared helper `is_old_enough` in `crc/gcp/_common.py` preserves the exact evaluation order (timestamp parse, `clock().astimezone(...)`, `logging.debug(item.labels)`, `core_age.get_retention_age`, `Updating age for <kind>: <name>` info log only when `retention_age` is truthy, `policy.effective_age`, `core_age.is_old`).
+2. **Import paths & patch targets**: `crc.gcp.disk`, `crc.gcp.ip`, and `crc.gcp.vm` re-export all previously exported symbols (`__all__`) and trigger `@register("gcp", ...)` on import as before. All `monkeypatch` / `mock.patch` string targets in `tests/` (`googleapiclient.discovery.build`, `google.cloud.compute_v1.*`, `crc.gcp.spot_vm.operations.time.*`, `crc.service.init_logging`) still resolve to the live code under test.
+3. **Tests & safety lock**: Zero test files, hash-locked tests (`tests/archtest/safety_lock.json`), or legacy oracle files (`tests/legacy/*.txt`) were modified.
+4. **File sizes & module seams**: Every owned file in `crc/gcp/` is well under the 250-line target (`wc -l` max is `crc/gcp/disk_cleaner.py` at 235 lines, `crc/gcp/vm_cleaner.py` at 225 lines, `crc/gcp/ip_cleaner.py` at 174 lines). Splits follow clean seams (`*_cleaner.py`, `*_adapter.py`, `*_settings.py`, `ip_client.py`, and shared `_common.py`), isolating legacy adapters (`Disk`, `IP`, `VM`) in their own modules for one-step removal later.
+5. **README**: `crc/gcp/README.md` (82 lines) is concise and its `## Public API` symbol list is in sync with ARCH-002.
+
+### Gates & Verification
+
+- `ruff check .`: passed
+- `mypy`: passed (261 source files)
+- `lint-imports`: passed (5 contracts kept, 0 broken)
+- `ARCH-001..005` & `SAF-LOCK`: passed
+- `pytest -q`: **43010 passed** (matches base `cea0a8a` count of 43010)
+- `make check` runtime: **2m56.5s** (`pytest` 158.94s)
+
+VERDICT: APPROVE
+
