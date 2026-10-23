@@ -38,6 +38,24 @@ SUMMARY = ("No Azure instances", "number of Azure", "List of Azure")
 
 BUGS = {"BUG-358"}  # log-only divergences of the LOG-AZU rung
 
+# Calls the FIX-AZU-VM rung changed in every case: the listing is one resource group (BUG-002,
+# `list(rg)` instead of `list_all()`) and stop deallocates (BUG-003, `begin_deallocate` instead of
+# `begin_power_off`). They are mapped back to the oracle's call so every other call (order,
+# arguments, count) is still compared; `test_list_is_the_configured_group_only` and
+# `test_stop_deallocates` pin the new calls themselves.
+
+
+def _oracle_shape(calls: Sequence[tuple[Any, ...]], group: str) -> list[tuple[Any, ...]]:
+    shaped: list[tuple[Any, ...]] = []
+    for call in calls:
+        if call == ("list", group):
+            shaped.append(("list_all",))
+        elif call[0] == "begin_deallocate":
+            shaped.append(("begin_power_off", *call[1:]))
+        else:
+            shaped.append(call)
+    return shaped
+
 
 @dataclass
 class Case:
@@ -56,6 +74,17 @@ class Case:
     list_error: Exception | None = None
     scripts: Mapping[str, Mapping[str, Sequence[Exception | None]]] = field(default_factory=dict)
     fails_in_plan: bool = False
+    diverges: str = ""
+    expect: Callable[["Outcome"], bool] | None = None
+
+
+def _kept_quietly(kept: str, acted: str) -> Callable[["Outcome"], bool]:
+    """`acted` was done, `kept` was not, and nothing was logged as an error (BUG-010)."""
+    return lambda o: (
+        getattr(o, acted) == ["b"]
+        and kept not in getattr(o, acted)
+        and not any(r[1] == logging.ERROR for r in o.logs)
+    )
 
 
 def _boom(text: str = "boom") -> Exception:
@@ -83,6 +112,12 @@ CASES = [
     Case("many-dry-run", _many(12), dry_run=True),
     Case("many-stop", _many(12), operation="stop"),
     Case("resource-group-from-env", [vm("vm-a")], resource_group=""),
+    Case(
+        "other-resource-group-ignored",
+        [vm("a", group="other-rg"), vm("b", group="rg-test")],
+        diverges="BUG-002",
+        expect=lambda o: o.deleted == ["b"] and ("instance_view", "rg-test", "a") not in o.calls,
+    ),
     Case("duplicate-names", [vm("vm-a"), vm("vm-a")]),
     # filters
     Case(
@@ -222,6 +257,8 @@ CASES = [
         "status-state-is-substring",
         [vm("a", statuses=("p", "VM running")), vm("b", statuses=("p", "VM deallocated"))],
         instance_state=["run"],
+        diverges="BUG-198",
+        expect=lambda o: o.deleted == [],
     ),
     Case(
         "status-state-case-sensitive",
@@ -234,16 +271,39 @@ CASES = [
         instance_state=["stopped", "running"],
     ),
     Case("status-empty-state-list-nothing", [vm("a")], instance_state=[]),
-    Case("status-empty-string-state-matches-all", [vm("a", statuses=STOPPED)], instance_state=[""]),
+    Case(
+        "status-empty-string-state-matches-all",
+        [vm("a", statuses=STOPPED)],
+        instance_state=[""],
+        diverges="BUG-198",
+        expect=lambda o: o.deleted == [],
+    ),
     Case("status-stop-ignores-state-list", [vm("a", statuses=STOPPED), vm("b")], operation="stop"),
-    Case("status-single-entry-index-error", [vm("a", statuses=("only",)), vm("b")]),
+    Case(
+        "status-single-entry-index-error",
+        [vm("a", statuses=("only",)), vm("b")],
+        diverges="BUG-010",
+        expect=_kept_quietly("a", "deleted"),
+    ),
     Case(
         "status-single-entry-index-error-stop",
         [vm("a", statuses=("only",)), vm("b")],
         operation="stop",
+        diverges="BUG-010",
+        expect=_kept_quietly("a", "stopped"),
     ),
-    Case("status-empty-statuses", [vm("a", statuses=()), vm("b")]),
-    Case("status-none-display", [vm("a", statuses=("p", None)), vm("b")]),
+    Case(
+        "status-empty-statuses",
+        [vm("a", statuses=()), vm("b")],
+        diverges="BUG-010",
+        expect=_kept_quietly("a", "deleted"),
+    ),
+    Case(
+        "status-none-display",
+        [vm("a", statuses=("p", None)), vm("b")],
+        diverges="BUG-010",
+        expect=_kept_quietly("a", "deleted"),
+    ),
     Case("status-first-entry-ignored", [vm("a", statuses=("VM running", "VM stopped"))]),
     Case("status-instance-view-error", [vm("a", statuses=_boom("view failed")), vm("b")]),
     Case(
@@ -440,7 +500,7 @@ def _run(
     caplog.clear()
     counts = [service.delete_count, service.nic_delete_count, service.stopped_count]
     return Outcome(
-        azure.calls,
+        _oracle_shape(azure.calls, case.resource_group or "env-rg"),
         list(service.get_deleted),
         list(service.get_deleted_nic),
         list(service.get_stopped),
@@ -466,6 +526,11 @@ def test_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run(_new, case, monkeypatch, caplog, capsys)
+    if case.diverges:
+        assert case.expect is not None
+        assert case.expect(new)
+        assert (new.deleted, new.stopped, new.logs) != (old.deleted, old.stopped, old.logs)
+        return
     assert new.calls == old.calls
     assert new.error == old.error
     assert new.deleted == old.deleted
@@ -513,7 +578,13 @@ def _run_cleaner(
     except Exception as e:
         error = (type(e).__name__, str(e))
     return Outcome(
-        azure.calls, deleted, nics, stopped, _records(caplog), capsys.readouterr().out, error
+        _oracle_shape(azure.calls, case.resource_group or "env-rg"),
+        deleted,
+        nics,
+        stopped,
+        _records(caplog),
+        capsys.readouterr().out,
+        error,
     )
 
 
@@ -545,6 +616,11 @@ def test_cleaner_protocol_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run_cleaner(case, monkeypatch, caplog, capsys)
+    if case.diverges:
+        assert case.expect is not None
+        assert case.expect(new)
+        assert (new.deleted, new.stopped) != (old.deleted, old.stopped) or new.logs != old.logs
+        return
     assert new.error == old.error
     assert new.stdout == old.stdout
     assert _only(new.calls, "list_all") == _only(old.calls, "list_all")
@@ -603,21 +679,9 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
     ("time-created-none", lambda o: o.error is not None and o.error[0] == "AttributeError"),
     ("time-created-naive", lambda o: o.error is not None and o.error[0] == "TypeError"),
     ("time-created-skipped-not-read", lambda o: o.error is None and o.deleted == []),
-    ("status-state-is-substring", lambda o: o.deleted == ["a"]),
     ("status-state-case-sensitive", lambda o: o.deleted == []),
-    ("status-empty-string-state-matches-all", lambda o: o.deleted == ["a"]),
     ("status-empty-state-list-nothing", lambda o: o.deleted == []),
     ("status-stop-ignores-state-list", lambda o: o.stopped == ["b"]),
-    (
-        "status-single-entry-index-error",
-        lambda o: _swallowed(o, "list index out of range") and o.deleted == ["b"],
-    ),
-    (
-        "status-single-entry-index-error-stop",
-        lambda o: _swallowed(o, "list index out of range") and o.stopped == ["b"],
-    ),
-    ("status-empty-statuses", lambda o: _swallowed(o, "list index out of range")),
-    ("status-none-display", lambda o: _swallowed(o, "not iterable") or _swallowed(o, "NoneType")),
     ("status-first-entry-ignored", lambda o: o.deleted == []),
     ("status-instance-view-error", lambda o: _swallowed(o, "view failed") and o.deleted == ["b"]),
     ("status-error-in-dry-run", lambda o: _swallowed(o, "view failed") and o.deleted == ["b"]),
@@ -702,34 +766,78 @@ def test_quirk_is_preserved(
     assert check(_run_cleaner(case, monkeypatch, caplog, capsys))
 
 
-def test_list_is_subscription_wide_and_every_other_call_uses_the_configured_group(
+def test_list_is_the_configured_group_only(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """BUG-002: main lists the subscription (`list_all`); the fix lists only the group."""
     case = _find("delete")
-    for build in (_legacy, _new):
-        azure = _setup(case, monkeypatch, caplog, capsys)
-        build(case).delete()
-        assert ("list_all",) in azure.calls
-        assert ("instance_view", "rg-test", "vm-a") in azure.calls
-        assert ("vm_begin_delete", "rg-test", "vm-a") in azure.calls
-        assert ("nic_begin_delete", "rg-test", "vm-a-NIC") in azure.calls
+    azure = _setup(case, monkeypatch, caplog, capsys)
+    _legacy(case).delete()
+    assert ("list_all",) in azure.calls
+    assert ("list", "rg-test") not in azure.calls
+    azure = _setup(case, monkeypatch, caplog, capsys)
+    _new(case).delete()
+    assert ("list", "rg-test") in azure.calls
+    assert ("list_all",) not in azure.calls
+    assert ("instance_view", "rg-test", "vm-a") in azure.calls
+    assert ("vm_begin_delete", "rg-test", "vm-a") in azure.calls
+    assert ("nic_begin_delete", "rg-test", "vm-a-NIC") in azure.calls
 
 
-def test_stop_powers_off_without_deallocating(
+def test_stop_deallocates(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """BUG-003: main powers off (the VM stays allocated and billed); the fix deallocates."""
     case = _find("stop")
-    for build in (_legacy, _new):
-        azure = _setup(case, monkeypatch, caplog, capsys)
-        build(case).stop()
-        assert _only(azure.calls, "begin_power_off") == [
-            ("begin_power_off", "rg-test", "vm-a"),
-            ("begin_power_off", "rg-test", "vm-b"),
-        ]
+    azure = _setup(case, monkeypatch, caplog, capsys)
+    _legacy(case).stop()
+    assert _only(azure.calls, "begin_power_off", "begin_deallocate") == [
+        ("begin_power_off", "rg-test", "vm-a"),
+        ("begin_power_off", "rg-test", "vm-b"),
+    ]
+    azure = _setup(case, monkeypatch, caplog, capsys)
+    _new(case).stop()
+    assert _only(azure.calls, "begin_power_off", "begin_deallocate") == [
+        ("begin_deallocate", "rg-test", "vm-a"),
+        ("begin_deallocate", "rg-test", "vm-b"),
+    ]
+
+
+DIVERGING = [c for c in CASES if c.diverges]
+OLD_BEHAVIOUR: Mapping[str, Callable[[Outcome], bool]] = {
+    "other-resource-group-ignored": lambda o: o.deleted == ["a", "b"],
+    "status-state-is-substring": lambda o: o.deleted == ["a"],
+    "status-empty-string-state-matches-all": lambda o: o.deleted == ["a"],
+    "status-single-entry-index-error": lambda o: (
+        _swallowed(o, "list index out of range") and o.deleted == ["b"]
+    ),
+    "status-single-entry-index-error-stop": lambda o: (
+        _swallowed(o, "list index out of range") and o.stopped == ["b"]
+    ),
+    "status-empty-statuses": lambda o: _swallowed(o, "list index out of range"),
+    "status-none-display": lambda o: _swallowed(o, "not iterable") or _swallowed(o, "NoneType"),
+}
+
+
+@pytest.mark.parametrize("case", DIVERGING, ids=[c.id for c in DIVERGING])
+def test_fixed_quirk_diverges_from_main(
+    case: Case,
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The oracle still shows the bug (`case.diverges`); both new paths assert the new outcome."""
+    assert case.expect is not None
+    old = _run(_legacy, case, monkeypatch, caplog, capsys)
+    assert OLD_BEHAVIOUR[case.id](old), f"oracle no longer shows {case.diverges}"
+    assert not case.expect(old)
+    assert case.expect(_run(_new, case, monkeypatch, caplog, capsys))
+    assert case.expect(_run_cleaner(case, monkeypatch, caplog, capsys))
 
 
 def test_repeated_delete_accumulates_like_main(
@@ -747,7 +855,7 @@ def test_repeated_delete_accumulates_like_main(
         service.delete()
         results.append(
             (
-                azure.calls,
+                _oracle_shape(azure.calls, case.resource_group),
                 service.get_deleted,
                 service.get_deleted_nic,
                 [(r.levelno, r.getMessage()) for r in caplog.records],
@@ -775,7 +883,7 @@ def test_stop_then_empty_delete_shares_name_lists_like_main(
         service.delete(["deallocated"])
         results.append(
             (
-                azure.calls,
+                _oracle_shape(azure.calls, case.resource_group),
                 service.get_deleted,
                 service.get_stopped,
                 [(r.levelno, r.getMessage()) for r in caplog.records],
