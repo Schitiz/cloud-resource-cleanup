@@ -201,7 +201,6 @@ CASES = [
         "custom-age-inf-raises",
         [vm("a", {"env": "ci", "ttl": "{'days': 1e999}"})],
         custom_age_tag_key="ttl",
-        fails_in_plan=True,
     ),
     Case("custom-age-key-absent", [vm("a", hours=5)], custom_age_tag_key="ttl"),
     Case("max-age-shortens", [vm("a", hours=3)], age={"days": 5}, max_age="{'hours': 2}"),
@@ -594,10 +593,10 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
     ("age-exact-edge", lambda o: o.deleted == ["a"]),
     ("age-empty-matches-all", lambda o: o.deleted == ["a", "b"]),
     ("age-unknown-keys-keep", lambda o: o.deleted == []),
-    ("custom-age-empty-falls-back", lambda o: o.deleted == ["a"]),
-    ("custom-age-unparseable-falls-back", lambda o: o.deleted == ["a"]),
-    ("custom-age-zero-dict-falls-back", lambda o: o.deleted == ["a"]),
-    ("custom-age-inf-raises", lambda o: o.error is not None and o.error[0] == "OverflowError"),
+    ("custom-age-empty-falls-back", lambda o: o.deleted == []),
+    ("custom-age-unparseable-falls-back", lambda o: o.deleted == []),
+    ("custom-age-zero-dict-falls-back", lambda o: o.deleted == []),
+    ("custom-age-inf-raises", lambda o: o.error is None and o.deleted == []),
     ("max-age-shortens", lambda o: o.deleted == ["a"]),
     ("max-age-with-empty-age-unused", lambda o: o.deleted == ["a"]),
     ("max-age-malformed-raises", lambda o: o.error is not None and o.error[0] == "SyntaxError"),
@@ -672,6 +671,16 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
 ]
 
 
+BUG_004_FIXED = frozenset(
+    [
+        "custom-age-empty-falls-back",
+        "custom-age-inf-raises",
+        "custom-age-unparseable-falls-back",
+        "custom-age-zero-dict-falls-back",
+    ]
+)
+
+
 @pytest.mark.parametrize(("case_id", "check"), QUIRKS, ids=[q[0] for q in QUIRKS])
 def test_quirk_is_preserved(
     case_id: str,
@@ -684,7 +693,11 @@ def test_quirk_is_preserved(
     case = _find(case_id)
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run(_new, case, monkeypatch, caplog, capsys)
-    assert check(old), "oracle no longer shows the quirk"
+    # BUG-004/BUG-016: the oracle class inherits the live crc.service.Service, so it cannot
+    # show the old custom-age-tag behaviour here; tests/test_crc_service_parity.py pins it
+    # against the frozen crc_service oracle. Fixed cases assert the new outcome only.
+    if case_id not in BUG_004_FIXED:
+        assert check(old), "oracle no longer shows the quirk"
     assert check(new)
     assert check(_run_cleaner(case, monkeypatch, caplog, capsys))
 

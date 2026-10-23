@@ -736,9 +736,9 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
     ("max-age-shortens", lambda o: o.deleted == ["a"]),
     ("max-age-empty-dict", lambda o: o.deleted == []),
     ("max-age-not-a-dict", lambda o: o.error is not None),
-    ("custom-age-tag-unparseable-falls-back-to-age", lambda o: o.deleted == ["a"]),
-    ("custom-age-tag-empty-falls-back-to-age", lambda o: o.deleted == ["a"]),
-    ("custom-age-tag-zero-days-falls-back-to-age", lambda o: o.deleted == ["a"]),
+    ("custom-age-tag-unparseable-falls-back-to-age", lambda o: o.deleted == []),
+    ("custom-age-tag-empty-falls-back-to-age", lambda o: o.deleted == []),
+    ("custom-age-tag-zero-days-falls-back-to-age", lambda o: o.deleted == []),
     ("untagged-with-filter-skipped", lambda o: o.deleted == []),
     ("untagged-without-filter-included", lambda o: o.deleted == ["a", "b"]),
     ("filter-any-key", lambda o: o.deleted == ["a", "b"]),
@@ -760,6 +760,15 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
 ]
 
 
+BUG_004_FIXED = frozenset(
+    [
+        "custom-age-tag-empty-falls-back-to-age",
+        "custom-age-tag-unparseable-falls-back-to-age",
+        "custom-age-tag-zero-days-falls-back-to-age",
+    ]
+)
+
+
 @pytest.mark.parametrize(("case_id", "check"), QUIRKS, ids=[q[0] for q in QUIRKS])
 def test_quirk_is_preserved(
     case_id: str,
@@ -772,7 +781,11 @@ def test_quirk_is_preserved(
     case = next(c for c in CASES if c.id == case_id)
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run(_new, case, monkeypatch, caplog, capsys)
-    assert check(old), "oracle no longer shows the quirk"
+    # BUG-004/BUG-016: the oracle class inherits the live crc.service.Service, so it cannot
+    # show the old custom-age-tag behaviour here; tests/test_crc_service_parity.py pins it
+    # against the frozen crc_service oracle. Fixed cases assert the new outcome only.
+    if case_id not in BUG_004_FIXED:
+        assert check(old), "oracle no longer shows the quirk"
     assert check(new)
 
 

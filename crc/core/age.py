@@ -9,11 +9,18 @@ import logging
 import os
 from typing import Any, cast
 
+from crc.core import logger
+
 AgeSpec = dict[str, int]
 
 AGE_KEYS = frozenset({"days", "hours"})
 
 _HOURS_IN_A_DAY = 24
+
+# Returned by ``get_retention_age`` for a custom age tag that is present but empty,
+# unparseable, not finite, zero or negative. ``is_old`` answers False for it before the
+# ``MAX_AGE`` override, so the resource is kept. About 2,700 years: ``timedelta``-safe.
+KEEP_AGE: AgeSpec = {"days": 1_000_000}
 
 
 def _normalize_age_values(age: AgeSpec, label: str) -> AgeSpec:
@@ -81,6 +88,45 @@ def lookup_custom_age_tag(
     return False, None
 
 
+def _checked_retention_age(
+    tags: dict[str, str] | list[dict[str, str]], key: str, level: int
+) -> tuple[AgeSpec, Any] | None:
+    """Shared body of ``validated_retention_age`` / ``get_retention_age``; ``level`` is the
+    log level of the "bad tag" diagnostics. Returns ``(normalized, parsed)`` or ``None``
+    when the tag is absent; raises ``ValueError`` when it is present but bad."""
+    if not key:
+        return None
+    present, raw_str = lookup_custom_age_tag(tags, key)
+    if not present:
+        return None
+    if raw_str is None or str(raw_str).strip() == "":
+        logging.log(level, "Custom age tag %r is present but empty (skipping resource)", key)
+        raise ValueError(f"custom age tag {key!r} is present but empty")
+    # Parsed here (not via parse_literal) so TypeError becomes ValueError for the callers.
+    try:
+        parsed = ast.literal_eval(str(raw_str))
+    except (ValueError, SyntaxError, TypeError) as e:
+        logging.log(
+            level,
+            "Custom age tag %r=%r is unparseable (skipping resource): %s",
+            key,
+            raw_str,
+            e,
+        )
+        raise ValueError(f"custom age tag {key!r} is present but unparseable: {raw_str!r}") from e
+    try:
+        return require_positive_age(parsed, "custom age tag"), parsed
+    except ValueError as e:
+        logging.log(
+            level,
+            "Invalid custom age tag %r for key %r (skipping resource): %s",
+            parsed,
+            key,
+            e,
+        )
+        raise
+
+
 def validated_retention_age(
     tags: dict[str, str] | list[dict[str, str]],
     key: str,
@@ -91,37 +137,8 @@ def validated_retention_age(
     Raises ``ValueError`` when the tag is present but empty, unparseable, invalid, or
     zero: callers must skip the resource (fail closed), not fall back to ``--age``.
     """
-    if not key:
-        return None
-    present, raw_str = lookup_custom_age_tag(tags, key)
-    if not present:
-        return None
-    if raw_str is None or str(raw_str).strip() == "":
-        logging.warning("Custom age tag %r is present but empty (skipping resource)", key)
-        raise ValueError(f"custom age tag {key!r} is present but empty")
-    # Parsed here (not via parse_literal) so TypeError becomes ValueError for spot
-    # callers. get_retention_age swallows parse errors and returns None (callers then
-    # treat the tag as absent: fail-open to --age); fail-closed callers use this.
-    try:
-        parsed = ast.literal_eval(str(raw_str))
-    except (ValueError, SyntaxError, TypeError) as e:
-        logging.warning(
-            "Custom age tag %r=%r is unparseable (skipping resource): %s",
-            key,
-            raw_str,
-            e,
-        )
-        raise ValueError(f"custom age tag {key!r} is present but unparseable: {raw_str!r}") from e
-    try:
-        return require_positive_age(parsed, "custom age tag")
-    except ValueError as e:
-        logging.warning(
-            "Invalid custom age tag %r for key %r (skipping resource): %s",
-            parsed,
-            key,
-            e,
-        )
-        raise
+    checked = _checked_retention_age(tags, key, logging.WARNING)
+    return None if checked is None else checked[0]
 
 
 def get_min_age(dict1: AgeSpec, dict2: AgeSpec) -> AgeSpec:
@@ -186,7 +203,8 @@ def is_old(
 
     ``age`` is an int (days) or a dict with ``days`` and/or ``hours``. An empty age
     returns True (matches every resource). The ``MAX_AGE`` environment variable, a
-    literal dict, replaces ``age`` when it is the shorter duration.
+    literal dict, replaces ``age`` when it is the shorter duration. ``KEEP_AGE`` (the
+    bad custom age tag marker) is never old and ignores ``MAX_AGE``.
     """
     if not age:
         logging.debug("Age is not specified. Ignoring age threshold check")
@@ -194,6 +212,10 @@ def is_old(
 
     if isinstance(age, int):
         age = {"days": age}
+
+    if age == KEEP_AGE:
+        logging.debug("Custom age tag is bad (BUG-004/BUG-016): keeping the resource")
+        return False
 
     age = _apply_max_age_override(age)
 
@@ -225,9 +247,14 @@ def _find_tag_value(tags: dict[str, str] | list[dict[str, str]], key: str) -> st
 
 
 def get_retention_age(tags: dict[str, str] | list[dict[str, str]], key: str) -> Any:
-    """Return the parsed custom age tag ``key``, or ``None`` (fail open).
+    """Return the custom age tag ``key`` (the parsed literal, validated as positive), ``None`` or
+    ``KEEP_AGE``.
 
-    Absent, empty and unparseable tags all give ``None``; parse errors are logged.
+    ``None``: no key, no tags or the tag is absent (caller uses ``--age``). ``KEEP_AGE``
+    (fail closed, BUG-004/BUG-016): the tag is present but empty, unparseable, not finite,
+    zero, negative or otherwise invalid. Callers feed it to ``is_old``, which keeps the
+    resource; the run log counts it as skipped (``bad_age_tag``) and the cause is logged at
+    DEBUG. Validation is the one of ``validated_retention_age``.
     """
     if not key:
         logging.debug("No custom_age_tag_key provided to search for.")
@@ -240,9 +267,17 @@ def get_retention_age(tags: dict[str, str] | list[dict[str, str]], key: str) -> 
     logging.debug(f"Searching for custom_age_tag_key: {key}")
     try:
         value = _find_tag_value(tags, key)
-        if value:
-            logging.info(f"Found '{key}' tag: {value}")
-            return parse_literal(value, key)
+        if value is not None and not isinstance(value, str):
+            logging.debug("Custom age tag %r has a non-string value %r", key, value)
+            raise ValueError(f"custom age tag {key!r} has a non-string value")
+        checked = _checked_retention_age(tags, key, logging.DEBUG)
+        if checked is None:
+            return None
+        logging.info(f"Found '{key}' tag: {value}")
+        return checked[1]
+    except ValueError:
+        logger.current().skip("bad_age_tag")
+        return dict(KEEP_AGE)
     except Exception as e:
         logging.error(f"Error retrieving '{key}' tag: {e}")
 

@@ -795,9 +795,9 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
     ("age-error-after-earlier-zone", lambda o: o.error is not None and o.deleted == ["ok"]),
     ("custom-age-tag-keeps-young", lambda o: o.deleted == []),
     ("custom-age-tag-shortens", lambda o: o.deleted == ["d"]),
-    ("custom-age-tag-empty-falls-back", lambda o: o.deleted == ["d"]),
-    ("custom-age-tag-unparseable-falls-back", lambda o: o.deleted == ["d"]),
-    ("custom-age-tag-zero-falls-back-to-default", lambda o: o.deleted == ["d"]),
+    ("custom-age-tag-empty-falls-back", lambda o: o.deleted == []),
+    ("custom-age-tag-unparseable-falls-back", lambda o: o.deleted == []),
+    ("custom-age-tag-zero-falls-back-to-default", lambda o: o.deleted == []),
     ("filter-any-key", lambda o: o.deleted == ["a", "c"]),
     ("filter-empty-values-means-key-present", lambda o: o.deleted == ["a", "b"]),
     ("filter-string-value-is-substring", lambda o: o.deleted == ["a", "b"]),
@@ -856,6 +856,15 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
 ]
 
 
+BUG_004_FIXED = frozenset(
+    [
+        "custom-age-tag-empty-falls-back",
+        "custom-age-tag-unparseable-falls-back",
+        "custom-age-tag-zero-falls-back-to-default",
+    ]
+)
+
+
 @pytest.mark.parametrize(("case_id", "check"), QUIRKS, ids=[q[0] for q in QUIRKS])
 def test_quirk_is_preserved(
     case_id: str,
@@ -868,7 +877,11 @@ def test_quirk_is_preserved(
     case = _find(case_id)
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run(_new, case, monkeypatch, caplog, capsys)
-    assert check(old), "oracle no longer shows the quirk"
+    # BUG-004/BUG-016: the oracle class inherits the live crc.service.Service, so it cannot
+    # show the old custom-age-tag behaviour here; tests/test_crc_service_parity.py pins it
+    # against the frozen crc_service oracle. Fixed cases assert the new outcome only.
+    if case_id not in BUG_004_FIXED:
+        assert check(old), "oracle no longer shows the quirk"
     assert check(new)
 
 

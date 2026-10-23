@@ -1112,12 +1112,12 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
     ("kubernetes-skipped", lambda o: o.deleted == ["us-west-2/e"]),
     ("kubernetes-allowed-with-filter", lambda o: len(o.deleted) == 1),
     ("custom-age-tag-zero-skips", lambda o: o.deleted == []),
-    ("custom-age-tag-unparseable-fails-open", lambda o: len(o.deleted) == 1),
-    ("custom-age-tag-empty-fails-open", lambda o: len(o.deleted) == 1),
-    ("custom-age-tag-zero-literal-fails-open", lambda o: len(o.deleted) == 1),
+    ("custom-age-tag-unparseable-fails-open", lambda o: o.deleted == []),
+    ("custom-age-tag-empty-fails-open", lambda o: o.deleted == []),
+    ("custom-age-tag-zero-literal-fails-open", lambda o: o.deleted == []),
     (
         "custom-age-tag-overflow",
-        lambda o: o.deleted == [] and "skipping volume a after error" in _flatten(o),
+        lambda o: o.deleted == [] and "skipping volume a after error" not in _flatten(o),
     ),
     ("custom-age-tag-detach-only-uses-max", lambda o: len(o.deleted) == 1),
     ("detach-age-too-long", lambda o: o.error is not None and o.error[0] == "ValueError"),
@@ -1228,6 +1228,16 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
 ]
 
 
+BUG_004_FIXED = frozenset(
+    [
+        "custom-age-tag-empty-fails-open",
+        "custom-age-tag-overflow",
+        "custom-age-tag-unparseable-fails-open",
+        "custom-age-tag-zero-literal-fails-open",
+    ]
+)
+
+
 @pytest.mark.parametrize(("case_id", "check"), QUIRKS, ids=[q[0] for q in QUIRKS])
 def test_quirk_is_preserved(
     case_id: str,
@@ -1240,7 +1250,11 @@ def test_quirk_is_preserved(
     selected = next(c for c in CASES if c.id == case_id)
     old = _run(_legacy, selected, monkeypatch, caplog, capsys)
     new = _run(_new, selected, monkeypatch, caplog, capsys)
-    assert check(old), "oracle no longer shows the quirk"
+    # BUG-004/BUG-016: the oracle class inherits the live crc.service.Service, so it cannot
+    # show the old custom-age-tag behaviour here; tests/test_crc_service_parity.py pins it
+    # against the frozen crc_service oracle. Fixed cases assert the new outcome only.
+    if case_id not in BUG_004_FIXED:
+        assert check(old), "oracle no longer shows the quirk"
     assert check(new)
 
 

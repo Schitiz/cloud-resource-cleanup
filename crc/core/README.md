@@ -28,7 +28,7 @@ An age spec is a dict with days and/or hours integer values.
 - `lookup_custom_age_tag()`: return whether the custom age tag is present, and its raw value, for AWS list tags or dict tags.
 - `validated_retention_age()`: fail-closed custom age tag parse; None when the tag is absent, ValueError when present but empty, unparseable or invalid.
 - `parse_literal()`: parse a tag value with ast.literal_eval, logging and returning None on error.
-- `get_retention_age()`: fail-open custom age tag parse; None when absent, empty or unparseable.
+- `get_retention_age()`: fail-closed custom age tag parse (BUG-004, BUG-016): None when the key or the tag is absent, the parsed age when valid, and the keep marker `age.KEEP_AGE` (`{"days": 1000000}`, which `is_old` never treats as old, `MAX_AGE` included) when the tag is present but empty, unparseable, not finite, zero, negative, not an age or not a string; the run log counts `bad_age_tag` and the cause is logged at DEBUG.
 - `get_min_age()`: return the shorter of two age specs; ties return the second.
 - `is_old()`: True when the resource is at least as old as the age; an empty age returns True; the MAX_AGE environment variable can replace a longer age.
 
@@ -151,9 +151,12 @@ decides what a cleaner selects or deletes.
 
 - `is_old` with an empty age matches every resource (SAF-006). Destructive callers must
   reject empty ages first with `require_positive_age`.
-- Custom age tags: callers that must fail closed use `validated_retention_age`; callers
-  using `get_retention_age` alone fail open to `--age` (SAF-008, SAF-009). Do not change
-  either in a refactor rung.
+- Custom age tags (BUG-004, BUG-016, FIX-CORE-AGE): a tag that is present but empty,
+  unparseable, not finite, zero or negative keeps the resource. `validated_retention_age`
+  raises `ValueError` (spot modules skip); `get_retention_age` returns `KEEP_AGE` so callers
+  that use it with `is_old` keep the resource and count `bad_age_tag`. An absent tag still
+  uses `--age`. Proposed `CLEANUP_SAFETY.md` text for SAF-009 is in
+  `docs/refactor/reviews/FIX-CORE-AGE.md`.
 - `MAX_AGE` can still shorten a floor inside `is_old`, including to zero (SAF-010).
   Never add another place where it shortens a floor set by another flag.
 - This package never imports `crc.aws`, `crc.azu`, `crc.gcp`, `crc.oci`,
