@@ -42,4 +42,4 @@ Not synced with ARCH-002: the check skips the modules directly in `crc/` (`packa
    logic goes in `crc/core/`.
 2. Do not add modules to the legacy lists in `pyproject.toml`; they may only shrink.
 3. A new sub-directory needs a `README.md` with the four sections (ARCH-002).
-4. Record every new bug or quirk in `docs/refactor/BUGS.md` with its file:line.
+4. Record every new bug or quirk in `docs/refactor/BUGS.md` with its `main` file:line.

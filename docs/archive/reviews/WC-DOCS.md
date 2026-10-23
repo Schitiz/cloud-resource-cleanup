@@ -94,3 +94,63 @@ a 30-line entry point; the `CRC` run context in `crc/cli/runner.py` has only `ge
 
 VERDICT: APPROVE
 
+
+## Round 2 (Opus)
+
+### Round 1 check
+
+- Round 1's four fixes are correct: `crc/notify/README.md` and `tests/README.md` now name
+  `tests/legacy/crc_main.txt` via `load_legacy_crc()` as the notify oracle, every file they list
+  exists (including the five `test_<name>_engine.py` companions), and the `test_azure_logger.py`,
+  `test_crc_service_parity.py` and `test_crc_utils_parity.py` docstrings are accurate.
+
+### Findings and fixes
+
+1. Fixed: `docs/refactor/bugs/README.md:16` and `docs/refactor/bugs/pending/README.md:13` changed the
+   row location rule to "current file:line, verified in the working tree". The register they feed
+   (`docs/refactor/BUGS.md` header and rules 1 and 5, its `Location on main` / `Exists on main`
+   columns) still requires `main` file:line verified with `git show main:<path>`, and that register
+   is out of this lane. Restored the `main` rule in both READMEs. For the same reason, restored
+   "`main` file:line" in Extension Rules `crc/README.md:45` and `crc/notify/README.md:56`. That
+   names the branch the register cites; it is not refactor history.
+2. Accepted as accurate on this branch: `tests/README.md:14-16,29,44` and `crc/README.md:8` still
+   name "adapter" classes. They still exist in `crc/aws`, `crc/azu`, `crc/gcp` and `crc/oci`, and the
+   parity tests still run them. Once the adapter-deleting lanes merge, the docs lane that follows
+   must drop those mentions.
+3. Not changed: the BUGS.md header and rules still use rung wording (`R3`, "behaviour-fix rung",
+   `docs/refactor/PLAN.md`, `STATUS.md`). This lane may not edit BUGS.md; leave it to the docs lane.
+
+### Gates
+
+1. **Nothing production uses deleted:** the diff `302612d..HEAD` deletes no file. `crc/cli/scan.py`,
+   `crc/cli/routes/*.py`, `crc/cli/bridge.py` (`build_notifiers`, `engine.run` at line 140), the
+   registry factories and the five adapters the hash-locked tests build are unchanged.
+2. **Parity tests non-vacuous, no test logic edited:** I compared the AST of all 72 touched `.py` files
+   before and after, with docstrings removed: none differs, so only docstrings and comments changed.
+   In a throwaway worktree, I made `crc/gcp/ip_cleaner.py` `apply()` skip the last region.
+   `tests/test_gcp_ip_parity.py::test_cleaner_protocol_matches_main[no-filter-all-reserved]` failed
+   (1 failed, 60 passed); after the restore, all 158 pass. Not committed. Round 1 broke a different
+   cleaner (`KeyPairCleaner.plan`) with the same result.
+3. **Names and links:** grep over `crc/core/**`, `crc/README.md`, `crc/notify/**`, `tests/README.md`,
+   `tests/*.py` and `docs/refactor/bugs/**` finds no rung names (`R0a`..`R4`, `AWS-n`, `ENG-*`,
+   `FIX-*`, `LOG-*`, `CL2-*`, `WA-n`, `WB-n`), no "rung", "wiring" or "deferred" wording, and no link to
+   `docs/refactor/PLAN.md`, `STATUS.md`, `docs/refactor/FILTER_VARIANTS.md`, `docs/refactor/reviews`,
+   `LOGGING.md`, `crc-python-refactor` or `BEHAVIOUR_FIX.md`. Every file path cited in the six touched
+   READMEs exists. The owned items of `DOCS-1.md` "## Links to fix" are all addressed. The
+   docstrings' claims match the code: `crc.py` re-exports `main`, `get_argparser` and the validators;
+   `bridge.py` builds a one-pair `Selection`; `validate_targets` is in `crc/cli/dispatch.py`;
+   SAF-009 is in `CLEANUP_SAFETY.md:73`; Slack `fail_open` is False and Influx `fail_open` is True.
+4. **Protected files:** no change to the five hash-locked test files, `tests/legacy/`,
+   `tests/archtest/`, `crc/{aws,azu,gcp,oci,cli}/`, `docs/refactor/BUGS.md` or `CLEANUP_SAFETY.md`.
+5. **Sizes and Public API:** `ARCH-002` and `ARCH-004` are green (files at most 250 lines,
+   functions at most 60 lines, Public API sections in sync).
+6. **`make check`** (after `pip install -r requirements.txt -r requirements-dev.txt`) is green on
+   the final tree: ruff, mypy (372 files), lint-imports, pytest, ARCH checks and SAF-LOCK.
+   **44415 passed in 53.47s**, with `make check` taking 60s in total; `ARCH-008: 44415 tests, floor
+   44415`. The test count is unchanged.
+
+### New bugs
+
+None.
+
+ROUND 2 VERDICT: APPROVE

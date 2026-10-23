@@ -13,7 +13,8 @@ assigns the real `BUG-NNN` IDs.
 
 ## Safety Invariants
 
-- Locations are current `file:line`, verified in the working tree.
+- Locations are `file:line` on `main` (the `BUGS.md` location column), verified with
+  `git show main:<path>`.
 - A pending row never fixes anything: a fix is its own change with a test and a `BUGS.md` status.
 
 ## Extension Rules
