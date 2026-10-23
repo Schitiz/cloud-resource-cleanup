@@ -63,3 +63,65 @@ None (no blocking or non-blocking defects found).
 - `make check`: PASS — **43,010 passed** in 156.44s (`make check` total wall time: **2m43s**; base `cea0a8a` count: 43,010).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+### Round 1 check
+
+Round 1 reported no findings and made no fixes, so there was nothing to re-verify beyond its claims. Its
+claims hold, with two small corrections to the gate output: in this VM `lint-imports` reports
+`5 kept, 0 broken` (not 10) and mypy checks 261 source files (not 114). Neither changes the verdict.
+
+### Findings
+
+No blocking findings. I changed no code.
+
+1. **No behaviour change.** I compared every top-level def, class, method and constant of the six base
+   modules with its new location by AST. `args`, `dispatch`, `policy` and the `SlackNotifier` methods
+   (now on `SlackPoster` in `slack_owners.py`) are identical. I reviewed the `resource_ops` / `vm_ops`
+   dedupe hunk by hunk:
+   - Slack still runs before Influx. The Influx attribute is still read only when an Influx client is set.
+   - `delete_vm` still writes the Azure NIC point after the VM point.
+   - Spot requests still write VMS, then DISKS.
+   - The `delete_disks` report still runs before the re-raise.
+   - The Azure and GCP spot pre-checks still run before the adapter is built.
+   - Unsupported clouds still raise before any constructor argument is read.
+   - The per-cloud positional and keyword argument lists are the same as at the base.
+
+   One small difference: `vm_arguments`, `ip_arguments` and `disk_arguments` now read `ops.notags`
+   before `dry_run` / `resource_group`. These are plain instance attributes (no property or
+   `__getattr__` in `crc/cli`), so nothing observable changes.
+2. **Import paths and patch targets.**
+   - Every name that `tests/`, `crc.py` and `crc/` import from the six old paths still resolves.
+   - Some names no longer appear on the old modules: `dispatch.UNSUPPORTED_PAIR_MESSAGES`,
+     `dispatch.AWS_ONLY_RESOURCES` and `dispatch.CLOUDS`, the private policy helpers (`_K8S_KEYS`,
+     `_folded_key`, `_key_matches`, `_looks_oke`, `_text`, ...), `slack._split_lines`,
+     `slack.format_owner_ping` and `resource_ops._DiskArgs`. A repo-wide grep finds no reference to any
+     of them through the old module, so the contract holds.
+   - Patch targets still hit live code. That covers `dispatch.make_crc`, `dispatch.HANDLERS`,
+     `dispatch.Snapshot`, `slack.datetime`, `slack.human_readable_timedelta` and
+     `"crc.notify.slack.time.sleep"`. It also covers the adapter globals of `vm_ops` and `resource_ops`,
+     which are still looked up at call time.
+3. **Protected files.** `git diff cea0a8a..HEAD` touches no test, oracle, hash-locked file,
+   `crc/cli/main.py`, `crc/core/age.py` or config/doc file outside this review.
+4. **Size and seams.** The largest file is `crc/cli/dispatch.py` at 245 lines (`wc -l`); every owned and
+   new file is at 250 or fewer. The splits follow real concerns: flag groups, pair table, adapter
+   arguments, report call, policy by topic, Slack chunking vs posting. `report_result` has 9 callers and
+   `vm_arguments` 7. The name `args_run.py` is vague; this is non-blocking.
+5. **READMEs.** The cli, core and notify READMEs list the new public names (ARCH-002 green) and stay short.
+
+### Gates
+
+- `pip install -r requirements.txt -r requirements-dev.txt`, then `make check`: PASS, run here.
+  - ruff: clean.
+  - mypy strict: no issues in 261 files.
+  - lint-imports: 5 kept, 0 broken.
+  - pytest: green, including ARCH-001..005 and SAF-LOCK.
+- Test count: **43010 passed** (43010 collected at `cea0a8a`, checked in a temporary worktree).
+- `make check` runtime: **180 s** wall (pytest 161 s), Python 3.12.3.
+
+### New bugs
+
+None beyond those listed above.
+
+ROUND 2 VERDICT: APPROVE
