@@ -72,3 +72,38 @@ Scope reviewed: `git diff 6b3d85e..HEAD` on branch `eng/aws` (lane `ENG-1`).
 
 VERDICT: APPROVE
 
+## Round 2 (Opus)
+
+Scope: `git diff 6b3d85e..HEAD` on `eng/aws` (3 commits, including the round 1 fixes). No code change in this round.
+
+### Round 1 fixes, re-checked
+
+- VM dry-run names (round 1 item 1): `VmCleaner.plan()` sets the dry-run candidate id to `dry_run_names(...)` (the `Name` tag for delete, the instance id for stop, BUG-217), so `Report.from_plan` sends what `VM.get_deleted` / `get_stopped` held. `note_dry_run` now runs per region, as in `VM._perform_operation`. Correct.
+- Dry-run `would_delete` actions (round 1 item 2): `ip`, `kms`, `snapshot` and `vpc` now log them in `plan()`, in the same per-region position the adapters used (VPC: after the default-VPC filter, which only bumps a `skip` counter that `finish()` prints sorted, so the order does not matter). Correct.
+- SAF-030..033 spot copies (round 1 item 3): present.
+
+### Independent checks
+
+1. **Parity of the routed pairs** (`ip`, `kms`, `snapshot`, `vpc`, `vm` delete and stop, `spot_instance_requests`, `disk`; `keypair` from ENG-0), checked against `crc/cli/resource_ops.py`, `vm_ops.py`, `report_calls.py` and `notify.py`:
+   - Slack and Influx: `REPORT` gives Slack then Influx, each only with a client, as `report_result` does. For a stop run, `_PAST_TENSE` gives "Stopped" (like `notify_stopped_vm_via_slack`) and the Influx `VM` point carries the stopped ids. For spot requests, the `DISK` related section (`notify_empty=False`) gives the extra Slack message and the Influx `DISKS` point of `volumes_to_delete`, and `_INFLUX_LABEL` maps the primary point to `VM`. `vpc` and `snapshot` send nothing (`NotifyMode.NONE`, BUG-084/BUG-009). Disk with `REPORT_THEN_RERAISE` reports, then raises the same error, as `delete_disks` did. The other kinds send nothing on error, as before.
+   - Options: `vm` passes `instance_state` only for delete and only when truthy (legacy `_delete_vm`). `stop` passes no states. `ip` and `disk` drop the regexes and Slack owner flags that the AWS adapters never read.
+   - Gate and order: `Route.precheck` (the disk opt-in) runs inside `begin`/`finish` and before `init_run_logging`, the same point where `_disk` raised before the adapter was built. `validate_targets` is unchanged. The engine never calls `apply()` in a dry run, and `_ReportThenRaise.apply` returns early after a `plan()` error, so a dry run never mutates.
+   - Snapshot console line: `len(plan.candidates)` and `result.succeeded` equal the adapter's `delete_count` and `get_deleted` (same cleaner decisions).
+   - The only behaviour change is plan-all-regions-before-apply: BUG-391 (low group end, "fixed in ENG-1", Exists on main yes, location `crc.py` adapter loop) plus one clause in `CLEANUP_SAFETY.md`. Those are the only edits to those two files.
+2. **Parity tests are not vacuous.** `test_cli_main_parity.install_routed_fakes` makes every route in `bridge.TABLES` record the oracle `crc.<method>` event from `context.options` (`ROUTED_CALLS` raises `KeyError` for a route without an entry), and the events are compared to the oracle `CRC` fake's events. A fake cleaner that is never reached would therefore fail, not pass. Line 942 also asserts that `Snapshot` and `Snapshot.delete` are recorded. `test_cli_bridge_aws.py` runs the oracle `CRC` method and `run_routed` on the same Slack and Influx fakes, and asserts the cleaner's options and operation. `test_core_selection.py` and `test_cli_logger.py` dropped their `Snapshot` patch for the `FakeCleaners` seam, which their routed side effects reach. No patch of an AWS adapter name in a `crc.cli` module is left unreached: the `test_cli_crc_parity.py` and `test_core_engine.py` patches call the `CRC` methods directly, and those methods still exist.
+3. **Locked safety tests**: the 5 files in `safety_lock.json` and the lock itself are untouched and pass. Every SAF ID that the lock maps to `test_aws_disk.py` (003, 007, 011, 012, 013, 015, 017, 018, 019, 020, 025) appears in `test_aws_disk_engine.py`. Every SAF ID mapped to `test_aws_spot_instance_requests.py` (007, 008, 011, 026..033, 035) appears in `test_aws_spot_instance_requests_engine.py`; 011 and 027 are in `test_saf_007_011_027_a_positive_age_is_required`. The azure, gcp and oci SpotVM copies are still to do in their lanes (adapters not touched here).
+4. **Protected files**: no `tests/legacy/*`, `tests/archtest/*.py`, `safety_lock.json`, guardrail or requirements file is edited. `tests/archtest/test_count_floor.txt` changed only through `make raise-test-floor`.
+5. **Limits and READMEs**: ARCH-002 and ARCH-004 are green in `make check`. The touched READMEs (`crc/aws`, `crc/aws/disk`, `crc/cli`, `crc/cli/routes`) match the new names (`NotifyMode`, `ExtraNotifiers`, `AfterRun`, `partial_succeeded`).
+
+### New bugs (round 2, not fixed)
+
+- `crc/aws/elastic_ips/cleaner.py:90` and `:128`: `ElasticIpCleaner.apply()` in a dry run still calls `apply_region(dry_run=True)`, which logs `would_delete` again after `plan()` already did. Neither the engine nor the adapter calls it that way (the engine skips `apply()` in a dry run, the adapter calls `apply_region` without `plan()`), so production is not affected. Unlike kms, snapshot and vpc, this one has no early dry-run return.
+- `crc/aws/vpc/cleaner.py:172` and `crc/aws/elastic_ips/cleaner.py:118` (the same shape in the other AWS cleaners): through the engine, every region's `region_done` line is logged in `plan()`, before any delete line. The adapters logged each region's line after that region's deletes. Same lines and counts, different cross-region interleaving. This follows from plan-all-regions-before-apply (BUG-388/BUG-391) and is cosmetic.
+
+### Gates (after `pip install -r requirements.txt -r requirements-dev.txt`)
+
+- `make check`: ruff, mypy strict, lint-imports, ARCH-001..009 and SAF-LOCK green, exit 0.
+- Tests: **43803 passed in 54.39s** (`make check` wall time 74s). `ARCH-008: 43803 tests, floor 43803`.
+
+ROUND 2 VERDICT: APPROVE
+
