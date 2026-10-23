@@ -8,9 +8,11 @@ from typing import Any
 import pytest
 from botocore.exceptions import ClientError
 
-from crc.aws.vpc import VPC, VpcCleaner, VpcRuntime
-from crc.core import logger
+from crc.aws.vpc import VpcCleaner
+from crc.core import engine, logger
 from crc.core.cleaner import Operation, RunContext
+from crc.core.registry import Registry
+from crc.core.selection import Selection
 from tests.test_aws_vpc_parity import (
     ENV,
     MUTATING,
@@ -43,6 +45,22 @@ def _denied() -> Exception:
     return error
 
 
+class _Done:
+    """The ids the engine run deleted (listed in a dry run)."""
+
+    def __init__(self, get_deleted: list[str]) -> None:
+        self.get_deleted = get_deleted
+
+
+def _engine_run(cleaner: VpcCleaner, *, dry_run: bool) -> _Done:
+    registry = Registry()
+    registry.register("aws", "vpc")(lambda ctx: cleaner)
+    ctx = RunContext(dry_run=dry_run, operation=Operation.DELETE, options={}, now=NOW)
+    (outcome,) = engine.run(Selection((("aws", "vpc"),)), ctx, registry)
+    ids = outcome.plan.candidates if outcome.result is None else outcome.result.succeeded
+    return _Done([c if isinstance(c, str) else c.id for c in ids])
+
+
 def _run(
     aws: FakeAws,
     sleeps: list[float],
@@ -51,16 +69,17 @@ def _run(
     exception_tags: Any = None,
     notags: Any = None,
     dry_run: bool = False,
-) -> VPC:
-    runtime = VpcRuntime(
-        client_factory=lambda region: FakeClient(aws, region),
-        resource_factory=lambda region: FakeResource(aws, region),
-        list_regions=lambda: list(aws.case.regions),
-        sleep=sleeps.append,
+) -> _Done:
+    cleaner = VpcCleaner(
+        lambda region: FakeClient(aws, region),
+        lambda region: FakeResource(aws, region),
+        lambda: list(aws.case.regions),
+        filter_tags,
+        exception_tags,
+        notags,
     )
-    vpc = VPC(dry_run, filter_tags, exception_tags, notags, runtime)
-    vpc.delete()
-    return vpc
+    cleaner.sleep = sleeps.append
+    return _engine_run(cleaner, dry_run=dry_run)
 
 
 def _mutating(aws: FakeAws) -> list[tuple[Any, ...]]:
@@ -155,12 +174,15 @@ def test_protection_uses_the_vpc_tags_not_the_resource(
             self.vpcs.filter = _filter  # type: ignore[method-assign]
 
     aws = FakeAws(Case("x", {W2: [full("vpc-1", tags)]}))
-    runtime = VpcRuntime(
-        client_factory=lambda region: FakeClient(aws, region),
-        resource_factory=lambda region: RealLikeResource(aws, region),
-        list_regions=lambda: list(aws.case.regions),
+    cleaner = VpcCleaner(
+        lambda region: FakeClient(aws, region),
+        lambda region: RealLikeResource(aws, region),
+        lambda: list(aws.case.regions),
+        FILTER,
+        exception_tags,
+        notags,
     )
-    VPC(False, FILTER, exception_tags, notags, runtime).delete()
+    _engine_run(cleaner, dry_run=False)
     assert (("delete_vpc", W2, "vpc-1") in aws.calls) is deleted
 
 

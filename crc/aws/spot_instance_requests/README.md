@@ -4,25 +4,25 @@
 
 Cancels old, tagged AWS spot instance requests, terminates their instances and deletes the
 `DeleteOnTermination=false` volumes they leave behind, in every region. A `Cleaner`
-(`aws` / `spot_instance_requests`), refactored from the single module of `main` with no
-behaviour change. Split by responsibility: `model.py` (settings, state, constants),
+(`aws` / `spot_instance_requests`) that `crc/cli` runs through `crc.core.engine` (route in
+`crc/cli/routes/aws.py`). Split by responsibility: `model.py` (settings, state, constants),
 `client.py` (SDK Protocol), `rules.py` (pure tag and marker decisions), `requests.py` (list,
 filter, age), `volume_tags.py` (volume tag reads), `lookups.py` (instance and leftover volume
 reads), `sweep.py` (sweep gates), `volumes.py` (re-exports those three), `preview.py`
 (dry-run path, reads only), `leftover.py` (marker tags, wait and delete), `cleanup.py` (one
 request, region sweep), `runtime.py` (`SpotRuntime`, settings), `regions.py` (region listing,
 error isolation), `summary.py` (closing log lines), `cleaner.py` (`plan()` / `apply()`),
-`adapter.py` (the `SpotInstanceRequests` adapter).
+`adapter.py` (the `SpotInstanceRequests` class, kept for the hash-locked safety tests).
 
 ## Public API
 
 from crc.aws.spot_instance_requests import SpotInstanceRequests keeps working.
 
-- `SpotInstanceRequests`: adapter crc.py calls (delete(), get_deleted, delete_count, spot_requests_to_delete, instance_ids_to_delete, volumes_to_delete); runs the cleaner region by region in the order of main.
+- `SpotInstanceRequests`: class the hash-locked safety tests build (delete(), get_deleted, delete_count, spot_requests_to_delete, instance_ids_to_delete, volumes_to_delete); runs the cleaner region by region.
 - `SpotRequestCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus apply_region).
 - `build_spot_request_cleaner`: registry factory behind @register("aws", "spot_instance_requests"); reads filter_tags, exception_tags, notags, age (required) and custom_age_tag_key from RunContext.options.
 - `SpotRuntime`: (runtime.py) frozen dataclass with the injected client factory, region lister, clock and `Waiter`.
-- `settings_from_options` (runtime.py), `log_summary` (summary.py), `list_matches`, `guarded_sweep`, `guarded_cleanup` (regions.py): helpers shared by the cleaner and the adapter, re-exported by cleaner.py (settings, closing warnings, per-region listing, error isolation).
+- `settings_from_options` (runtime.py), `log_summary` (summary.py), `list_matches`, `guarded_sweep`, `guarded_cleanup` (regions.py): helpers shared by the cleaner and `SpotInstanceRequests`, re-exported by cleaner.py (settings, closing warnings, per-region listing, error isolation).
 - `SpotClient`, `VolumePaginator`: Protocols of the EC2 calls used; tests pass fakes. `boto3_client`, `all_regions`: the real client and region factories.
 - `SpotSettings`, `RequestMatch`, `SpotState`, `Waiter`, `Inspection`: frozen/slot dataclasses of model.py.
 - `tag_map`, `should_skip`, `matches_filter`, `volume_tags_protect`, `is_crc_marker`, `own_volume_tags`, `own_tags_for_protect`, `effective_sweep_tags`, `scope_tags_for_volume`: pure decisions (rules.py, through crc.core.policy).
@@ -39,16 +39,16 @@ from crc.aws.spot_instance_requests import SpotInstanceRequests keeps working.
 - Order of one request: tag DoT=false volumes, cancel (an already cancelled request skips it), terminate, wait for `available`, delete. A failed tag or cancel aborts before the next step; a failed cancel or terminate invalidates the `crc_leftover_of` / `crc_leftover_tag_*` markers.
 - Fail closed: untagged requests, a bad custom age tag, unreadable volume tags, an unknown instance state and a failed live-request lookup keep the resource. Sensitive `yb_task` and exception/notags protect leftover volumes only.
 - Listing errors are logged and skip the region; a `describe_regions` failure logs and ends the run; connectivity errors skip the region; per-request and per-volume errors are logged and isolated.
-- Cleaner path vs `main` (real runs with more than one region): `plan()` lists every region before `apply()` mutates, so the SDK calls and log lines of different regions are not interleaved as on `main`; each region's call stream and the multiset of log lines are the same. The adapter path keeps the order of `main`.
-- Logging (LOG-AWS1, BUG-356/361/362): the INFO `Skipping ...` lines of leftover volumes and cancelled requests are DEBUG with the same text; REGION (listing and filtering time), ACTION (`deleted` / `would_delete` per request, instance and volume), skip counts and failures (describe, cancel, terminate, tag, wait/delete and sweep errors) go to `crc.core.logger.current()`.
+- `plan()` lists every region before `apply()` mutates, so the SDK calls and log lines of different regions are not interleaved; each region's call stream is the same as a region-by-region run.
+- Logging (BUG-356/361/362): the INFO `Skipping ...` lines of leftover volumes and cancelled requests are DEBUG with the same text; REGION (listing and filtering time), ACTION (`deleted` / `would_delete` per request, instance and volume), skip counts and failures (describe, cancel, terminate, tag, wait/delete and sweep errors) go to `crc.core.logger.current()`.
 
 ## Extension Rules
 
-1. No behaviour change in a refactor rung; behaviour fixes are separate rungs.
+1. Behaviour changes need a `BUG-NNN` row in `docs/refactor/BUGS.md` and a test that fails without them.
 2. Keep reads in `requests.py`, `volume_tags.py`, `lookups.py`, `sweep.py`, `preview.py` and mutations in `leftover.py`,
    `cleanup.py` (ARCH-005). Decide through `crc.core.policy` and `crc.core.age`.
 3. Changes need `tests/test_aws_spot_instance_requests_parity.py` (oracle
    `tests/legacy/aws_spot_instance_requests.txt`, a frozen copy of `main`, never edit it),
    `tests/test_aws_spot_instance_requests_cleaner.py` and `tests/test_aws_spot_instance_requests.py`
    to stay green.
-4. Every file at most 250 lines (wave W2 target; ARCH-004 limit is 400); update this README and the symbol list above.
+4. Every file at most 250 lines; update this README and the symbol list above.

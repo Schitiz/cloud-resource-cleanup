@@ -2,11 +2,11 @@
 
 ## Purpose
 
-AWS EC2 key pair cleaner (R4a): deletes key pairs by name regex, exception regex and age in every region. Split into a package in W2-AWS-A; `from crc.aws.keypairs import ...` keeps working.
+AWS EC2 key pair cleaner: deletes key pairs by name regex, exception regex and age in every region. `KeyPairCleaner` is registered as `aws` / `keypair`; `crc/cli` runs it through `crc.core.engine` (route in `crc/cli/routes/aws.py`).
 
 Modules:
 
-- `client.py`: EC2 Protocol, default factory, runtime.
+- `client.py`: the EC2 Protocol and the default client factory.
 - `cleaner.py`: the Cleaner and its registry factory.
 
 ## Public API
@@ -19,13 +19,12 @@ Modules:
 
 ## Safety Invariants
 
-- Authoritative invariants and quirks: `crc/aws/README.md` (Safety Invariants) and `CLEANUP_SAFETY.md`; this package keeps them unchanged (W2-AWS-A split, no behaviour change). Through the engine `plan()` lists every region before `apply()` deletes (ENG-0): a listing error in a later region now stops the run before any delete. In a dry run `plan()` logs the `would_delete` actions per region, since the engine never calls `apply()` then.
+- Authoritative invariants and quirks: `crc/aws/README.md` (Safety Invariants) and `CLEANUP_SAFETY.md`. Through the engine `plan()` lists every region before `apply()` deletes: a listing error in a later region stops the run before any delete. In a dry run `plan()` logs the `would_delete` actions per region, since the engine never calls `apply()` then.
 - `plan()` and what it calls stay read-only (ARCH-005); every mutating call stays in `apply()` / `apply_region()` and never runs in a dry run. Tests: `tests/test_aws_keypairs.py`, `tests/test_aws_keypair_parity.py` (oracle `tests/legacy/aws_keypairs.txt`, never edit it).
 
 ## Extension Rules
 
-1. Structure-only changes in a refactor wave; behaviour fixes are separate rungs (`docs/refactor/PLAN.md`).
-2. `crc/cli` runs the Cleaner through `crc.core.engine` (route `aws` / `keypair` in `crc/cli/routes/aws.py`); the `KeyPairs` adapter was deleted in ENG-0.
+1. Behaviour changes need a `BUG-NNN` row in `docs/refactor/BUGS.md` and a test that fails without them.
+2. `crc/cli` runs the Cleaner through `crc.core.engine` (route `aws` / `keypair` in `crc/cli/routes/aws.py`).
 3. Shared AWS helpers live in `crc/aws/_common.py`; keep this package free of copies.
-4. Import path `crc.aws.keypairs` must keep re-exporting every public name (see `__init__.py`).
-5. Keep every file at 250 lines or fewer.
+4. Keep every file at 250 lines or fewer.
