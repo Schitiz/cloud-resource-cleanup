@@ -26,7 +26,7 @@ Modules, split by responsibility:
 - `compute_api_for()`: builds the per-region `ComputeApi` factory on top of Base, which caches clients per region.
 - `DEFAULT_INSTANCE_STATES`: the default allowed state, running.
 - `VmSettings`: frozen dataclass with the filters and thresholds of one run (filter tags, exception tags, notags, age, custom age tag key, allowed instance states).
-- `VmCleaner`: the Cleaner (supports delete and stop, read-only plan, mutating apply, plus decide and act used by the adapter).
+- `VmCleaner`: the Cleaner (supports delete and stop, read-only plan, mutating apply, plus decide and act used by the adapter); built by the registry factory with the engine flag, see Safety Invariants.
 - `build_vm_cleaner()`: registry factory behind @register("oci", "vm"); reads filter_tags, exception_tags, notags, age, custom_age_tag_key and (delete only; stop always uses RUNNING, as on main) instance_state from RunContext.options.
 - `VmRuntime`: frozen dataclass with the injected API factory, region lister and clock (now) of `VM`; unset parts come from Base.
 - `VM`: adapter crc.py calls (delete(), stop(), get_deleted, get_stopped, delete_count, stopped_count, instance_names_to_delete, instance_names_to_stop); subclasses Service and Base; decides and acts instance by instance in the order of main.
@@ -43,6 +43,7 @@ Modules, split by responsibility:
 - An unexpected error while evaluating one instance (missing or naive `time_created`, malformed `MAX_AGE`; `BUG-162`) is logged at ERROR, recorded as a run-log failure and the instance is kept; the loop goes on with the next instance and region (skip reason `evaluation failed`, in `plan().skipped` only). The run no longer aborts.
 - A failed terminate or stop is logged and skipped, never raised, as on main; list and region errors are not isolated per instance (connectivity errors skip the region, other errors propagate).
 - Known bugs and quirks (do not fix outside a behaviour-fix rung): `docs/refactor/BUGS.md` (`BUG-159` to `BUG-161`, `BUG-163` to `BUG-171`, `BUG-352`; `BUG-158` and `BUG-162` are fixed in FIX-OCI-VM).
+- Engine path: the factory builds `VmCleaner(..., engine=True)`, so a dry-run `plan()` logs the would_delete / would_stop ACTION lines per region and names its candidates by display name (as the legacy `VM` reported them), because `crc.core.engine` never calls `apply()` in a dry run. (`crc/cli/routes/oci.py`, BUG-408): `plan()` lists every region before `apply()` acts, so a listing error in a later region stops the pair before any terminate or stop.
 - Do not call real cloud APIs in tests; use fakes for `ComputeApi`.
 
 ## Extension Rules

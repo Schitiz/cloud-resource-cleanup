@@ -420,10 +420,11 @@ Related: `docs/refactor/FILTER_VARIANTS.md` (how each module filters, section 7 
 | BUG-389 | Through the engine the age clock is read once per pair (`crc/cli/bridge.py` `datetime.now(UTC)`), where the adapter read it per region: a resource that crosses its age threshold during the run is kept in later regions (fewer deletes, never more) | refactor only: `crc/cli/bridge.py` | no | keeps what it should delete | low | ENG-0 | open |
 | BUG-391 | For the AWS kinds ip, kms, snapshot, vpc, vm, spot_instance_requests and disk the adapter loop listed and deleted region by region, so a listing error in a later region still left earlier regions deleted; through the engine `plan()` lists every region before `apply()` mutates and the pair stops before any mutation (fewer deletes, never more) | `crc.py` adapter loop (`ElasticIPs`, `Kms`, `Snapshot`, `VPC`, `VM`, `SpotInstanceRequests`, `Disk` `delete`) | yes | keeps what it should delete | low | ENG-1 | fixed in ENG-1 |
 | BUG-390 | The AWS keypair Cleaner builds the EC2 client again in `apply()` for each region with candidates (once already in `plan()`), so the SDK call sequence differs from `main` (no mutation) | refactor only: `crc/aws/keypairs/cleaner.py` `apply` | no | cosmetic | low | ENG-0 | open |
+| BUG-408 | For the OCI kinds disk and vm (delete and stop) the adapter loop listed and acted region by region, so a listing error in a later region still left earlier regions deleted or stopped; through the engine `plan()` lists every region before `apply()` mutates and the pair stops before any mutation (fewer deletes, never more) | `crc.py` adapter loop (`Disk.delete`, `VM.delete`, `VM.stop` of `crc/oci`) | yes | keeps what it should delete | low | ENG-OCI | fixed in ENG-OCI |
 
 ## Counts
 
-391 rows: critical 5, high 27, medium 65, low 294. 59 fixed and 5 partly fixed (the LOG rungs, wave FIX-1, ENG-0 and ENG-1); the others are open. BUG-366 to BUG-379 were found by the FIX-1 reviews, BUG-380 to BUG-387 by the W2 reviews, BUG-388 to BUG-390 by ENG-0.
+392 rows: critical 5, high 27, medium 65, low 295. 60 fixed and 5 partly fixed (the LOG rungs, wave FIX-1, ENG-0, ENG-1 and ENG-OCI); the others are open. BUG-366 to BUG-379 were found by the FIX-1 reviews, BUG-380 to BUG-387 by the W2 reviews, BUG-388 to BUG-390 by ENG-0.
 
 ## Notes
 

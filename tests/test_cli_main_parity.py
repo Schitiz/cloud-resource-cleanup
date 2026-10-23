@@ -8,6 +8,7 @@ after the run and the raised error (type and message) or exit code must be equal
 """
 
 import functools
+import importlib
 import importlib.util
 import io
 import itertools
@@ -358,15 +359,36 @@ ROUTED_CALLS: dict[str, RoutedCall] = {
 }
 
 
+def cloud_calls(cloud: str) -> dict[str, RoutedCall]:
+    """The oracle calls of the routed kinds of a cloud.
+
+    AWS uses `ROUTED_CALLS`; another cloud lists its own in `tests/routed_calls_<cloud>.py`
+    (kinds it does not list fall back to `ROUTED_CALLS`).
+    """
+    try:
+        module = importlib.import_module(f"tests.routed_calls_{cloud}")
+    except ModuleNotFoundError:
+        return dict(ROUTED_CALLS) if cloud == "aws" else {}
+    own = {kind: RoutedCall(*entry) for kind, entry in module.CALLS.items()}
+    return {**ROUTED_CALLS, **own}
+
+
+def routed_call(cloud: str, kind: str) -> RoutedCall:
+    return cloud_calls(cloud).get(kind) or ROUTED_CALLS[kind]
+
+
 def strip_unused_args(events: Events) -> Events:
-    """Drop the oracle call arguments that the routed AWS adapters never read."""
-    inverse = {call.method: call for call in ROUTED_CALLS.values()}
+    """Drop the oracle call arguments that the routed adapters never read."""
     kept: Events = []
     for event in events:
-        call = inverse.get(str(event[0]).removeprefix("crc."))
-        if call is not None and event[0].startswith("crc.") and event[1] == "aws":
-            args = [a for a, key in zip(event[2], call.keys, strict=False) if key is not None]
-            event = (event[0], event[1], args, event[3])
+        name = str(event[0]).removeprefix("crc.")
+        calls = cloud_calls(str(event[1])) if str(event[0]).startswith("crc.") else {}
+        for kind, call in calls.items():
+            if kind in bridge.TABLES.get(str(event[1]), {}) and name in (call.method, call.stop):
+                keys = call.keys[:4] if name == call.stop else call.keys
+                args = [a for a, key in zip(event[2], keys, strict=False) if key is not None]
+                event = (event[0], event[1], args, event[3])
+                break
         kept.append(event)
     return kept
 
@@ -389,7 +411,7 @@ def install_routed_fakes(fakes: Fakes, monkeypatch: pytest.MonkeyPatch) -> None:
     cleaners = FakeCleaners().install(monkeypatch)
     for cloud, table in bridge.TABLES.items():
         for kind in table:
-            call = ROUTED_CALLS[kind]
+            call = routed_call(cloud, kind)
             if kind == "snapshot":
                 cleaners.side_effect[(cloud, kind)] = snapshot_side_effect(fakes)
                 cleaners.plans[(cloud, kind)] = Plan(

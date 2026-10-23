@@ -16,6 +16,8 @@ Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.
 - `spot_vm/`: the Spot VM cleaner subpackage (`SpotVmCleaner`, the `SpotVM` adapter, the SDK Protocols and the leftover volume handling); terminates preemptible instances and deletes leftover volumes; skips OKE and instance pool members
 - `vm/`: the VM cleaner subpackage (`VmCleaner` registered as `oci` / `vm`, the `VM` adapter, the SDK Protocols); terminates or stops `RUNNING` instances; freeform tag all-keys filter
 
+`crc/cli/routes/oci.py` routes `disk` and `vm` (delete and stop) through `crc.core.engine`; `spot_instances` keeps the legacy `CRC` handler (SAF-037: under `--cloud all` the handler only warns and returns, and `Route.precheck` cannot skip a pair).
+
 ## Public API
 
 The shared helpers connectivity.py, _base.py and __init__.py (rung PL-OCI) are refactored, so the names below are synced with this README by
