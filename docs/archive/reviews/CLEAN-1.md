@@ -39,7 +39,7 @@ code; steps (2) and (3) are only started.
   `test_gcp_spot_vm_engine.py` already exist; the OCI copy was not checked.
 
 ### Numbers
-- `crc/` lines (all `*.py`): 19346 before, 19264 after (-82: `dispatch.py` handlers).
+- `crc/` lines (all `*.py`): 19346 before, 19280 after (-66 net: `dispatch.py` handlers minus the new skips).
 - Test count: 44364 before this lane (ENG-CLEAN floor 44373); `make check` runs 44399 after.
 
 ### Owner actions
