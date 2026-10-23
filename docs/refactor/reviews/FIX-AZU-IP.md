@@ -112,3 +112,84 @@ against `docs/refactor/BUGS.md` (`BUG-074`, `BUG-013`, `BUG-077`, `BUG-076`),
 Test count: 42444 on base (`182466d`), 42455 before review, 42470 after review additions (+26 total, +15 in round 1).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 182466d..HEAD`, round 1 fixes and findings re-checked first, then the eight
+checks done independently.
+
+### Round 1 fixes re-checked
+
+- Whitespace-only resource group fail-closed (`crc/azu/ip.py:134-135`): correct, raises
+  `ValueError` before `self._client_factory()` is called (`azure.calls == []`).
+- Added parity cases `in-use-nat-gateway-skipped`, `in-use-linked-ip-skipped`,
+  `in-use-service-ip-skipped` (BUG-076), the tightened `DIVERGING` assertions and
+  `FIXED_QUIRKS`: correct; every diverging case asserts the oracle still shows the bug and the
+  exact new calls/logs.
+- Production `--filter_tags` coverage in `tests/test_azure_ip_fix.py`: correct.
+
+### Findings
+
+- **BLOCKING (fixed in this round), direction rule:** round 1 extended the `getattr(..., None)`
+  default to `ip_configuration` too. For a model without `ip_configuration` (parity case
+  `missing-ip-configuration-attribute`), main raised `AttributeError` and deleted nothing, while
+  the branch deleted the IP: it deleted more than today. That broke the direction rule, and
+  BUG-076 is a "deletes what it should keep" row, so its fix may only keep more. The owner note
+  ("so SDK models without the field still work") only needs the default for the three newer
+  fields. Fixed in `crc/azu/ip.py:49-62`: `_in_use()` reads `ip.ip_configuration` directly (as
+  main does) and uses `getattr` default `None` only for `nat_gateway`,
+  `linked_public_ip_address` and `service_public_ip_address`. The parity case is back in
+  `QUIRKS` (equal to the oracle: `AttributeError`, nothing deleted) and has been removed from
+  `DIVERGING` and `FIXED_QUIRKS`. In `tests/test_azure_ip_fix.py`, the bare-model test now has
+  `ip_configuration=None` and is renamed `test_sdk_model_without_the_newer_in_use_fields_still_works`,
+  and the new test `test_model_without_ip_configuration_still_raises_before_any_delete` checks
+  the preserved behaviour. The `crc/azu/README.md` Safety Invariants line is updated to match.
+  The coding summary's mention of this case as diverging (above) is superseded by this round.
+- **Note (no change), BUG-013/BUG-077 direction:** where main raised `TypeError`, an untagged
+  IP is now treated as having no tags. With `exception_tags`/`notags` set and an empty
+  `filter_tags`, the IP becomes a candidate, and IPs listed after it are no longer cut off by
+  the crash. That is the owner-approved outcome in the task notes ("treated as having no tags,
+  never raises"), and it equals main's outcome for an IP with `tags == {}` (parity quirks
+  `exception-empty-tags-dict`, `notags-empty-tags-dict`). Production is not affected:
+  both Jenkins commands set `--filter_tags` and pass neither `--exception_tags` nor
+  `--notags` (argparse default `None`), so main never raised there, and untagged IPs still never
+  match a non-empty `filter_tags`.
+- **NIT:** none.
+
+### Checks
+
+1. Each fixed bug is covered by tests that fail on `182466d` and pass now: with
+   `182466d:crc/azu/ip.py` in place, `tests/test_azure_ip_fix.py` gave 19 failed, 1 passed (the
+   untagged-with-no-specs control case, which is not bug-specific). BUG-074 lists only
+   `list(Base.resource_group)` and never derives the group from the IP id.
+2. Direction rule: holds after the fix above. The oracle `tests/legacy/azu_ip.txt` is unchanged.
+   Diverging parity cases are marked BUG-013, BUG-077 or BUG-076 and assert the new outcome. The
+   only global mapping is `("list_all",)` to `("list", group)` (BUG-074); every other case
+   asserts exact equality.
+3. Production commands: same flags. Selection is now the unused, filter-matching IPs of
+   `$RESOURCE_GROUP` only (BUG-074, intended), minus IPs held by a NAT gateway or linked/service
+   IP (BUG-076, intended).
+4. Fail closed: an empty or whitespace resource group raises `ValueError` before any SDK call;
+   a missing `ip_configuration` raises `AttributeError` in `plan()` before any `begin_delete`.
+5. Protected files untouched: `tests/archtest/**`, `safety_lock.json`, the five locked tests,
+   `tests/legacy/**`, PLAN.md, STATUS.md, BUGS.md, CLEANUP_SAFETY.md, AGENTS.md,
+   ARCHITECTURE.md, `.cursor/**`.
+6. README: Public API (`PublicIpOperations.list`) and Safety Invariants (AZ-1 line) are updated.
+7. Unfixed bugs: none in scope. `## Owner decision` says "None.", which is correct.
+8. Gates: see below.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`:
+
+| Gate | Result |
+|------|--------|
+| `ruff` | All checks passed |
+| `mypy` | Success: no issues found |
+| `lint-imports` | Contracts: 5 kept, 0 broken |
+| `pytest -q` | 42471 passed |
+
+Test count: 42444 on base (`182466d`), 42470 after round 1, 42471 after round 2 (one new
+fix test; the moved parity case keeps the count).
+
+ROUND 2 VERDICT: APPROVE

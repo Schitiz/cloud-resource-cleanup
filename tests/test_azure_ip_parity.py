@@ -261,7 +261,6 @@ DIVERGING: dict[str, Diverges] = {
     ),
     "untagged-raises-in-dry-run": Diverges("BUG-013", ["a", "c"], TYPE_ERROR, ["a"]),
     "untagged-with-exception-attached-ip-still-raises": Diverges("BUG-013", [], TYPE_ERROR, []),
-    "missing-ip-configuration-attribute": Diverges("BUG-076", ["a"], ATTRIBUTE_ERROR, []),
     "in-use-nat-gateway-skipped": Diverges("BUG-076", ["b"], None, ["a", "b"]),
     "in-use-linked-ip-skipped": Diverges("BUG-076", ["b"], None, ["a", "b"]),
     "in-use-service-ip-skipped": Diverges("BUG-076", ["b"], None, ["a", "b"]),
@@ -493,6 +492,10 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
     ),
     ("resource-group-from-env", lambda o: ("begin_delete", "env-rg", "a") in o.calls),
     ("delete-error-not-called-in-dry-run", lambda o: o.error is None and o.deleted == ["a"]),
+    (
+        "missing-ip-configuration-attribute",
+        lambda o: o.error == ATTRIBUTE_ERROR and o.deleted == [],
+    ),
     ("missing-ip-configuration-not-reached-when-filtered", lambda o: o.error is None),
     ("tag-value-none-does-not-match-empty-string-filter", lambda o: o.deleted == []),
     ("tag-value-none-does-not-match-empty-string-exception", lambda o: o.deleted == ["a"]),
@@ -555,12 +558,6 @@ FIXED_QUIRKS: Sequence[FixedQuirk] = [
         "BUG-013",
         lambda o: o.error == TYPE_ERROR and o.deleted == ["a"],
         lambda o: o.error is None and o.deleted == ["a", "c"],
-    ),
-    FixedQuirk(
-        "missing-ip-configuration-attribute",
-        "BUG-076",
-        lambda o: o.error == ATTRIBUTE_ERROR,
-        lambda o: o.error is None and o.deleted == ["a"],
     ),
 ]
 

@@ -46,8 +46,7 @@ class IpNetworkClient(Protocol):
 ClientFactory = Callable[[], IpNetworkClient]
 
 
-_IN_USE_FIELDS = (
-    "ip_configuration",
+_OPTIONAL_IN_USE_FIELDS = (
     "nat_gateway",
     "linked_public_ip_address",
     "service_public_ip_address",
@@ -55,8 +54,14 @@ _IN_USE_FIELDS = (
 
 
 def _in_use(ip: Any) -> bool:
-    """True when the address is attached to anything (BUG-076); absent SDK fields count as unset."""
-    return any(getattr(ip, field, None) is not None for field in _IN_USE_FIELDS)
+    """True when the address is attached to anything (BUG-076).
+
+    `ip_configuration` is read directly, so a model without it raises `AttributeError` as on
+    `main` instead of being deleted; the newer fields count as unset when the SDK lacks them.
+    """
+    return ip.ip_configuration is not None or any(
+        getattr(ip, field, None) is not None for field in _OPTIONAL_IN_USE_FIELDS
+    )
 
 
 def _log_summary(deleted: Sequence[str], *, dry_run: bool) -> None:

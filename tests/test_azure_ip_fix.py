@@ -165,10 +165,17 @@ def test_ip_in_use_is_kept_with_reason_in_use(field: str) -> None:
     assert [(s.id, s.reason) for s in plan.skipped] == [("busy", "in_use")]
 
 
-def test_sdk_model_without_the_in_use_fields_still_works() -> None:
-    bare = types.SimpleNamespace(name="a", tags=ENV)
+def test_sdk_model_without_the_newer_in_use_fields_still_works() -> None:
+    bare = types.SimpleNamespace(name="a", tags=ENV, ip_configuration=None)
     plan = _cleaner(FakeAzure([bare])).plan(_context())
     assert [c.id for c in plan.candidates] == ["a"]
+
+
+def test_model_without_ip_configuration_still_raises_before_any_delete() -> None:
+    azure = FakeAzure([types.SimpleNamespace(name="a", tags=ENV)])
+    with pytest.raises(AttributeError, match="ip_configuration"):
+        _cleaner(azure).plan(_context(dry_run=False))
+    assert [c for c in azure.calls if c[0] == "begin_delete"] == []
 
 
 def test_in_use_ip_is_never_deleted_by_the_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
