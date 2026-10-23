@@ -6,8 +6,9 @@ from typing import Any
 
 import pytest
 
-from crc.aws.elastic_ips import ElasticIpCleaner, ElasticIpRuntime, ElasticIPs
+from crc.aws.elastic_ips import ElasticIpCleaner
 from crc.core.cleaner import Operation, RunContext
+from tests.helpers_wc_aws1_engine import deleted_ids, run_cleaner
 
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)
 
@@ -118,16 +119,14 @@ def test_notags_tag_without_value_fails_closed() -> None:
     assert released == []
 
 
-def test_adapter_with_notags_does_not_raise(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("crc.service.init_logging", lambda *args, **kwargs: None)
+def test_engine_run_with_notags_does_not_raise() -> None:
     released: list[str] = []
     addresses = [address("1.1.1.1", keep="y"), address("2.2.2.2", env="t")]
-    runtime = ElasticIpRuntime(
-        client_factory=lambda region: FakeEc2(addresses, released), list_regions=lambda: ["r1"]
+    cleaner = ElasticIpCleaner(
+        lambda region: FakeEc2(addresses, released), lambda: ["r1"], {}, {}, {"keep": []}
     )
-    ips = ElasticIPs(False, {}, {}, {"keep": []}, runtime)
-    ips.delete()
-    assert ips.get_deleted == ["2.2.2.2"]
+    outcome = run_cleaner("aws", "ip", cleaner)
+    assert deleted_ids(outcome) == ["2.2.2.2"]
     assert released == ["alloc-2.2.2.2"]
 
 
@@ -191,4 +190,3 @@ def test_production_jenkins_filter_tags_selection_unchanged(
     ]
     cleaner = build(addresses, [], filter_tags=filter_tags)
     assert planned(cleaner) == expected
-

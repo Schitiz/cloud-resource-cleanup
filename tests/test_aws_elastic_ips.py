@@ -1,4 +1,4 @@
-"""Unit tests for `crc.aws.elastic_ips`: read-only `plan()`, mutating `apply()`, adapter."""
+"""Unit tests for `crc.aws.elastic_ips`: read-only `plan()`, mutating `apply()`, engine run."""
 
 import datetime
 from collections.abc import Mapping
@@ -7,8 +7,9 @@ from typing import Any
 import pytest
 from botocore.exceptions import EndpointConnectionError
 
-from crc.aws.elastic_ips import ElasticIpCleaner, ElasticIpRuntime, ElasticIPs
+from crc.aws.elastic_ips import ElasticIpCleaner
 from crc.core.cleaner import Candidate, Operation, Plan, RunContext
+from tests.helpers_wc_aws1_engine import deleted_ids, run_cleaner
 
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)
 
@@ -155,19 +156,18 @@ def test_supports_only_delete(operation: Operation, expected: bool) -> None:
     assert cleaner(Aws({})).supports(operation) is expected
 
 
-def test_adapter_keeps_attributes_and_runs_per_region(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("crc.service.init_logging", lambda *args, **kwargs: None)
+def test_engine_run_releases_per_region() -> None:
     aws = Aws({"r1": [tagged("1.1.1.1", a="b")], "r2": [tagged("2.2.2.2", a="b")]})
-    runtime = ElasticIpRuntime(client_factory=aws.client, list_regions=aws.list_regions)
-    ips = ElasticIPs(False, {"a": []}, {}, {}, runtime)
-    ips.delete()
-    assert ips.get_deleted == ips.deleted_ips == ["1.1.1.1", "2.2.2.2"]
-    assert ips.count == len(aws.regions)
+    outcome = run_cleaner("aws", "ip", cleaner(aws, filter_tags={"a": []}))
+    assert deleted_ids(outcome) == ["1.1.1.1", "2.2.2.2"]
+    assert len(deleted_ids(outcome)) == len(aws.regions)
     assert [c[0] for c in aws.calls] == [
         "client",
         "describe_addresses",
-        "release_address",
         "client",
         "describe_addresses",
+        "client",
+        "release_address",
+        "client",
         "release_address",
     ]

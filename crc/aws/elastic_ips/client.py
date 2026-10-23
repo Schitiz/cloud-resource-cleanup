@@ -37,7 +37,7 @@ def boto3_client(region: str) -> ElasticIpClient:
 
 @dataclass(frozen=True, slots=True)
 class ElasticIpRuntime:
-    """Injected collaborators of `ElasticIPs`: the SDK client factory and the region lister."""
+    """Injected collaborators of the cleaner: the SDK client factory and the region lister."""
 
     client_factory: ClientFactory = boto3_client
     list_regions: RegionLister = ec2_regions

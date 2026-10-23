@@ -3,8 +3,7 @@
 """AWS Elastic IP cleaner.
 
 `ElasticIpCleaner` implements the `crc.core.cleaner.Cleaner` contract: `plan()` lists the
-addresses (`describe_addresses`) and filters them, `apply()` calls `release_address`. The
-legacy class `crc.py` uses lives in `adapter.py`.
+addresses (`describe_addresses`) and filters them, `apply()` calls `release_address`.
 """
 
 import logging

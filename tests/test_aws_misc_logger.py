@@ -15,9 +15,9 @@ import pytest
 from botocore.exceptions import ClientError
 
 from crc.aws import _regionlog
-from crc.aws.elastic_ips import ElasticIpCleaner, ElasticIpRuntime, ElasticIPs
+from crc.aws.elastic_ips import ElasticIpCleaner
 from crc.aws.keypairs import KeyPairCleaner
-from crc.aws.kms import Kms, KmsCleaner, KmsRuntime, KmsSettings
+from crc.aws.kms import KmsCleaner, KmsSettings
 from crc.aws.snapshot import Snapshot, SnapshotCleaner, SnapshotRuntime
 from crc.aws.vpc import VPC, VpcCleaner, VpcRuntime
 from crc.core import engine, logger
@@ -28,6 +28,7 @@ from tests import test_aws_elastic_ips as eip_t
 from tests import test_aws_keypairs as kp_t
 from tests import test_aws_kms as kms_t
 from tests import test_aws_snapshot as snap_t
+from tests.helpers_wc_aws1_engine import run_cleaner
 from tests.test_aws_vpc_parity import W2, Case, FakeAws, FakeClient, FakeResource, conn_error, full
 
 TWO_SKIPS = 2
@@ -86,19 +87,30 @@ class MixedKms(kms_t.FakeKms):
         return super().get_key_policy(KeyId=KeyId, PolicyName=PolicyName)
 
 
-def _kms(dry_run: bool) -> tuple[Kms, list[tuple[str, ...]]]:
+def _kms_cleaner(client_factory: Any) -> KmsCleaner:
+    return KmsCleaner(
+        client_factory,
+        KmsSettings(
+            kms_key_description="ci",
+            kms_user=kms_t.USER,
+            kms_pending_window=kms_t.WINDOW,
+            age={"days": 1},
+        ),
+    )
+
+
+def _kms(dry_run: bool) -> tuple[Any, list[tuple[str, ...]]]:
     keys = {"k-denied": kms_t.OLD, "k-other": kms_t.OLD, "k-ok": kms_t.OLD, "k-new": kms_t.YOUNG}
     calls: list[tuple[str, ...]] = []
-    runtime = KmsRuntime(lambda region: MixedKms(keys, calls), lambda: kms_t.NOW)
-    kms = Kms(dry_run, None, None, "ci", kms_t.USER, kms_t.WINDOW, {"days": 1}, "", runtime)
-    return kms, calls
+    cleaner = _kms_cleaner(lambda region: MixedKms(keys, calls))
+    return (lambda: run_cleaner("aws", "kms", cleaner, dry_run=dry_run, now=kms_t.NOW)), calls
 
 
 def test_kms_dry_run_counts_skips_by_reason_and_lists_would_delete(run_lines: Any) -> None:
     begin, lines = run_lines
     begin("kms", dry_run=True)
-    kms, calls = _kms(dry_run=True)
-    kms.delete()
+    run, calls = _kms(dry_run=True)
+    run()
     out = lines()
     assert _run_lines(out, "REGION", "ACTION", "SKIPPED") == [
         "REGION cloud=aws resource=kms region=us-west-2 scanned=4 selected=1 seconds=2",
@@ -119,7 +131,7 @@ def test_kms_key_skipped_is_debug_with_unchanged_text(
     """BUG-357: `KEY SKIPPED <id>` is DEBUG now (WARNING on main); the text is the same."""
     begin, lines = run_lines
     begin("kms", dry_run=True)
-    _kms(dry_run=True)[0].delete()
+    _kms(dry_run=True)[0]()
     lines()
     skipped = [(r.levelno, r.getMessage()) for r in caplog.records if "KEY SKIPPED" in r.message]
     assert skipped == [
@@ -137,10 +149,9 @@ def test_kms_real_run_reports_deleted_and_a_failure(run_lines: Any) -> None:
         def schedule_key_deletion(self, *, KeyId: str, PendingWindowInDays: int) -> Any:
             raise _client_error("ScheduleKeyDeletion")
 
-    runtime = KmsRuntime(lambda region: Failing(keys, []), lambda: kms_t.NOW)
-    kms = Kms(False, None, None, "ci", kms_t.USER, kms_t.WINDOW, {"days": 1}, "", runtime)
+    cleaner = _kms_cleaner(lambda region: Failing(keys, []))
     with pytest.raises(ClientError):
-        kms.delete()
+        run_cleaner("aws", "kms", cleaner, now=kms_t.NOW)
     out = lines()
     assert "ERRORS count=1" in out
     failed = [m for m in out if m.startswith("FAILED")]
@@ -196,8 +207,8 @@ def test_kms_key_with_a_later_statement_error_is_skipped_not_selected(
     begin, lines = run_lines
     begin("kms", dry_run=True)
     keys = {"k1": kms_t.OLD}
-    runtime = KmsRuntime(lambda region: MatchThenNoPrincipal(keys, []), lambda: kms_t.NOW)
-    Kms(True, None, None, "ci", kms_t.USER, kms_t.WINDOW, {"days": 1}, "", runtime).delete()
+    cleaner = _kms_cleaner(lambda region: MatchThenNoPrincipal(keys, []))
+    run_cleaner("aws", "kms", cleaner, dry_run=True, now=kms_t.NOW)
     out = lines()
     records = [(r.levelno, r.getMessage()) for r in caplog.records]
     assert (logging.DEBUG, "KEY SKIPPED k1") in records
@@ -385,9 +396,11 @@ def test_keypairs_real_run_and_skipped_region(run_lines: Any) -> None:
 # Elastic IPs -------------------------------------------------------------------------------
 
 
-def _eips(aws: eip_t.Aws, *, dry_run: bool) -> ElasticIPs:
-    runtime = ElasticIpRuntime(aws.client, aws.list_regions)
-    return ElasticIPs(dry_run, {"team": ["qa"]}, {"keep": ["1"]}, None, runtime)
+def _eips(aws: eip_t.Aws, *, dry_run: bool) -> Any:
+    cleaner = ElasticIpCleaner(
+        aws.client, aws.list_regions, {"team": ["qa"]}, {"keep": ["1"]}, None
+    )
+    return lambda: run_cleaner("aws", "ip", cleaner, dry_run=dry_run)
 
 
 def _addresses() -> list[dict[str, Any]]:
@@ -402,7 +415,7 @@ def _addresses() -> list[dict[str, Any]]:
 def test_elastic_ips_dry_run_and_real_run_lines(run_lines: Any) -> None:
     begin, lines = run_lines
     begin("ip", dry_run=True)
-    _eips(eip_t.Aws({"us-west-2": _addresses()}), dry_run=True).delete()
+    _eips(eip_t.Aws({"us-west-2": _addresses()}), dry_run=True)()
     out = lines()
     assert _run_lines(out, "REGION", "ACTION", "SKIPPED") == [
         "REGION cloud=aws resource=ip region=us-west-2 scanned=4 selected=1 seconds=2",
@@ -411,7 +424,7 @@ def test_elastic_ips_dry_run_and_real_run_lines(run_lines: Any) -> None:
         "SKIPPED cloud=aws resource=ip reason=no_filter_match count=1",
     ]
     begin("ip", dry_run=False)
-    _eips(eip_t.Aws({"us-west-2": _addresses()}), dry_run=False).delete()
+    _eips(eip_t.Aws({"us-west-2": _addresses()}), dry_run=False)()
     out = lines()
     assert "ACTION deleted cloud=aws resource=ip region=us-west-2 id=1.1.1.1 name=1.1.1.1" in out
     assert " selected=1 done=1 failed=0 skipped=2 regions=1 regions_skipped=0 " in out[-1]
@@ -427,14 +440,17 @@ def test_elastic_ips_release_failure_and_skipped_region(run_lines: Any) -> None:
         def release_address(self, *, AllocationId: str) -> Any:
             raise _client_error("ReleaseAddress")
 
-    runtime = ElasticIpRuntime(
+    cleaner = ElasticIpCleaner(
         lambda region: (
             Failing(aws.regions[region], aws.calls) if region == "us-west-2" else aws.client(region)
         ),
         aws.list_regions,
+        {"team": ["qa"]},
+        {"keep": ["1"]},
+        None,
     )
     with pytest.raises(ClientError):
-        ElasticIPs(False, {"team": ["qa"]}, {"keep": ["1"]}, None, runtime).delete()
+        run_cleaner("aws", "ip", cleaner)
     out = lines()
     assert "ERRORS count=1" in out
     assert any("FAILED cloud=aws resource=ip region=us-west-2 id=1.1.1.1" in m for m in out)
