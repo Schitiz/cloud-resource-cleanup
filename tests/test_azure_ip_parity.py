@@ -1,15 +1,14 @@
-"""Parity: `crc.azu.ip.IP` against main (`tests/legacy/azu_ip.txt`).
+"""Parity: the Azure IP Cleaner, run through `crc.core.engine.run`, against main.
 
-Both run against the same fake Azure network client (the SDK classes `crc.azu._base` builds
-are replaced, so the real `Base` runs in both). SDK calls (in order, including the lazy
-paging of the listing), results, log records, stdout and raised errors must be identical for
-every case through the legacy adapter, except two documented divergences. First, every case
-lists the configured resource group (`list(resource_group)`) instead of the subscription
-(`list_all()`): BUG-074, the oracle's `("list_all",)` call is mapped to `("list", group)`.
-Second, the cases in `DIVERGING` (BUG-013, BUG-076, BUG-077) assert the new outcome and that it
-differs from the oracle. The registered `Cleaner` path (factory with a
-`RunContext`, `plan()` then `apply()` unless dry run) is compared on results, errors, stdout,
-delete calls and log records. The module lists no regions, so there is no region fallback.
+The oracle is `tests/legacy/azu_ip.txt`. Both run against the same fake Azure network client (the
+SDK classes `crc.azu._base` builds are replaced, so the real `Base` runs in both). SDK calls,
+results, log records, stdout and raised errors must match for every case, except the documented
+divergences. First, every case lists the configured resource group (`list(resource_group)`)
+instead of the subscription (`list_all()`): BUG-074, the oracle's `("list_all",)` call is mapped
+to `("list", group)`. Second, the cases in `DIVERGING` (BUG-013, BUG-076, BUG-077) assert the
+new outcome and that it differs from the oracle. Third, the cleaner lists everything before it
+deletes, so a listing or selection error stops the run before any delete (fewer deletes). The
+registered `Cleaner` protocol (factory, `plan()`, `apply()`) is compared too.
 """
 
 import logging
@@ -21,10 +20,11 @@ from typing import Any
 
 import pytest
 
-from crc.azu.ip import IP, AzureIpCleaner, build_ip_cleaner
+from crc.azu.ip import AzureIpCleaner, build_ip_cleaner
 from crc.core.cleaner import Cleaner, Operation, RunContext
 from crc.core.registry import get
 from tests.helpers_azure_ip import NOW, FakeAzure, ip
+from tests.helpers_wc_azu_engine import candidate_ids, engine_run
 
 ORACLE = Path(__file__).parent / "legacy" / "azu_ip.txt"
 ENV = {"env": "test", "owner": "qa"}
@@ -319,10 +319,6 @@ def _legacy(case: Case) -> Any:
     )
 
 
-def _new(case: Case) -> Any:
-    return IP(case.resource_group, case.dry_run, case.filter_tags, case.exception_tags, case.notags)
-
-
 def _setup(
     case: Case,
     monkeypatch: pytest.MonkeyPatch,
@@ -361,6 +357,45 @@ def debug_logs(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG)
 
 
+def _expected_engine_calls(case: Case, deleted: Sequence[str]) -> list[tuple[Any, ...]]:
+    group = case.resource_group or "env-rg"
+    wanted = set(deleted)
+    calls: list[tuple[Any, ...]] = [("client", "sub-1"), ("list", group)]
+    calls.extend(("yield", getattr(item, "name", None)) for item in case.ips)
+    if not case.dry_run:
+        for item in case.ips:
+            name = getattr(item, "name", None)
+            if name in wanted:
+                calls.append(("begin_delete", group, name))
+    return calls
+
+
+def _options(case: Case) -> dict[str, Any]:
+    return {
+        "resource_group": case.resource_group,
+        "filter_tags": case.filter_tags,
+        "exception_tags": case.exception_tags,
+        "notags": case.notags,
+    }
+
+
+def _run_engine(
+    case: Case,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> Outcome:
+    azure = _setup(case, monkeypatch, caplog, capsys)
+    error: tuple[str, str] | None = None
+    deleted: list[str] = []
+    try:
+        deleted = candidate_ids(engine_run("ip", _options(case), dry_run=case.dry_run, now=NOW))
+    except Exception as e:
+        error = (type(e).__name__, str(e))
+    logs = [(r.name, r.levelno, r.getMessage()) for r in caplog.records]
+    return Outcome(azure.calls, deleted, len(deleted), logs, capsys.readouterr().out, error)
+
+
 @pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
 def test_matches_main(
     case: Case,
@@ -370,7 +405,7 @@ def test_matches_main(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
+    new = _run_engine(case, monkeypatch, caplog, capsys)
     if case.id in DIVERGING:
         fix = DIVERGING[case.id]
         assert old.error == fix.old_error, f"{fix.bug}: oracle no longer shows the bug"
@@ -379,16 +414,27 @@ def test_matches_main(
         assert new.deleted == fix.deleted
         assert new.count == len(fix.deleted)
         assert (new.error, new.deleted) != (old.error, old.deleted)
-        assert new.calls == _expected_calls(case, fix.deleted)
-        assert new.logs == _expected_logs(case, fix.deleted)
+        assert new.calls == _expected_engine_calls(case, fix.deleted)
+        assert new.logs == _expected_logs(case, fix.deleted)[:-1]
         assert new.stdout == ""
         return
-    assert new.calls == _scoped(old.calls, case)
     assert new.error == old.error
-    assert new.deleted == old.deleted
-    assert new.count == old.count
-    assert new.logs == old.logs
     assert new.stdout == old.stdout
+    assert _only(new.calls, "list") == _only(_scoped(old.calls, case), "list")
+    old_yields = _only(old.calls, "yield")
+    assert _only(new.calls, "yield")[: len(old_yields)] == old_yields
+    if old.error is None:
+        assert _only(new.calls, "yield") == old_yields
+    if case.fails_in_plan:
+        assert _only(new.calls, "begin_delete") == []
+        assert new.logs == []
+        return
+    assert _only(new.calls, "begin_delete") == _only(old.calls, "begin_delete")
+    assert new.logs == old.logs[:-1]
+    if new.error is None:
+        assert new.deleted == old.deleted
+        assert new.count == old.count
+        assert new.calls == _expected_engine_calls(case, old.deleted or [])
 
 
 def _run_cleaner(
@@ -562,6 +608,22 @@ FIXED_QUIRKS: Sequence[FixedQuirk] = [
 ]
 
 
+ENGINE_QUIRKS: dict[str, Callable[[Outcome], bool]] = {
+    # Allowed change: the cleaner lists the whole group before it deletes, so a listing error
+    # (even one raised mid-listing) stops the run before any delete.
+    "iteration-error-mid-listing": lambda o: (
+        o.error == ("RuntimeError", "page failed")
+        and o.deleted == []
+        and [c for c in o.calls if c[0] == "begin_delete"] == []
+    ),
+    # The delete error propagates from apply(); earlier IPs were already deleted, in plan order.
+    "delete-error-mid-run-keeps-earlier-record": lambda o: (
+        o.error == ("RuntimeError", "delete failed")
+        and [c[2] for c in o.calls if c[0] == "begin_delete"] == ["ip-0", "ip-1", "ip-2"]
+    ),
+}
+
+
 @pytest.mark.parametrize(("case_id", "check"), QUIRKS, ids=[q[0] for q in QUIRKS])
 def test_quirk_is_preserved(
     case_id: str,
@@ -573,9 +635,9 @@ def test_quirk_is_preserved(
 ) -> None:
     case = _find(case_id)
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
+    new = _run_engine(case, monkeypatch, caplog, capsys)
     assert check(old), "oracle no longer shows the quirk"
-    assert check(new)
+    assert ENGINE_QUIRKS.get(case_id, check)(new)
 
 
 @pytest.mark.parametrize(
@@ -592,7 +654,7 @@ def test_fixed_quirk(
 ) -> None:
     case = _find(quirk.case_id)
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
+    new = _run_engine(case, monkeypatch, caplog, capsys)
     assert quirk.old_check(old), f"{quirk.bug}: oracle no longer shows the bug"
     assert quirk.new_check(new), f"{quirk.bug}: fix did not produce expected outcome"
 
@@ -609,34 +671,36 @@ def test_oracle_lists_subscription_wide_new_code_lists_the_configured_group(
     assert ("list_all",) in azure.calls
     assert ("begin_delete", "rg-test", "a") in azure.calls
     azure = _setup(case, monkeypatch, caplog, capsys)
-    _new(case).delete()
+    candidate_ids(engine_run("ip", _options(case), dry_run=False, now=NOW))
     assert ("list", "rg-test") in azure.calls
     assert ("list_all",) not in azure.calls
     assert ("begin_delete", "rg-test", "a") in azure.calls
 
 
-def test_repeated_delete_accumulates_like_main(
+def test_repeated_run_repeats_the_calls_like_main(
     debug_logs: None,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """The oracle accumulates names over two `delete()` calls; each engine run starts afresh."""
     case = _find("delete")
-    results = []
-    for build in (_legacy, _new):
-        azure = _setup(case, monkeypatch, caplog, capsys)
-        cleaner = build(case)
-        cleaner.delete()
-        cleaner.delete()
-        results.append(
-            (
-                _scoped(azure.calls, case) if build is _legacy else azure.calls,
-                cleaner.get_deleted,
-                [(r.levelno, r.getMessage()) for r in caplog.records],
-            )
-        )
-    assert results[0] == results[1]
-    assert results[1][1] == ["a", "b", "a", "b"]
+    azure = _setup(case, monkeypatch, caplog, capsys)
+    legacy = _legacy(case)
+    legacy.delete()
+    legacy.delete()
+    old_calls = _scoped(azure.calls, case)
+    old_deleted = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Deleted")]
+    azure = _setup(case, monkeypatch, caplog, capsys)
+    runs = [
+        candidate_ids(engine_run("ip", _options(case), dry_run=False, now=NOW)) for _ in range(2)
+    ]
+    new_deleted = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Deleted")]
+    assert _only(azure.calls, "list") == _only(old_calls, "list")
+    assert _only(azure.calls, "begin_delete") == _only(old_calls, "begin_delete")
+    assert new_deleted == old_deleted
+    assert legacy.get_deleted == ["a", "b", "a", "b"]
+    assert runs == [["a", "b"], ["a", "b"]]
 
 
 def test_registered_factory_builds_cleaner(monkeypatch: pytest.MonkeyPatch) -> None:

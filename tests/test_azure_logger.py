@@ -14,7 +14,6 @@ import pytest
 
 from crc.azu import _logger
 from crc.azu.disk import AzureDiskCleaner, Disk, DiskSettings
-from crc.azu.ip import IP
 from crc.azu.nic import NIC, AzureNicCleaner
 from crc.azu.spot_vm import SpotVM
 from crc.azu.vm import VM, VmCleaner, VmSettings
@@ -25,6 +24,7 @@ from tests import helpers_azure_ip as hi
 from tests import helpers_azure_nic as hn
 from tests import helpers_azure_spot as hs
 from tests import helpers_azure_vm as hv
+from tests.helpers_wc_azu_engine import engine_run
 
 _PREFIXES = ("RUN START", "REGION", "ACTION", "SKIPPED", "ERRORS", "FAILED", "RESULT")
 ENV = {"env": ["ci"]}
@@ -139,6 +139,16 @@ def test_disk_cleaner_plan_dry_run_logs_each_action_once(caplog: pytest.LogCaptu
     ]
 
 
+def _engine_ip(*, dry_run: bool) -> None:
+    options = {
+        "resource_group": "rg",
+        "filter_tags": ENV,
+        "exception_tags": {},
+        "notags": {},
+    }
+    engine_run("ip", options, dry_run=dry_run, now=hi.NOW)
+
+
 # ----- ip -----------------------------------------------------------------------------------
 
 
@@ -150,7 +160,7 @@ def test_ip_real_and_dry_run(
     )
     azure.install(monkeypatch)
     _begin("ip", dry_run=False)
-    IP("rg", False, {"env": ["ci"]}, {}, {}).delete()
+    _engine_ip(dry_run=False)
     logger.finish()
     assert _lines(caplog)[1:] == [
         "ACTION deleted cloud=azure resource=ip region=rg id=a name=a",
@@ -162,10 +172,13 @@ def test_ip_real_and_dry_run(
     ]
     caplog.clear()
     _begin("ip", dry_run=True)
-    IP("rg", True, {"env": ["ci"]}, {}, {}).delete()
+    _engine_ip(dry_run=True)
     logger.finish()
     lines = _lines(caplog)
-    assert lines[1] == "ACTION would_delete cloud=azure resource=ip region=rg id=a name=a"
+    assert lines[1:3] == [
+        "REGION cloud=azure resource=ip region=rg scanned=3 selected=1 seconds=S",
+        "ACTION would_delete cloud=azure resource=ip region=rg id=a name=a",
+    ]
     assert "selected=1 done=0" in lines[-1]
 
 
