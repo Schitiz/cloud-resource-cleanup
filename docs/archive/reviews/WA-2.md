@@ -54,3 +54,36 @@ Ran `pip install -r requirements.txt -r requirements-dev.txt && make check`:
 
 VERDICT: APPROVE
 
+
+## Round 2 (Opus)
+
+Scope: `git diff fc6fa4d..HEAD` on `wa/2` (commits `b6d06cf`, `69544b0`).
+
+### Round 1 fixes and findings re-checked
+
+- Reverting `tests/README.md` (unowned) is correct; it is absent from the diff now.
+- The constructor `act` now returns `(type(c.slack_client).__name__, type(c.influxdb_client).__name__)`. This adds a comparison and drops none: before, `execute` filtered the client attributes out of `attributes` and `result` was always `("ok", "None")`. Both sides build the same fake clients, so it compares only whether the clients are stored, which is what main does.
+- Round 1's claims (counts, grep, gates) reproduce. See below.
+
+### Independent checks
+
+1. **No legacy CLI code in owned files.** `grep -rn "vm_ops\|cli.adapter_args\|report_calls\|resource_ops"` over `tests/test_cli_crc_parity.py`, `tests/test_cli_scan_parity.py`, `tests/test_cli_runner_parity.py` and `tests/helpers_wa2_*.py` is empty. `grep -rln "cli.vm_ops" tests/` is also empty. The `sys.modules[NewCRC.scan_instances_with_tag.__module__]` lookup and the `import sys` are gone. `helpers_wa2_scan` patches only `crc.{aws,azu,gcp,oci}.vm`, both the `VM` module attribute and the class object in place, and it restores `__qualname__`.
+2. **Comparisons preserved.** `scan_cases` reproduces `operation_cases()` for `scan` and `scan_unsupported` exactly: 5 clouds x `DATA` x (2 dry x 4 Slack x 6 Influx), with the same names, `routed=` and `scan_supported=False` override. Collection at `fc6fa4d`: `tests/test_cli_crc_parity.py` has 11744 tests, 990 of which match scan/constructor. At HEAD the three files have 11745 (960 scan + 30 constructor + 1 new non-vacuity test). The old side is still `execute(oracle.CRC, [oracle], case)` with `load_legacy_crc()`. The assertion is still `for key in old: new[key] == old[key]` over all seven recorded fields, and nothing is derived from the routed side. The moved blocks had no BUG-NNN divergences. The WA-1 blocks (get_msg/Slack/Influx/ping) are untouched; the only shared edit is the `spec is None` fallback, now `execute(NewCRC, [], case)` with `assert case.routed is None`.
+3. **Mutations** (local, reverted with `git checkout`, not committed):
+   - `crc/cli/vm_ops.py` `_get_vm`: Azure builds `GCP_VM`. Result: `test_cli_scan_parity.py` has 192 failed.
+   - `crc/cli/vm_ops.py` `scan_instances_with_tag` returns a constant instead of calling `find_instances_with_tag`. Result: 385 failed.
+   - `crc/cli/base.py`: `dry_run` inverted for OCI. Result: scan plus runner files have 198 failed (192 scan + 6 constructor).
+   - `crc/core/report.py` `get_msg` dry-run text `Will be` -> `Would be` (routed Slack text). Result: `test_cli_crc_parity.py` has 2196 failed.
+   - Note: changing the header text of `notify_cleanup` in `crc/notify/slack.py` failed nothing in `test_cli_crc_parity.py`. That function is not on the routed `CRC` path (`crc/cli/scan.py` imports `crc.notifications.notify_cleanup`). This is coverage outside this lane, not a regression.
+4. **Owned files only.** The diff touches `tests/test_cli_crc_parity.py`, `tests/test_cli_scan_parity.py`, `tests/test_cli_runner_parity.py`, `tests/helpers_wa2_scan.py`, `tests/archtest/test_count_floor.txt` (44411 -> 44412) and this review. No production code.
+6. **Gates.** `pip install -r requirements.txt -r requirements-dev.txt && make check`: ruff passed; mypy passed (377 files); lint-imports passed; pytest **44412 passed in 52.60s**; `ARCH-008: 44412 tests, floor 44412`. `make check` wall time 72s.
+
+### Minor (not blocking, not fixed)
+
+- `tests/helpers_wa2_scan.py:151`: `patch.delattr(real, "find_instances_with_tag")` only deletes from the class's own `__dict__`. If a later lane moves the method to a base class or mixin, `scan_unsupported` setup raises `AttributeError` instead of comparing. Today only `crc/aws/vm/adapter.py:130` defines it, on the class itself.
+
+## New bugs
+
+None.
+
+ROUND 2 VERDICT: APPROVE
