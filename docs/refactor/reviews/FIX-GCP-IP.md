@@ -113,3 +113,89 @@ Ran `pip install -r requirements.txt -r requirements-dev.txt` then `make check`:
 Test count: 42444 at `182466d`, 42462 at `5818d62`, 42468 after Round 1 (+24 total).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 182466d..HEAD` (coder commit `5818d62`, Round 1 commit `8b84e46`). Round 1's
+fixes (the `awaited` tracking, the `delete-operation-error` BUG-064 parity case, both production
+`--name_regex` lists in the selection test) were re-checked and hold.
+
+### Checks
+
+1. **Bugs fixed, tests fail on 182466d.** Copied `tests/test_gcp_ip_fix.py` into a `182466d`
+   worktree (only the `OperationView` import shimmed): 13 failed, 8 passed. The 8 that pass on
+   the base are the unchanged-behaviour cases (production selection without `exception_regex`,
+   `None`/`[]` exceptions, dry run, programming errors propagate), as they should.
+   - BUG-001: `_excluded` is `any(p in name ...)` (`crc/gcp/ip.py:224`), evaluated for every
+     RESERVED address as before (BUG-068 `TypeError` quirk kept, parity unmarked cases equal).
+   - BUG-063: Google API / auth / OS errors (`concurrent.futures.TimeoutError` is an `OSError` on
+     Python >= 3.11, the project minimum) are logged at ERROR, recorded with
+     `logger.current().fail` and in `Result.failed`, the loop continues, earlier deletes stay in
+     `deleted_ips`, the summary is logged.
+   - BUG-064: `.result()` is called on the operation before the INFO line, the ACTION line and
+     the record (`crc/gcp/ip.py:208`).
+2. **Direction rule / parity.** `tests/legacy/` untouched. 10 diverging cases, each marked with an
+   in-scope bug ID (6 x BUG-001, 3 x BUG-063, 1 x BUG-064), assert the oracle still differs and
+   the exact new calls, logs, deleted list and stdout; every unmarked case keeps full equality;
+   the removed `QUIRKS` entries moved to `FIXED_QUIRKS` (old check on the oracle, new check on
+   HEAD). BUG-063/BUG-064 only delete less (a failed address is no longer recorded) or go on to
+   the next address that `main` would also have reached had it not crashed; nothing new is
+   selected. BUG-001 is the exception: for a run that passes a non-empty `--exception_regex`, the
+   inverted-filter fix necessarily deletes names `main` kept (case
+   `exception-inverted-keeps-matching`: `main` deletes `keep-c`, HEAD deletes `ip-a`, `ip-b`).
+   This is the outcome the rung notes prescribe ("exception_regex excludes matching names") and
+   the coder recorded it under "## Owner decision" with the fail-closed alternative; no Jenkins
+   job passes `--exception_regex`. Not blocking for this rung; the owner decision stands.
+3. **Production commands.** Both commands (`--resource ip --name_regex '["itest", "itests",
+   "ui-auto"]'` and `'["yb-stress-auto"]'`, no `--exception_regex`) keep the same flags
+   (`crc/cli/resource_ops.py:71` unchanged) and the same selection
+   (`test_bug_001_production_selection_without_exception_regex_is_unchanged`). The only added SDK
+   call is `.result()` on each delete operation.
+4. **Fail closed.** No new fail-closed path; missing `project_id` still raises `ValueError` in
+   `build_ip_cleaner` before any SDK call.
+5. **Protected files.** `git diff 182466d..HEAD` touches none of PLAN.md, STATUS.md, BUGS.md,
+   CLEANUP_SAFETY.md, AGENTS.md, ARCHITECTURE.md, `.cursor/**`, `tests/archtest/**`,
+   `tests/legacy/**` or the five hash-locked safety tests.
+6. **README (ARCH-002).** Safety Invariants and Public API (`OperationView`) were updated, but the
+   module overview line still said "exception filter inverted" (fixed below).
+7. **Owner decision.** No bug left unfixed; BUG-001's direction-rule tension is documented.
+
+### Fixed in Round 2
+
+- `crc/gcp/README.md:14`: the module overview still read "exception filter inverted"; it now says
+  "waits for the operation" and "substring name and exception filters".
+- `crc/gcp/README.md:31`: `IpCleaner`'s new public `failures` attribute is documented (written
+  without backticks because the ARCH-002 check reads backticked names as top-level symbols).
+- `crc/gcp/README.md` Safety Invariants: says that for an exception outside the caught classes
+  `IP.delete()` still loses the record of that region's deleted addresses, as on main.
+- `tests/test_gcp_ip_fix.py`: renamed `test_bug_063_errors_are_not_swallowed_in_dry_run_and_nothing_is_deleted`
+  to `test_bug_063_dry_run_never_calls_delete` (a dry run never reaches the delete call, so no
+  error is ever raised or swallowed there).
+
+### BLOCKING
+
+None.
+
+### NIT (not fixed)
+
+- Exit code: a delete error used to propagate and fail the run (non-zero exit, no Slack/Influx
+  report); now the run exits 0 and the failure only shows in the run log `ERRORS`/`FAILED` lines
+  and the ERROR line. This is the BUG-063 fix the rung asks for and matches GCP disk/VM; the run
+  log does not drive the exit code (`crc/core/logger.py:150`). Owner FYI: a Jenkins job that
+  fails to delete every address (for example a revoked permission) stays green.
+- `crc/core/policy.py:200` `gcp_ip_exception_excludes` is now dead code with an inverted
+  docstring (already listed under "## New bugs"); remove it with its `tests/test_core_policy.py`
+  cases in a later rung.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt`, then `make check`:
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed |
+| `mypy` | Success: no issues found in 229 source files |
+| `lint-imports` | Contracts: 5 kept, 0 broken |
+| `pytest -q` | 42468 passed (unchanged from Round 1; Round 2 renamed one test, ARCH-002 and touched tests re-run green after the README edits) |
+
+ROUND 2 VERDICT: APPROVE

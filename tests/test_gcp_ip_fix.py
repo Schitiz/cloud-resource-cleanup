@@ -218,7 +218,7 @@ def test_bug_063_summary_is_logged_after_a_failure(
     ]
 
 
-def test_bug_063_errors_are_not_swallowed_in_dry_run_and_nothing_is_deleted(quiet: None) -> None:
+def test_bug_063_dry_run_never_calls_delete(quiet: None) -> None:
     client = Client({"r": [addr("a")]}, start_errors={"a": _make(PermissionDenied, "denied")})
     ips = IP(True, PROJECT, [], [], client)
     ips.delete()
