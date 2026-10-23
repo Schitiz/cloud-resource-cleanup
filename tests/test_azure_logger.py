@@ -1,7 +1,7 @@
 """LOG-AZU: the Azure cleaners report to `crc.core.logger` (REGION, ACTION, SKIPPED, FAILED).
 
 Azure has no regions: one REGION line per resource group, `region=<resource group>`. Every case
-runs the adapter `crc.py` uses under a begun run and asserts the exact new lines; the tag dumps
+runs the Cleaner through `crc.core.engine` (the Azure VM adapter for vm) under a begun run and asserts the exact new lines; the tag dumps
 (BUG-358) and the per-leftover-disk skip lines are DEBUG with unchanged text.
 """
 
@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 
 from crc.azu import _logger
-from crc.azu.disk import AzureDiskCleaner, Disk, DiskSettings
+from crc.azu.disk import AzureDiskCleaner, DiskSettings
 from crc.azu.nic import AzureNicCleaner
 from crc.azu.spot_vm import SpotVM
 from crc.azu.vm import VM, VmCleaner, VmSettings
@@ -72,10 +72,16 @@ def _disks(monkeypatch: pytest.MonkeyPatch) -> hd.FakeAzure:
     return azure
 
 
-def _disk(clock_now: Any = hd.NOW) -> Disk:
-    adapter = Disk("rg", False, {"env": ["ci"]}, None, None, None, None)
-    adapter.clock = lambda: clock_now
-    return adapter
+def _disk(*, dry_run: bool = False) -> Any:
+    options = {
+        "resource_group": "rg",
+        "filter_tags": ENV,
+        "exception_tags": None,
+        "age": None,
+        "custom_age_tag_key": None,
+        "notags": None,
+    }
+    return engine_run("disk", options, dry_run=dry_run, now=hd.NOW)
 
 
 def test_disk_real_run_reports_region_actions_and_skips(
@@ -83,13 +89,13 @@ def test_disk_real_run_reports_region_actions_and_skips(
 ) -> None:
     _disks(monkeypatch)
     _begin("disk", dry_run=False)
-    _disk().delete()
+    _disk()
     logger.finish()
     assert _lines(caplog) == [
         "RUN START cloud=azure resource=disk operation=delete dry_run=false",
+        "REGION cloud=azure resource=disk region=rg scanned=4 selected=2 seconds=S",
         "ACTION deleted cloud=azure resource=disk region=rg id=a name=a",
         "ACTION deleted cloud=azure resource=disk region=rg id=d name=d",
-        "REGION cloud=azure resource=disk region=rg scanned=4 selected=2 seconds=S",
         "SKIPPED cloud=azure resource=disk reason=filter_tags count=1",
         "SKIPPED cloud=azure resource=disk reason=state count=1",
         "RESULT cloud=azure resource=disk operation=delete dry_run=false selected=2 done=2 "
@@ -101,12 +107,12 @@ def test_disk_dry_run_logs_would_delete_and_done_is_zero(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     azure = _disks(monkeypatch)
-    adapter = Disk("rg", True, {"env": ["ci"]}, None, None, None, None)
     _begin("disk", dry_run=True)
-    adapter.delete()
+    _disk(dry_run=True)
     logger.finish()
     lines = _lines(caplog)
-    assert lines[1:3] == [
+    assert lines[1:4] == [
+        "REGION cloud=azure resource=disk region=rg scanned=4 selected=2 seconds=S",
         "ACTION would_delete cloud=azure resource=disk region=rg id=a name=a",
         "ACTION would_delete cloud=azure resource=disk region=rg id=d name=d",
     ]

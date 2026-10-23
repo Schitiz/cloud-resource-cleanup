@@ -6,10 +6,11 @@ from typing import Any
 
 import pytest
 
-from crc.azu.disk import AzureDiskCleaner, Disk, DiskSettings
+from crc.azu.disk import AzureDiskCleaner, DiskSettings
 from crc.core import logger
 from crc.core.cleaner import Operation, RunContext
 from tests.helpers_azure_disk import NOW, FakeAzure, disk
+from tests.helpers_wc_azu_engine import candidate_ids, engine_run
 
 
 @pytest.fixture(autouse=True)
@@ -96,16 +97,23 @@ def test_bug_174_dry_run_never_deletes_or_waits() -> None:
     assert azure.waited == []
 
 
-def test_bug_174_adapter_continues_and_lists_only_deleted(
+def test_bug_174_engine_continues_and_lists_only_deleted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     azure = FakeAzure([disk("a"), disk("b"), disk("c")], begin_script={"a": [RuntimeError("nope")]})
     azure.install(monkeypatch)
-    adapter = Disk("rg", False, {}, {}, {}, "", {})
-    adapter.clock = lambda: NOW
-    adapter.delete()
-    assert adapter.get_deleted == ["b", "c"]
-    assert adapter.count == len(adapter.get_deleted)
+    options = {
+        "resource_group": "rg",
+        "filter_tags": {},
+        "exception_tags": {},
+        "notags": {},
+        "age": {},
+        "custom_age_tag_key": "",
+    }
+    outcome = engine_run("disk", options, dry_run=False, now=NOW)
+    assert candidate_ids(outcome) == ["b", "c"]
+    assert outcome.result is not None
+    assert [f.id for f in outcome.result.failed] == ["a"]
     assert azure.waited == ["b", "c"]
 
 

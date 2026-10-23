@@ -4,9 +4,10 @@ from typing import Any
 
 import pytest
 
-from crc.azu.disk import AzureDiskCleaner, Disk, DiskSettings
+from crc.azu.disk import DEFAULT_DISK_STATES, AzureDiskCleaner, DiskSettings
 from crc.core.cleaner import Operation, Plan, RunContext
 from tests.helpers_azure_disk import NOW, FakeAzure, ago, disk
+from tests.helpers_wc_azu_engine import candidate_ids, engine_run
 
 
 def _context(*, dry_run: bool) -> RunContext:
@@ -101,12 +102,18 @@ def test_plan_propagates_list_error() -> None:
         _cleaner(azure).plan(_context(dry_run=True))
 
 
-def test_adapter_keeps_the_public_surface(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_engine_run_deletes_unattached_disks_only(monkeypatch: pytest.MonkeyPatch) -> None:
     azure = FakeAzure([disk("a"), disk("b", state="Reserved")])
     azure.install(monkeypatch)
-    adapter = Disk("rg", False, {}, {}, {}, "", {})
-    adapter.delete()
-    assert adapter.get_deleted == ["a"]
-    assert adapter.disks_names_to_delete == ["a"]
-    assert adapter.count == 1
-    assert Disk.default_disk_state == ["Unattached"]
+    options = {
+        "resource_group": "rg",
+        "filter_tags": {},
+        "exception_tags": {},
+        "notags": {},
+        "age": {},
+        "custom_age_tag_key": "",
+    }
+    outcome = engine_run("disk", options, dry_run=False, now=NOW)
+    assert candidate_ids(outcome) == ["a"]
+    assert [section.ids for section in outcome.report.sections] == [("a",)]
+    assert list(DEFAULT_DISK_STATES) == ["Unattached"]
