@@ -184,15 +184,11 @@ def _lines(caplog: pytest.LogCaptureFixture) -> list[str]:
 
 
 def install(monkeypatch: pytest.MonkeyPatch, client: FakeGcp) -> None:
-    """Every GCP client constructor, the scan clock and the logging setup, as fakes."""
-    for module in ("ip_adapter", "ip_cleaner"):
-        monkeypatch.setattr(f"crc.gcp.{module}.ComputeIpClient", lambda: client)
-    for module in ("disk_adapter", "disk_cleaner"):
-        monkeypatch.setattr(f"crc.gcp.{module}.ComputeDiskClient", lambda: client)
-    for module in ("vm_adapter", "vm_cleaner"):
-        monkeypatch.setattr(f"crc.gcp.{module}.ComputeVmClient", lambda: client)
-    for module in ("adapter", "cleaner"):
-        monkeypatch.setattr(f"crc.gcp.spot_vm.{module}.ComputeSpotClient", lambda: client)
+    """Every GCP cleaner client constructor, the scan clock and the logging setup, as fakes."""
+    monkeypatch.setattr("crc.gcp.ip_cleaner.ComputeIpClient", lambda: client)
+    monkeypatch.setattr("crc.gcp.disk_cleaner.ComputeDiskClient", lambda: client)
+    monkeypatch.setattr("crc.gcp.vm_cleaner.ComputeVmClient", lambda: client)
+    monkeypatch.setattr("crc.gcp.spot_vm.cleaner.ComputeSpotClient", lambda: client)
     ticks = itertools.cycle([0.0, 7.0])
     monkeypatch.setattr(_scan, "time", types.SimpleNamespace(monotonic=lambda: next(ticks)))
     monkeypatch.setattr("crc.service.init_logging", lambda *a, **k: None)

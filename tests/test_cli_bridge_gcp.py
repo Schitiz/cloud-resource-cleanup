@@ -332,6 +332,7 @@ def test_owner_pings_with_a_project_listing_error_differ_known(
         influx=True,
         scenario="fail_zones",
     )
+    assert new.run_log == old.run_log
     assert new.error == old.error
     assert old.slack == [("usergroups_list",)]
     assert [call[0] for call in new.slack] == ["chat_postMessage"]
@@ -358,6 +359,12 @@ def test_later_listing_error_deletes_fewer_never_more(
     new_deleted = [c for c in new.gcp_calls if c[0] in deletes]
     assert set(new_deleted) <= set(old_deleted)
     assert len(new_deleted) <= len(old_deleted)
+    if case == "ip":
+        assert [line for line in old.run_log if line.startswith("ACTION")]
+        assert not [line for line in new.run_log if line.startswith("ACTION")]  # BUG-400
+        assert new.error == old.error == "RuntimeError: listing denied"
+    else:
+        assert_equal(old, new)
 
 
 @pytest.mark.parametrize("dry_run", [False, True], ids=["real", "dry"])

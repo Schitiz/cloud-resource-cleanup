@@ -572,17 +572,6 @@ DIVERGENCES: dict[tuple[str, bool, bool, bool, str], tuple[tuple[str, ...], dict
             "gcp_calls": [("list_instances", "z1"), ("list_instances", "z2")],
         },
     ),
-    ("ip", False, False, False, "fail_list_last"): (
-        ("BUG-001",),
-        {
-            "gcp_calls": [
-                ("delete_address", "r1", "a-1"),
-                ("delete_address", "r1", "a-2"),
-                ("list_addresses", "r1"),
-                ("list_addresses", "r2"),
-            ],
-        },
-    ),
     ("disk", False, False, False, "fail_list_last"): (
         ("BUG-005", "BUG-006", "BUG-127"),
         {
