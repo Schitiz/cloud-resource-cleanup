@@ -30,27 +30,31 @@ ADAPTER = "adapter"
 CLEANER = "cleaner"
 OLD_ENOUGH = 100
 
-# case id -> (deleted by the adapter path, deleted by the Cleaner path). The adapter deletes as
+# case id -> (expected old error type, adapter deleted, cleaner deleted). The adapter deletes as
 # it goes, so snapshots listed before a failing one in the same region are already deleted; the
 # Cleaner decides the whole region before it deletes, so a failing region deletes nothing.
-EXPECTED: dict[str, tuple[list[str], list[str]]] = {
-    "tag-missing-value-raises": (["a"], ["a"]),
-    "tag-missing-key-raises": (["a"], ["a"]),
-    "tag-malformed-after-deleted-snapshot": (["a", "b", "c"], ["a", "b", "c"]),
-    "missing-start-time": (["a"], []),
-    "missing-snapshot-id": (["a"], []),
-    "missing-snapshots-key": ([], []),
-    "naive-start-time": ([], []),
-    "start-time-string": ([], []),
-    "tags-is-dict": ([], []),
-    "exception-tags-not-a-dict": ([], []),
-    "ami-ebs-none-raises": ([], []),
-    "ami-missing-images-key": ([], []),
-    "describe-unexpected-error": ([], []),
-    "describe-snapshots-client-error-propagates": (["a"], ["a"]),
-    "describe-images-client-error-propagates": (["a", "c"], ["a", "c"]),
+EXPECTED: dict[str, tuple[str, list[str], list[str]]] = {
+    "tag-missing-value-raises": ("KeyError", ["a"], ["a"]),
+    "tag-missing-key-raises": ("KeyError", ["a"], ["a"]),
+    "tag-malformed-after-deleted-snapshot": ("KeyError", ["a", "b", "c"], ["a", "b", "c"]),
+    "missing-start-time": ("KeyError", ["a"], []),
+    "missing-snapshot-id": ("KeyError", ["a"], []),
+    "missing-snapshots-key": ("KeyError", [], []),
+    "naive-start-time": ("TypeError", [], []),
+    "start-time-string": ("TypeError", [], []),
+    "tags-is-dict": ("TypeError", [], []),
+    "exception-tags-not-a-dict": ("AttributeError", [], []),
+    "ami-ebs-none-raises": ("AttributeError", [], []),
+    "ami-missing-images-key": ("KeyError", [], []),
+    "describe-unexpected-error": ("ValueError", [], []),
+    "describe-snapshots-client-error-propagates": ("ClientError", ["a"], ["a"]),
+    "describe-images-client-error-propagates": ("ClientError", ["a", "c"], ["a", "c"]),
 }
 BUG_144_CASES = {k for k, v in DIVERGES.items() if v == "BUG-144"}
+FAILED_REGION: dict[str, str] = {
+    "describe-snapshots-client-error-propagates": "eu-west-1",
+    "describe-images-client-error-propagates": "eu-west-1",
+}
 
 
 def test_every_diverging_case_has_an_expected_outcome() -> None:
@@ -61,6 +65,79 @@ def test_every_diverging_case_has_an_expected_outcome() -> None:
 @pytest.fixture
 def debug_logs(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG)
+
+
+def _expected_bug_144(
+    case_id: str, old_calls: list[tuple[Any, ...]], old_logs: list[tuple[str, int, str]]
+) -> tuple[list[tuple[Any, ...]], list[tuple[str, int, str]]]:
+    if case_id == "tag-missing-value-raises":
+        return (
+            [*old_calls, ("delete_snapshot", "us-west-2", "a")],
+            [*old_logs, ("root", logging.INFO, "Deleted snapshot a")],
+        )
+    if case_id == "tag-missing-key-raises":
+        return (
+            [*old_calls, ("delete_snapshot", "us-west-2", "a")],
+            [
+                *old_logs,
+                ("root", logging.DEBUG, "Ignoring a tag entry without Key: {'Value': 'v'}"),
+                ("root", logging.INFO, "Deleted snapshot a"),
+            ],
+        )
+    return (
+        [
+            *old_calls,
+            ("delete_snapshot", "us-west-2", "b"),
+            ("delete_snapshot", "us-west-2", "c"),
+        ],
+        [
+            *old_logs,
+            ("root", logging.INFO, "Deleted snapshot b"),
+            ("root", logging.INFO, "Deleted snapshot c"),
+        ],
+    )
+
+
+def _expected_bug_149(
+    case_id: str,
+    path: str,
+    old_calls: list[tuple[Any, ...]],
+    old_logs: list[tuple[str, int, str]],
+    old_error: tuple[str, str],
+) -> tuple[list[tuple[Any, ...]], list[tuple[str, int, str]]]:
+    region = FAILED_REGION.get(case_id, "us-west-2")
+    skip_record = (
+        "root",
+        logging.ERROR,
+        f"Region {region}: skipped snapshot cleanup — error while listing "
+        f"({old_error[0]}): {old_error[1]}",
+    )
+    tail_calls: list[tuple[Any, ...]] = (
+        [
+            ("client", "ec2", "ap-south-1"),
+            ("describe_snapshots", "ap-south-1", ("self",)),
+            ("describe_images", "ap-south-1", ("self",)),
+            ("delete_snapshot", "ap-south-1", "c"),
+        ]
+        if case_id == "describe-images-client-error-propagates"
+        else []
+    )
+    tail_logs: list[tuple[str, int, str]] = (
+        [("root", logging.INFO, "Deleted snapshot c")]
+        if case_id == "describe-images-client-error-propagates"
+        else []
+    )
+    adapter_calls = [*old_calls, *tail_calls]
+    adapter_logs = [*old_logs, skip_record, *tail_logs]
+    if path == ADAPTER:
+        return adapter_calls, adapter_logs
+    plan_logs = [r for r in adapter_logs if not r[2].startswith("Deleted snapshot")]
+    if case_id in ("missing-start-time", "missing-snapshot-id"):
+        return [c for c in adapter_calls if c[0] != "delete_snapshot"], plan_logs
+    non_deletes = [c for c in adapter_calls if c[0] != "delete_snapshot"]
+    deletes = [c for c in adapter_calls if c[0] == "delete_snapshot"]
+    delete_logs = [r for r in adapter_logs if r[2].startswith("Deleted snapshot")]
+    return [*non_deletes, *deletes], [*plan_logs, *delete_logs]
 
 
 @pytest.mark.parametrize("case_id", sorted(DIVERGES))
@@ -80,12 +157,19 @@ def test_diverging_case_has_the_fixed_outcome(
         if path == ADAPTER
         else _run_cleaner(case, monkeypatch, caplog, capsys)
     )
-    assert old.error is not None, "oracle no longer shows the bug"
+    err_type, adapter_deleted, cleaner_deleted = EXPECTED[case_id]
+    assert old.error is not None and old.error[0] == err_type, "oracle no longer shows the bug"
     assert new.error is None
-    assert new.deleted == EXPECTED[case_id][0 if path == ADAPTER else 1]
+    assert new.deleted == (adapter_deleted if path == ADAPTER else cleaner_deleted)
     assert new.count == len(new.deleted)
-    if case_id not in BUG_144_CASES:
-        assert any("skipped snapshot cleanup — error while listing" in r[2] for r in new.logs)
+    assert new.stdout == ""
+    expected_calls, expected_logs = (
+        _expected_bug_144(case_id, old.calls, old.logs)
+        if case_id in BUG_144_CASES
+        else _expected_bug_149(case_id, path, old.calls, old.logs, old.error)
+    )
+    assert new.calls == expected_calls
+    assert new.logs == expected_logs
 
 
 def _ctx(dry_run: bool = False) -> RunContext:
@@ -211,16 +295,25 @@ def test_key_only_tag_still_protects_when_any_value_is_listed() -> None:
     assert cleaner_for(clients, {"keep": []}).plan(_ctx()).candidates == ()
 
 
-def test_malformed_tags_on_a_young_snapshot_are_read_and_kept() -> None:
-    clients = {"r1": Ec2([snap("y", 1, Tags=[{"Key": "k"}]), snap("a")])}
+def test_malformed_tags_on_a_young_snapshot_are_read_and_kept(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    clients = {"r1": Ec2([snap("y", 1, Tags=[{"Value": "v"}, {"Key": "k"}]), snap("a")])}
     plan = cleaner_for(clients, {"keep": []}).plan(_ctx())
     assert [c.id for c in plan.candidates] == ["a"]
+    assert "Ignoring a tag entry without Key: {'Value': 'v'}" in [
+        r.getMessage() for r in caplog.records
+    ]
 
 
 def test_protected_snapshot_with_a_malformed_sibling_tag_is_kept() -> None:
-    tags = [{"Key": "autoclean"}, {"Value": "x"}, {"Key": "autoclean2", "Value": "false"}]
+    tags = [{"Key": "autoclean"}, {"Value": "x"}, {"Key": "auto_clean", "Value": "false"}]
     clients = {"r1": Ec2([snap("a", Tags=tags)])}
-    spec = {"autoclean": ["false", "False", "FALSE"], "autoclean2": ["false"]}
+    spec = {
+        "autoclean": ["false", "False", "FALSE"],
+        "auto_clean": ["false", "False", "FALSE"],
+    }
     assert cleaner_for(clients, spec).plan(_ctx()).candidates == ()
 
 
@@ -254,4 +347,12 @@ def test_is_protected_tolerates_malformed_entries(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("crc.service.init_logging", lambda *args, **kwargs: None)
+    with pytest.raises(KeyError):
+        _load_oracle_snapshot(exception_tags)._is_protected(tags, "snap-1")
     assert Snapshot(False, 90, exception_tags)._is_protected(tags, "snap-1") is expected
+
+
+def _load_oracle_snapshot(exception_tags: Any) -> Any:
+    from tests.test_aws_snapshot_parity import _load_oracle
+
+    return _load_oracle().Snapshot(False, 90, exception_tags)

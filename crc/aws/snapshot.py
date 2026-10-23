@@ -104,14 +104,13 @@ def _skip_failed_region(region: str, error: BaseException) -> None:
     logger.current().fail(region, "-", error)
 
 
-def _read_tags(tags: Any) -> dict[str, Any] | None:
+def _read_tags(tags: Any) -> dict[str, Any]:
     """BUG-144: tag map of a list of tag entries; an entry without `Key` is ignored and a
-    missing `Value` reads as ''. None when `tags` is not a list of mappings (left to the
-    strict reader, which raises as on main)."""
+    missing `Value` reads as ''. Non-list or non-mapping `tags` still raise as on main."""
     if not tags:
         return {}
     if not isinstance(tags, list) or not all(isinstance(t, Mapping) for t in tags):
-        return None
+        return {t["Key"]: t["Value"] for t in tags}
     tag_map: dict[str, Any] = {}
     for entry in tags:
         if "Key" not in entry:
@@ -134,8 +133,6 @@ def _is_protected(
         return False
     if tag_map is None:
         tag_map = _read_tags(tags)
-    if tag_map is None:
-        tag_map = {t["Key"]: t["Value"] for t in tags}
     for key, values in exception_tags.items():
         if policy.exception_tags_any(tag_map, {key: values}):
             logging.debug(f"Snap {snap_id} has tag {key}")
