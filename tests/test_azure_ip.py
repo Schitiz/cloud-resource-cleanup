@@ -33,7 +33,7 @@ def test_plan_lists_and_never_deletes() -> None:
     azure = FakeAzure([ip("a", ENV), ip("b", ENV, config={"id": "nic"})])
     plan = _cleaner(azure).plan(_context(dry_run=False))
     assert [c.id for c in plan.candidates] == ["a"]
-    assert [(s.id, s.reason) for s in plan.skipped] == [("b", "attached to an IP configuration")]
+    assert [(s.id, s.reason) for s in plan.skipped] == [("b", "in_use")]
     assert _names(azure.calls, "begin_delete") == []
 
 
@@ -111,10 +111,11 @@ def test_apply_empty_plan_logs_empty_summary(caplog: pytest.LogCaptureFixture) -
     ]
 
 
-def test_untagged_with_exception_tags_raises_in_plan() -> None:
+def test_untagged_with_exception_tags_is_a_candidate_in_plan() -> None:
+    """BUG-013: an untagged address has no tags and no longer raises."""
     azure = FakeAzure([ip("a", None)])
-    with pytest.raises(TypeError, match="NoneType"):
-        _cleaner(azure, exception_tags={"env": []}).plan(_context(dry_run=True))
+    plan = _cleaner(azure, exception_tags={"env": []}).plan(_context(dry_run=True))
+    assert [c.id for c in plan.candidates] == ["a"]
 
 
 def test_supports_only_delete() -> None:

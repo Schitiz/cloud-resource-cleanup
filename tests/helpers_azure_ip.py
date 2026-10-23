@@ -1,8 +1,8 @@
 """Fake Azure network SDK shared by the Azure IP tests.
 
 `FakeAzure.install` replaces the two SDK classes `crc.azu._base` builds and sets the
-environment `Base` reads, so the real `Base` runs against the fake. `list_all` is lazy and
-records every item it yields, which shows how listing and deleting interleave.
+environment `Base` reads, so the real `Base` runs against the fake. `list` and `list_all` are
+lazy and record every item they yield, which shows how listing and deleting interleave.
 """
 
 import datetime
@@ -27,6 +27,12 @@ class FakeIpOperations:
 
     def list_all(self) -> Iterator[Any]:
         self.azure.calls.append(("list_all",))
+        if self.azure.list_error is not None:
+            raise self.azure.list_error
+        return self._pages()
+
+    def list(self, resource_group_name: str) -> Iterator[Any]:
+        self.azure.calls.append(("list", resource_group_name))
         if self.azure.list_error is not None:
             raise self.azure.list_error
         return self._pages()
