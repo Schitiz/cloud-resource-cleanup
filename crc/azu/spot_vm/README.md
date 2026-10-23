@@ -2,13 +2,14 @@
 
 ## Purpose
 
-Azure Spot VM cleaner (rung AZ-5). Deletes Spot VMs that are stopped or deallocated, match the tag filters and are old enough, then their leftover Detach disks and their `<vm>-NIC`. Split by responsibility: `cleaner.py` (plan and apply), `client.py` (SDK Protocols), `disks.py` (leftover disk detection), `removal.py` (the mutating steps), `__init__.py` (the `SpotVM` adapter).
+Azure Spot VM cleaner (rung AZ-5). Deletes Spot VMs that are stopped or deallocated, match the tag filters and are old enough, then their leftover Detach disks and their `<vm>-NIC`. Split by responsibility: `cleaner.py` (plan and apply), `config.py` (`SpotVmConfig`, summary log, age check), `client.py` (SDK Protocols), `disks.py` (leftover disk detection), `removal.py` (the mutating steps), `__init__.py` (the `SpotVM` adapter).
 
 ## Public API
 
 - `AzureSpotVmCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus list_vms, decide and power_status used by the adapter); registered as azure / spot_instances.
 - `SpotVmConfig`: frozen dataclass with the flags of one run (resource group, tag specs, validated age, custom age tag key).
 - `build_spot_vm_cleaner()`: registry factory; reads resource_group, filter_tags, exception_tags, notags, age and custom_age_tag_key from RunContext.options and builds the clients from Base.
+- `old_enough()`: the age check of one Spot VM; an invalid custom age tag keeps it.
 - `log_summary()`: the closing warning lines main logs.
 - `STOPPED_POWER_STATES`: the two power states that qualify, "VM stopped" and "VM deallocated".
 - `SpotVM`: adapter crc.py calls (delete(), get_deleted, delete_count, get_deleted_nic, nic_delete_count, get_deleted_disks, base); runs the cleaner VM by VM in the order of main. The extra optional clock argument defaults to datetime.datetime.now.

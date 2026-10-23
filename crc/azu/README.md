@@ -9,42 +9,26 @@ Azure cleaners (azure-mgmt SDK). They delete or stop leftover VMs, disks, IPs an
 Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.md`):
 
 - `_base.py`: `Base`: Azure credential from the `AZURE_CREDENTIALS_*` variables, and lazily built compute and network clients for a resource group (rung PL-AZ)
-- `disk.py`: `AzureDiskCleaner` (registered as `azure`/`disk`) and the adapter `Disk`: deletes unattached managed disks (`begin_delete(...).result()`); any-key tag filter, age gate
-- `ip.py`: `AzureIpCleaner` (registered as `azure`/`ip`) and the adapter `IP`: deletes the unused IPs of the configured resource group (`begin_delete`); any-key tag filter
-- `nic.py`: `AzureNicCleaner` (registered as `azure`/`nic`) and the adapter `NIC`: deletes NICs not in use (`begin_delete(...).result()`, three attempts); regex name filters
+- `_common.py`: `kept`, `log_would_delete`, `log_delete_summary`: log text and skip bookkeeping shared by ip, nic and disk (W2-AZU)
+- `disk/`: subpackage (own README): `AzureDiskCleaner` (registered as `azure`/`disk`) and the adapter `Disk`: deletes unattached managed disks (`begin_delete(...).result()`); any-key tag filter, age gate; `from crc.azu.disk import Disk` still works
+- `ip/`: subpackage (own README): `AzureIpCleaner` (registered as `azure`/`ip`) and the adapter `IP`: deletes the unused IPs of the configured resource group (`begin_delete`); any-key tag filter
+- `nic/`: subpackage (own README): `AzureNicCleaner` (registered as `azure`/`nic`) and the adapter `NIC`: deletes NICs not in use (`begin_delete(...).result()`, three attempts); regex name filters
 - `spot_vm/`: `AzureSpotVmCleaner` (registered as `azure`/`spot_instances`) and the adapter `SpotVM`: deletes stopped or deallocated Spot VMs and their leftover disks and NICs (subpackage with its own README, rung AZ-5)
 - `vm/`: subpackage (own README): `VmCleaner` (registered as `azure`/`vm`) and the adapter `VM`: deletes (via `vm_delete_helpers`) or stops (`begin_deallocate`) VMs by power state; `from crc.azu.vm import VM` still works
 - `vm_delete_helpers.py`: `begin_delete_vm_and_wait`, `delete_vm_primary_nic`: delete helpers, no filtering (rung PL-AZ)
 
 ## Public API
 
-The ip, nic and disk modules are refactored, so the names below are synced with this README by ARCH-002.
-The vm and spot_vm subpackages document their own API in their own READMEs. The VM delete helpers module and the base module are refactored too (rung PL-AZ). The package init holds only a
+The ip, nic, disk, vm and spot_vm subpackages document their own API in their own READMEs; the names below are synced with this README by ARCH-002. The VM delete helpers module and the base module are refactored too (rung PL-AZ). The package init holds only a
 copyright comment and declares no export list.
 
 - `Base`: Azure credential from the AZURE_CREDENTIALS_* environment variables (read when a cleaner is built) plus the lazily built, shared compute and network clients of one resource group; the client getters are typed as any object because each cleaner narrows the client with its own Protocol.
 - `DeletePoller`: Protocol of the handle begin_delete returns (result(timeout)), used by the delete helpers.
 - `begin_delete_vm_and_wait()`: starts a VM delete and waits on the poller (default timeout 3600 s), then logs the completion; errors propagate.
 - `delete_vm_primary_nic()`: deletes the NIC named after the VM plus a suffix (default "-NIC") with up to 24 attempts 15 s apart; not-found counts as deleted and a final failure is logged, never raised.
-- `PublicIpOperations`: Protocol of the two public IP calls used, list and begin_delete; tests pass fakes.
-- `IpNetworkClient`: Protocol of the network client part used (the public_ip_addresses operations).
-- `AzureIpCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus list_ips, decide and delete_candidate used by the adapter); the client factory is injected through the constructor.
-- `build_ip_cleaner()`: registry factory behind @register("azure", "ip"); reads resource_group, filter_tags, exception_tags and notags from RunContext.options and builds the client from `Base`.
-- `IP`: adapter crc.py calls (delete(), get_deleted, count, deleted_ips, base); runs the cleaner IP by IP in the order of main.
-- `DeletePoller`: Protocol of the handle begin_delete returns (result()).
-- `NicOperations`: Protocol of the two network_interfaces calls used, list and begin_delete (positional arguments); tests pass fakes.
-- `NicNetworkClient`: Protocol of the network client part used (the network_interfaces operations).
-- `AzureNicCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus prepare (compiles name_regex / exception_regex, ValueError before any SDK call), list_nics, decide and attempt_delete used by the adapter); the client factory is injected through the constructor.
-- `build_nic_cleaner()`: registry factory behind @register("azure", "nic"); reads resource_group, name_regex and exception_regex from RunContext.options and builds the client from `Base`.
-- `NIC`: adapter crc.py calls (delete(), get_deleted, delete_count, nics_names_to_delete, base); runs the cleaner NIC by NIC in the order of main.
-- `SdkDisk`: Protocol of the Azure disk fields read (name, tags, time_created, disk_state).
-- `DeletePoller` (disk.py): Protocol of the poller disks.begin_delete returns (result()).
-- `DiskOperations`: Protocol of the two disks calls used, list_by_resource_group and begin_delete (positional arguments); tests pass fakes.
-- `DiskComputeClient`: Protocol of the compute client part used (the disks operations).
-- `DiskSettings`: frozen dataclass of the filters and age gate (filter_tags, exception_tags, notags, age, custom_age_tag_key, disk_states).
-- `AzureDiskCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus list_disks, decide and delete_disk used by the adapter; delete_disk returns None or the error text and never raises); the client factory is injected through the constructor.
-- `build_disk_cleaner()`: registry factory behind @register("azure", "disk"); reads resource_group, filter_tags, exception_tags, notags, age and custom_age_tag_key from RunContext.options and builds the client from `Base`.
-- `Disk`: adapter crc.py calls (delete(), get_deleted, count, disks_names_to_delete, base, clock); runs the cleaner disk by disk in the order of main, reading the clock once per listed disk (main reads it once per tag-matching disk).
+- `kept()`: counts a kept resource under a skip reason and returns the not-selected decision (module _common, shared by the ip, nic and disk cleaners).
+- `log_would_delete()`: one dry-run ACTION line per planned resource (module _common).
+- `log_delete_summary()`: the closing warning lines main logs for a resource kind (module _common); the NIC variant capitalises Number.
 - `started()`, `region_done()`, `skip()`, `acted()`, `failed()`, `reason_slug()` (module _logger, rung LOG-AZU): thin Azure helpers over the current run of crc.core.logger. Azure has no regions, so `region_done()` logs one REGION line per resource group, with the resource group as region; `skip()` counts a skipped resource under a short snake_case reason (`reason_slug()`), `acted()` logs one ACTION line, `failed()` records a swallowed per-resource error. They only report, never decide.
 
 ## Safety Invariants

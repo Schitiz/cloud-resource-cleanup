@@ -8,17 +8,30 @@ configured resource group only, applies the tag and age policy and reads each VM
 class in `adapter.py` drives the same pieces VM by VM, in the call order of the original code.
 """
 
-import datetime
 import logging
-from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
-from typing import cast
+from collections.abc import Iterable, Sequence
 
 from crc.azu import _logger
 from crc.azu._base import Base
-from crc.azu.vm.client import ComputeFactory, InstanceStatus, NetworkFactory, SdkVm
+from crc.azu.vm.client import ComputeFactory, NetworkFactory, SdkVm
+from crc.azu.vm.helpers import (
+    NIC_LABEL,
+    SKIP_NO_POWER_STATE,
+    SKIP_STATE_NOT_ALLOWED,
+    log_processing_error,
+    power_state,
+    tally_of,
+)
+from crc.azu.vm.selection import skip_reason
+from crc.azu.vm.settings import (
+    DEFAULT_INSTANCE_STATES,
+    Clock,
+    TagSpec,
+    Tally,
+    VmSettings,
+    log_summary,
+)
 from crc.azu.vm_delete_helpers import begin_delete_vm_and_wait, delete_vm_primary_nic
-from crc.core import age as core_age
 from crc.core import policy
 from crc.core.cleaner import (
     Candidate,
@@ -31,98 +44,6 @@ from crc.core.cleaner import (
     Skipped,
 )
 from crc.core.registry import register
-
-DEFAULT_INSTANCE_STATES = ("running",)
-NIC_NAME_SUFFIX = "-NIC"
-NIC_LABEL = "NIC"
-POWER_STATE_PREFIX = "PowerState/"
-SKIP_NO_POWER_STATE = "no_power_state"
-SKIP_STATE_NOT_ALLOWED = "status does not contain an allowed state"
-
-TagSpec = Mapping[str, Sequence[str]]
-Clock = Callable[[], datetime.datetime]
-
-
-@dataclass(frozen=True, slots=True)
-class VmSettings:
-    """Filters and thresholds of one run."""
-
-    filter_tags: TagSpec = field(default_factory=dict)
-    exception_tags: TagSpec = field(default_factory=dict)
-    notags: TagSpec = field(default_factory=dict)
-    age: core_age.AgeSpec = field(default_factory=dict)
-    custom_age_tag_key: str = ""
-    instance_states: Sequence[str] = DEFAULT_INSTANCE_STATES
-
-
-@dataclass(slots=True)
-class Tally:
-    """Names recorded so far: VMs deleted, VMs stopped and NICs deleted (also in a dry run)."""
-
-    deleted: list[str] = field(default_factory=list)
-    stopped: list[str] = field(default_factory=list)
-    nics: list[str] = field(default_factory=list)
-
-
-def _log_deleted(tally: Tally, *, dry_run: bool) -> None:
-    if not dry_run:
-        logging.warning(f"number of Azure instances deleted: {len(tally.deleted)}")
-        logging.warning(f"List of Azure instances deleted: {tally.deleted}")
-        logging.warning(f"number of Azure nics deleted: {len(tally.nics)}")
-        logging.warning(f"List of Azure nics deleted: {tally.nics}")
-    else:
-        logging.warning(
-            f"List of Azure instances (Total: {len(tally.deleted)}) "
-            f"which will be deleted: {tally.deleted}"
-        )
-        logging.warning(
-            f"List of Azure nics (Total: {len(tally.nics)}) which will be deleted: {tally.nics}"
-        )
-
-
-def _log_stopped(tally: Tally, *, dry_run: bool) -> None:
-    if not dry_run:
-        logging.warning(f"number of Azure instances stopped: {len(tally.stopped)}")
-        logging.warning(f"List of Azure instances stopped: {tally.stopped}")
-    else:
-        logging.warning(
-            f"List of Azure instances (Total: {len(tally.stopped)}) "
-            f"which will be stopped: {tally.stopped}"
-        )
-
-
-def log_summary(operation: Operation, tally: Tally, *, dry_run: bool) -> None:
-    """The closing lines of main. The "nothing to do" warning looks at both name lists,
-    whichever operation runs."""
-    if not tally.deleted and not tally.stopped:
-        logging.warning(f"No Azure instances to {operation}.")
-    if operation is Operation.DELETE:
-        _log_deleted(tally, dry_run=dry_run)
-    if operation is Operation.STOP:
-        _log_stopped(tally, dry_run=dry_run)
-
-
-def _tally_of(operation: Operation, candidates: Iterable[str]) -> Tally:
-    names = list(candidates)
-    if operation is Operation.DELETE:
-        return Tally(deleted=names, nics=[f"{name}{NIC_NAME_SUFFIX}" for name in names])
-    return Tally(stopped=names)
-
-
-def _power_state(statuses: Sequence[InstanceStatus] | None) -> str | None:
-    """The power state of an instance view: the code after `PowerState/` of the first status
-    with such a code, lower-cased, or None when there is none."""
-    for status in statuses or ():
-        code = getattr(status, "code", None)
-        if isinstance(code, str) and code.startswith(POWER_STATE_PREFIX):
-            state = code[len(POWER_STATE_PREFIX) :].casefold()
-            if state:
-                return state
-    return None
-
-
-def _log_processing_error(name: str, error: Exception) -> None:
-    logging.error(f"Error occurred while processing {name} instance: {error}")
 
 
 class VmCleaner:
@@ -166,7 +87,7 @@ class VmCleaner:
             else:
                 skipped.append(decision)
         _logger.region_done(self._resource_group, scanned, len(candidates), started)
-        tally = _tally_of(context.operation, (c.id for c in candidates))
+        tally = tally_of(context.operation, (c.id for c in candidates))
         if context.dry_run:
             kind = "would_delete" if context.operation is Operation.DELETE else "would_stop"
             for candidate in candidates:
@@ -187,7 +108,7 @@ class VmCleaner:
             try:
                 self.act(candidate.id, context.operation, tally, dry_run=False)
             except Exception as e:
-                _log_processing_error(candidate.id, e)
+                log_processing_error(candidate.id, e)
                 _logger.failed(self._resource_group, candidate.id, e)
                 failed.append(Failure(id=candidate.id, error=str(e)))
         log_summary(context.operation, tally, dry_run=False)
@@ -210,7 +131,7 @@ class VmCleaner:
         """Tag and age checks, in the order of main. `clock` is only read by the age check, as
         `datetime.now()` is on main."""
         tags = policy.normalize_tags(vm.tags)
-        reason = self._skip_reason(vm, tags, clock)
+        reason = skip_reason(self._settings, vm, tags, clock)
         if reason is not None:
             _logger.skip(reason)
             return Skipped(id=getattr(vm, "name", ""), reason=reason)
@@ -220,7 +141,7 @@ class VmCleaner:
         """None when the VM's power state equals an allowed state, else the skip reason:
         `no_power_state` when the instance view has no `PowerState/` status (BUG-010)."""
         view = self._compute().virtual_machines.instance_view(self._resource_group, vm_name)
-        state = _power_state(view.statuses)
+        state = power_state(view.statuses)
         if state is None:
             return SKIP_NO_POWER_STATE
         if state in states:
@@ -240,7 +161,7 @@ class VmCleaner:
             else:
                 _logger.skip(reason)
         except Exception as e:
-            _log_processing_error(vm_name, e)
+            log_processing_error(vm_name, e)
             _logger.failed(self._resource_group, vm_name, e)
         return selected
 
@@ -271,39 +192,13 @@ class VmCleaner:
         try:
             reason = self.state_skip_reason(candidate.id, self._settings.instance_states)
         except Exception as e:
-            _log_processing_error(candidate.id, e)
+            log_processing_error(candidate.id, e)
             _logger.failed(self._resource_group, candidate.id, e)
             return Skipped(id=candidate.id, reason="status unavailable")
         if reason is None:
             return candidate
         _logger.skip(reason)
         return Skipped(id=candidate.id, reason=reason)
-
-    def _skip_reason(self, vm: SdkVm, tags: policy.Tags, clock: Clock) -> str | None:
-        settings = self._settings
-        if policy.skip_untagged(tags, policy.UntaggedMode.SKIP):
-            return "untagged"
-        if policy.should_skip_by_tags(tags, settings.exception_tags, settings.notags):
-            return "matches exception_tags or notags"
-        if not policy.filter_tags_all_keys(tags, settings.filter_tags):
-            return "does not match filter_tags"
-        if not self._is_old(vm, clock):
-            return "not older than age"
-        return None
-
-    def _is_old(self, vm: SdkVm, clock: Clock) -> bool:
-        """Older than `age`, or than the VM's own custom age tag (capped by MAX_AGE)."""
-        created = vm.time_created
-        now = clock().astimezone(created.tzinfo)
-        logging.debug(vm.tags)
-        retention_age = core_age.get_retention_age(
-            cast(dict[str, str], vm.tags), self._settings.custom_age_tag_key
-        )
-        if retention_age:
-            logging.info(f"Updating age for vm: {vm.name}")
-        return core_age.is_old(
-            policy.effective_age(retention_age, self._settings.age), now, created
-        )
 
 
 @register("azure", "vm")
@@ -325,3 +220,15 @@ def build_vm_cleaner(context: RunContext) -> Cleaner:
     return VmCleaner(
         base.get_compute_client, base.get_network_client, base.resource_group, settings
     )
+
+
+__all__ = [
+    "DEFAULT_INSTANCE_STATES",
+    "Clock",
+    "TagSpec",
+    "Tally",
+    "VmCleaner",
+    "VmSettings",
+    "build_vm_cleaner",
+    "log_summary",
+]
