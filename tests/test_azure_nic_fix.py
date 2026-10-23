@@ -1,4 +1,4 @@
-"""Rung FIX-AZU-NIC: BUG-111/BUG-122 (resource-group scope), BUG-113 (regex), BUG-114 (in use)."""
+"""BUG-111/BUG-122 (resource-group scope), BUG-113 (regex), BUG-114 (in use)."""
 
 import types
 from typing import Any

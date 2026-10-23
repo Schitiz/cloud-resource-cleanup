@@ -1,4 +1,4 @@
-"""LOG-AZU: the Azure cleaners report to `crc.core.logger` (REGION, ACTION, SKIPPED, FAILED).
+"""The Azure cleaners report to `crc.core.logger` (REGION, ACTION, SKIPPED, FAILED).
 
 Azure has no regions: one REGION line per resource group, `region=<resource group>`. Every case
 runs the adapter `crc.py` uses under a begun run and asserts the exact new lines; the tag dumps

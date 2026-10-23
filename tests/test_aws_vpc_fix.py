@@ -1,4 +1,4 @@
-"""FIX-AWS-VPC: BUG-012, BUG-083, BUG-087 and BUG-088 of `crc.aws.vpc` (no cloud calls)."""
+"""BUG-012, BUG-083, BUG-087 and BUG-088 of `crc.aws.vpc` (no cloud calls)."""
 
 import datetime
 import logging

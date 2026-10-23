@@ -1,4 +1,4 @@
-"""Tests of tests/log_fix_aws_compute.py: the LOG-AWS1 rules only change levels, never text."""
+"""Tests of tests/log_fix_aws_compute.py: the log rules only change levels, never text."""
 
 import logging
 

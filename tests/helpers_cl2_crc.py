@@ -1,4 +1,4 @@
-"""Shared fakes of the CLI parity tests (lane CL2-CRC): scenario, recording fakes, routed driver.
+"""Shared fakes of the CLI parity tests: scenario, recording fakes, routed driver.
 
 `make_fake`, `FakeSlack` and `FakeInflux` drive the frozen oracle (`load_legacy_crc`); the routed
 side runs `crc.cli.bridge.run_routed` with a recording fake cleaner (`run_routed_op`) on the same

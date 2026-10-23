@@ -1,6 +1,6 @@
 """Parity: the `CRC` constructor against the CRC class of main (`tests/legacy/crc_main.txt`).
 
-Lane WA-2. Moved out of `tests/test_cli_crc_parity.py` with the same oracle
+Moved out of `tests/test_cli_crc_parity.py` with the same oracle
 (`load_legacy_crc()`), inputs and compared fields: the constructor attributes (cloud, dry_run,
 notags, resource group, project id, Slack and Influx settings), the clients' construction calls,
 the printed output and the result. No adapter or VM class is patched on the side under test.

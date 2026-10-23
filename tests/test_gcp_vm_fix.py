@@ -1,4 +1,4 @@
-"""Behaviour-fix tests of `crc.gcp.vm` (FIX-GCP-VM): BUG-185 (wait for the zone operation) and
+"""Behaviour-fix tests of `crc.gcp.vm`: BUG-185 (wait for the zone operation) and
 BUG-186 (an error on one instance or zone is recorded and the run goes on). Fakes only."""
 
 import datetime

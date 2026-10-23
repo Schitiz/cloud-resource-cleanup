@@ -1,4 +1,4 @@
-"""BUG-011 (FIX-AWS-EIP): `notags` on Elastic IPs keeps addresses instead of raising."""
+"""BUG-011: `notags` on Elastic IPs keeps addresses instead of raising."""
 
 import datetime
 from collections.abc import Mapping

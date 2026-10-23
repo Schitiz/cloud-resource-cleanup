@@ -1,5 +1,5 @@
-"""Parity: the engine bridge against `main`'s frozen CLI and GCP adapters for the kinds routed in
-ENG-GCP.
+"""Parity: the engine bridge against `main`'s frozen CLI and GCP adapters for the routed
+kinds.
 
 Each case builds the same fake GCP client data twice, runs `main`'s `CRC` on the oracles
 (`tests/legacy/crc_main.txt` driving `tests/legacy/gcp_*.txt`, see
@@ -7,9 +7,9 @@ Each case builds the same fake GCP client data twice, runs `main`'s `CRC` on the
 and once `dispatch._run_pair` through the route, with the same fake Slack and Influx clients, and
 requires equal Slack calls (text and recipients), Influx points, console output, error and GCP
 calls made. The oracles log no run-log lines (RUN START, REGION, ACTION, SKIPPED, ERRORS,
-RESULT); the routed lines are compared with the lines the pre-CL2 legacy handlers logged, frozen
+RESULT); the routed lines are compared with the lines the legacy handlers logged, frozen
 in `tests/helpers_cl2_gcp_runlog.py`. Where the oracle differs because `main` had a bug fixed since,
-the test asserts the difference against the oracle and names the BUG. `ENG-1` round 1 found two
+the test asserts the difference against the oracle and names the BUG. Review found two
 differences its tests missed (names versus ids in a dry run, missing per-region ACTION lines):
 the dry run cases here compare both.
 """
@@ -167,7 +167,7 @@ def run_both(  # noqa: PLR0913 - the case, the three switches and the scenario
     scenario: str = "",
 ) -> tuple[Outcome, Outcome]:
     """The oracle outcome and the routed one; the oracle logs no run-log lines, so its `run_log`
-    is the frozen lines of the pre-CL2 legacy run of the same case."""
+    is the frozen lines of the legacy run of the same case."""
     kind, flags, make = CASES[case]
     outcomes = []
     for routed in (False, True):
@@ -206,7 +206,7 @@ def view(outcome: Outcome, field: str, dry_run: bool) -> Any:
 
 
 def assert_equal(old: Outcome, new: Outcome) -> None:
-    """`old` is the oracle run with the frozen run-log lines of the pre-CL2 legacy run.
+    """`old` is the oracle run with the frozen run-log lines of the legacy run.
 
     The routed run lists every region before it logs ACTION lines (BUG-400, and `plan()` of the
     Cleaners logs a dry run's ACTION lines after its REGION lines), so the REGION and ACTION
@@ -319,7 +319,7 @@ def test_project_listing_error_raises_the_same_error_after_the_same_report(
 def test_owner_pings_with_a_project_listing_error_differ_known(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Known difference (see ENG-GCP "New bugs"): `_ReportThenRaise` rebuilds a plan without
+    """Known difference (see the BUG rows): `_ReportThenRaise` rebuilds a plan without
     owner groups, so with `--slack_notify_users` the error path posts an empty disk list where
     `delete_disks` only looked up the user groups. The error and the Influx point count agree."""
 

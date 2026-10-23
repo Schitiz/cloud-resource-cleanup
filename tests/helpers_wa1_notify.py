@@ -1,5 +1,4 @@
-"""Current-side driver of the notify parity tests (lane WA-1).
-
+"""Current-side driver of the notify parity tests.
 `execute_current` runs an action on the objects production reaches the notifications through:
 `crc.core.report.get_msg`, `SlackNotifier` (with `crc.notify.slack_owners`) and `InfluxNotifier`.
 The legacy side is `tests.helpers_cl2_crc.execute` on `load_legacy_crc()`. Neither side uses the

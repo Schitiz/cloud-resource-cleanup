@@ -1,4 +1,4 @@
-"""FIX-AZU-VM: BUG-002 (list the configured group only), BUG-003 (stop deallocates), BUG-010
+"""BUG-002 (list the configured group only), BUG-003 (stop deallocates), BUG-010
 (power state from the `PowerState/` status) and BUG-198 (exact power state match)."""
 
 import logging

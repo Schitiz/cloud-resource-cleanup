@@ -1,4 +1,4 @@
-"""Behaviour fixes of `crc.gcp.disk` (rung FIX-GCP-DISK): BUG-005, BUG-006, BUG-126, BUG-127.
+"""Behaviour fixes of `crc.gcp.disk`: BUG-005, BUG-006, BUG-126, BUG-127.
 
 Fakes only; no cloud call. The parity test marks the cases of the oracle that diverge.
 """

@@ -43,7 +43,7 @@ DAY = datetime.timedelta(days=1)
 HOUR = datetime.timedelta(hours=1)
 KEEP = {"keep": ["true"]}
 
-BUGS = {"BUG-356"}  # log-only divergences of the LOG-AZU rung
+BUGS = {"BUG-356"}  # log-only divergences from the oracle
 
 
 def boom(text: str = "boom") -> Exception:
@@ -433,7 +433,7 @@ def test_leftover_disk_skip_lines_diverge_from_main_in_level_only(
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """BUG-356 (LOG-AZU): the per-leftover-disk skip lines are DEBUG, text unchanged."""
+    """BUG-356: the per-leftover-disk skip lines are DEBUG, text unchanged."""
     diverging = 0
     for case in CASES:
         old = _run(_legacy, case, monkeypatch, caplog, capsys)

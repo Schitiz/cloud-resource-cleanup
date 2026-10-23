@@ -1,4 +1,4 @@
-"""FIX-CLI-MERGE: the FIX-CLI-ALL and FIX-CLI-ROUTE rules hold together in one pair validation."""
+"""The up-front pair check and the AWS-only snapshot and vpc rules hold together."""
 
 import logging
 import os

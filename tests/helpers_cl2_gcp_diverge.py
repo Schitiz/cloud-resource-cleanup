@@ -1,7 +1,7 @@
 # ruff: noqa: E501 - frozen log lines
 """Where `main`'s frozen CLI and GCP adapters differ from the routed run because of a bug fixed
 since (docs/refactor/BUGS.md rows "fixed in ..."): per case, the BUG ids, the outcome fields that
-differ, and the values the routed run produces, frozen from the pre-CL2 legacy run (not from the
+differ, and the values the routed run produces, frozen from the legacy run (not from the
 routed run). The test asserts that exactly these fields differ from the oracle and that the routed
 run equals the frozen values.
 

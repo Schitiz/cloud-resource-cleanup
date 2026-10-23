@@ -1,4 +1,5 @@
-"""Parity: the engine bridge against the oracle `CRC` methods for the AWS kinds routed in ENG-1.
+"""Parity: the engine bridge against the oracle `CRC` methods for the AWS kinds
+routed through the engine.
 
 The oracle (`tests/legacy/crc_main.txt`) runs `delete_ip`, `delete_kms`, `delete_vpc`, `delete_vm`,
 `stop_vm`, `delete_spot_instance_requests` and `delete_disks` of the AWS cloud with a fake adapter;

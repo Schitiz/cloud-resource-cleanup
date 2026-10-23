@@ -4,7 +4,7 @@
 inputs, environment and clock run through both classes; return values, raised errors, log
 records and `init_logging` calls must be equal. Quirks of `main` (BUG-004, BUG-016, BUG-024 to
 BUG-027, BUG-182, BUG-208, BUG-289) are cases of the tables. BUG-004 and BUG-016 are fixed
-for `get_retention_age` (FIX-CORE-AGE): the diverging cases are marked and assert the new outcome.
+for `get_retention_age`: the diverging cases are marked and assert the new outcome.
 """
 
 from typing import Any

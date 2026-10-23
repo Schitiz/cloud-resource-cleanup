@@ -556,7 +556,7 @@ def test_cleaner_protocol_logs_in_order_when_nothing_interleaves(
 
 
 def _logged(o: Outcome, message: str) -> bool:
-    """Whether the message is logged, at any level (the level moved to DEBUG in LOG-AWS2)."""
+    """Whether the message is logged, at any level (the level is DEBUG now)."""
     return any(r[2] == message for r in o.logs)
 
 

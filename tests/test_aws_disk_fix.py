@@ -1,4 +1,4 @@
-"""FIX-AWS-DISK: BUG-282 (every folded `yb_task` tag is judged) and BUG-283 (CreateTime floor
+"""BUG-282 (every folded `yb_task` tag is judged) and BUG-283 (CreateTime floor
 grows by `detach_age` because CloudWatch cannot see attachments to stopped instances)."""
 
 import datetime

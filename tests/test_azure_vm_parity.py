@@ -36,9 +36,9 @@ NIC_ATTEMPTS = 24
 THREE = 3
 SUMMARY = ("No Azure instances", "number of Azure", "List of Azure")
 
-BUGS = {"BUG-358"}  # log-only divergences of the LOG-AZU rung
+BUGS = {"BUG-358"}  # log-only divergences from the oracle
 
-# Calls the FIX-AZU-VM rung changed in every case: the listing is one resource group (BUG-002,
+# Calls the bug fixes changed in every case: the listing is one resource group (BUG-002,
 # `list(rg)` instead of `list_all()`) and stop deallocates (BUG-003, `begin_deallocate` instead of
 # `begin_power_off`). They are mapped back to the oracle's call so every other call (order,
 # arguments, count) is still compared; `test_list_is_the_configured_group_only` and

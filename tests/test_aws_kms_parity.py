@@ -682,7 +682,7 @@ FIXED: Mapping[str, tuple[list[str], list[str], list[str]]] = {
     "filter-empty-value-list-key-present": (["k1", "k2", "k3"], ["k1"], ["k1"]),
     "age-tag-never-matches-tagkey-entries": (["k1"], [], ["k1"]),
     "age-tag-tagkey-short-selects-earlier": ([], ["k1"], ["k1"]),
-    # BUG-008 reads the TagKey tag; BUG-004 (FIX-CORE-AGE) keeps a key whose tag is unparseable.
+    # BUG-008 reads the TagKey tag; BUG-004 keeps a key whose tag is unparseable.
     "age-tag-tagkey-unparseable-keeps": (["k1"], [], ["k1"]),
     "policy-match-then-statement-without-aws-stays-selected": (
         ["k1", "k2"],
@@ -694,7 +694,8 @@ FIXED: Mapping[str, tuple[list[str], list[str], list[str]]] = {
 
 def assert_fixed(case: Case, old: "Outcome", new: "Outcome") -> None:
     """A case marked with a BUG ID: the oracle (main) still shows the old outcome, the new code
-    differs from it and gives exactly the fixed outcome (BEHAVIOUR_FIX.md section 3)."""
+    differs from it and gives exactly the fixed outcome
+    (`.cursor/skills/crc-maintain/fix-bug.md`)."""
     old_deleted, deleted, described = FIXED[case.id]
     assert case.diverges.startswith("BUG-")
     assert old.error is None

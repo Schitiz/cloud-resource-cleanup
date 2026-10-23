@@ -11,7 +11,7 @@ NOT_FOUND = "not_found"
 
 
 class SlackPoster:
-    """A Slack client and channel with the posting and owner-ping calls of `crc.py`."""
+    """A Slack client and channel with the posting and owner-ping calls."""
 
     def __init__(self, client: SlackClient, channel: str) -> None:
         self.client = client
@@ -36,7 +36,7 @@ class SlackPoster:
         try:
             user_info = self.client.users_lookupByEmail(email=email)
             return user_info["user"]["id"]
-        except:  # noqa: E722 - the bare except of `crc.py` is kept, it also catches BaseException
+        except:  # noqa: E722 - the bare except is kept, it also catches BaseException
             return NOT_FOUND
 
     def user_groups(self) -> Any:
@@ -44,7 +44,7 @@ class SlackPoster:
         try:
             user_groups = self.client.usergroups_list()
             return user_groups["usergroups"]
-        except:  # noqa: E722 - the bare except of `crc.py` is kept, it also catches BaseException
+        except:  # noqa: E722 - the bare except is kept, it also catches BaseException
             print("Something Went Wront! Could not get user_groups.")
             return NOT_FOUND
 
@@ -57,8 +57,8 @@ class SlackPoster:
     ) -> None:
         """Ping each owner of `report.by_owner`: users 1:1, groups and untagged in the channel.
 
-        `lookup_user` and `get_groups` default to this notifier's own lookups; `crc.py` passes
-        its `CRC` methods so that overriding or patching them keeps working.
+        `lookup_user` and `get_groups` default to this notifier's own lookups; a caller may pass
+        its own to override or patch them.
         """
         lookup = lookup_user or self.lookup_user_by_email
         groups = get_groups or self.user_groups

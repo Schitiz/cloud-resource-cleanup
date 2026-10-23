@@ -1,8 +1,9 @@
-"""Selection rules of `crc.py main()`: which `(cloud, kind)` cleaners a run executes.
+"""Selection rules of the CLI: which `(cloud, kind)` cleaners a run executes.
 
-Pure and typed. Encodes the `--cloud all` / `--resource all` expansion and every opt-in
-gate with the errors and warning texts of `crc.py`, so the wiring rung only calls
-`build_selection()`. Nothing here reads the environment or logs.
+Pure and typed. `Selection` is the ordered pairs the engine runs; `crc/cli/bridge.py` builds a
+one-pair `Selection` per run. `build_selection()` encodes the `--cloud all` / `--resource all`
+expansion and every opt-in gate with the CLI error and warning texts; the pair check of a run is
+`validate_targets` in `crc/cli/dispatch.py`. Nothing here reads the environment or logs.
 """
 
 from dataclasses import dataclass
@@ -76,7 +77,7 @@ def _validate(
 
 
 def _skip_warning(cloud: str, kind: str, cloud_arg: str) -> str | None:
-    """Warning text when `crc.py` skips `(cloud, kind)`; None when the pair runs."""
+    """Warning text when the CLI skips `(cloud, kind)`; None when the pair runs."""
     if kind == "spot_instance_requests" and cloud != "aws":
         return _SPOT_REQUESTS_WARNING.format(cloud=cloud)
     if kind == "spot_instances":
@@ -95,7 +96,7 @@ def build_selection(
 ) -> Selection:
     """Expand `--cloud` / `--resource` into ordered pairs, applying the opt-in gates.
 
-    Raises `ValueError` with the messages of `crc.py main()`. The AWS EBS circuit breaker
+    Raises `ValueError` with the messages of the CLI. The AWS EBS circuit breaker
     raises as soon as the `(aws, disk)` pair is reached, so no other AWS resource is selected.
     """
     opts = options if options is not None else SelectionOptions()

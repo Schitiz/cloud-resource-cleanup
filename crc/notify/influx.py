@@ -1,4 +1,4 @@
-"""InfluxDB sink: one point per resource label, written as `crc.py write_influxdb` does today.
+"""InfluxDB sink: one point per resource label, sent through an injected client.
 
 The client is injected (an `influxdb_client.InfluxDBClient` in production, a fake in tests).
 """
@@ -22,7 +22,7 @@ def _fixed(names: str, count: int) -> Callable[[], tuple[str, int]]:
 
 
 class InfluxSettings(Protocol):
-    """Where the bucket and resource suffix come from; read at write time, like `crc.py`."""
+    """Where the bucket and resource suffix come from; read at write time."""
 
     @property
     def influxdb_bucket(self) -> str | None:
@@ -37,7 +37,7 @@ class InfluxSettings(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class InfluxConfig:
-    """Plain `InfluxSettings` for callers that are not the `CRC` object."""
+    """Plain `InfluxSettings` for callers that are not the CLI `CRC` object."""
 
     influxdb_bucket: str | None
     resource_suffix: str | None = None

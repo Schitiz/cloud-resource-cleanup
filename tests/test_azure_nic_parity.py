@@ -1,6 +1,6 @@
 """Parity: `crc.azu.nic.NIC` against main (`tests/legacy/azu_nic.txt`).
 
-BUG-111/BUG-113/BUG-114 (rung FIX-AZU-NIC): the new code lists the configured resource group
+BUG-111/BUG-113/BUG-114: the new code lists the configured resource group
 (`list(resource_group)`) instead of the subscription (`list_all()`); `_normalised` maps the
 oracle's `list_all` calls to that call so every unmarked case still asserts equal calls. Cases
 whose inputs trigger BUG-113 are in `DIVERGING` (new outcome asserted, oracle still shown to

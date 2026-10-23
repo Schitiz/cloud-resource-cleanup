@@ -1,4 +1,4 @@
-"""FIX-AZU-DISK: BUG-172 (only the configured resource group is listed) and BUG-174 (each delete
+"""BUG-172 (only the configured resource group is listed) and BUG-174 (each delete
 is isolated and its poller is awaited)."""
 
 import logging

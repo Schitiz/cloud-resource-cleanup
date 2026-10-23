@@ -1,8 +1,8 @@
-"""Slack sink: the `notify_*` messages, owner pings and the scan-tag cleanup summary.
+"""Slack sink: the cleanup report messages, owner pings and the scan-tag cleanup summary.
 
-Moved from `crc/notifications.py` and `crc.py` without behaviour change. The Slack client is
-injected (a `slack_sdk.WebClient` in production, a fake in tests); nothing here creates one.
-The line splitting is in `slack_chunks`, the posting and owner pings in `slack_owners`.
+The Slack client is injected (a `slack_sdk.WebClient` in production, a fake in tests);
+nothing here creates one. The line splitting is in `slack_chunks`, the posting and owner
+pings in `slack_owners`.
 """
 
 import logging
@@ -179,10 +179,10 @@ def notify_cleanup(  # noqa: PLR0913, PLR0917 - the seven positional parameters 
 
 
 class SlackNotifier(SlackPoster):
-    """Sends a `Report` to a Slack channel as `crc.py` does today.
+    """Sends a `Report` to the Slack channel the CLI configures.
 
     `fail_open` is False on purpose: a failed `chat_postMessage` is caught and printed per
-    message here (as in `crc.py`), but an error from `conversations_open` while pinging an
+    message here, but an error from `conversations_open` while pinging an
     individual owner propagates, and the engine must let it propagate too.
     """
 

@@ -1,4 +1,4 @@
-"""FIX-CORE-AGE: BUG-004 and BUG-016, a bad custom age tag keeps the resource (fail closed)."""
+"""BUG-004 and BUG-016, a bad custom age tag keeps the resource (fail closed)."""
 
 import datetime
 import logging

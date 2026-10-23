@@ -1,4 +1,4 @@
-"""LOG-GCP: the run-log lines (REGION, ACTION, SKIPPED, FAILED, RESULT) of every GCP cleaner.
+"""The run-log lines (REGION, ACTION, SKIPPED, FAILED, RESULT) of every GCP cleaner.
 
 Each test begins a run with a fake clock, drives a cleaner on a fake client and asserts the
 exact log lines. Log text only: calls, results and what is deleted are covered by the unit and

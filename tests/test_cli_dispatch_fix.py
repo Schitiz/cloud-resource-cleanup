@@ -1,4 +1,4 @@
-"""FIX-CLI-ALL: BUG-017 and BUG-018, the up-front check of every (cloud, resource) pair."""
+"""BUG-017 and BUG-018, the up-front check of every (cloud, resource) pair."""
 
 import logging
 from typing import Any
