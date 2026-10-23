@@ -12,3 +12,32 @@ Lane CL2-AWS (test-only): `tests/test_cli_bridge_aws.py` no longer reaches the c
 ## New bugs
 
 None found.
+
+## Round 1 (Argon)
+
+Scope reviewed: `git diff 2bd8e67..HEAD` on branch `cl2/aws` (lane `CL2-AWS`, commit `fcaf6d9`).
+
+### Findings
+
+None (no code or test changes needed).
+
+### Checklist verification
+
+1. **No legacy CLI imports or calls (`grep`):** Neither `tests/test_cli_bridge_aws.py` nor `tests/helpers_cl2_aws.py` imports `crc.cli.resource_ops`, `crc.cli.vm_ops`, `crc.cli.notify`, `crc.cli.adapter_args`, `crc.cli.report_calls`, or `tests.helpers_legacy_handlers`, and neither calls any `delete_*`, `stop_*`, or `notify_*` method on the current `crc.cli.runner.CRC` (all `c.delete_*` / `c.stop_*` lambdas in `KINDS` run solely on `oracle.CRC`). `NewCRC` is only instantiated as the context object passed to `bridge.run_routed` and `bridge.build_notifiers`.
+2. **Parity comparisons, case counts, and assertions preserved:** Only the import path in `tests/test_cli_bridge_aws.py:26` changed (`from tests.test_cli_crc_parity` -> `from tests.helpers_cl2_aws`). `tests/helpers_cl2_aws.py` is an exact self-contained copy of `Scenario`, `Logs`, `make_fake`, `FakeSlack`, `FakeWriter`, `FakeInflux`, `Case`, `oracle` (`load_legacy_crc("legacy_crc_main_cl2_aws")`), `build`, `scenario_grid`, `FULL`, `EMPTY`, and `AGE`. All 675 test cases and all assertions (`new == old` comparing `result`, `slack`, `influx`, `stdout`, plus `seen` context assertions, route notify modes, `REPORT_THEN_RERAISE`, `extra_notifiers`, and real `VmCleaner` through `bridge.run_routed`) are unchanged. The test never asserted run-log lines and has no fixed-bug divergences at the bridge layer.
+3. **Non-vacuity (mutation test):** Verified in-memory (not committed) that:
+   - Mutating `VmCleaner.apply` to drop one succeeded instance (`succeeded[:1]`) fails `test_real_vm_cleaner_through_bridge_matches_oracle_report_names_and_ids[False-delete]` and `[False-stop]` on both Slack and Influx records.
+   - Mutating `SlackNotifier.send` to append text to Slack messages fails the `ip-delete-full` bridge parity cases.
+4. **File ownership & CLEAN-2 contract:** Only `tests/test_cli_bridge_aws.py`, `tests/helpers_cl2_aws.py`, and `docs/archive/reviews/CL2-AWS.md` were modified; no production code (`crc/**`), other tests, hash-locked safety tests, `tests/legacy/*.txt`, or `tests/archtest/**` were touched.
+
+### Gates & test count
+
+Ran `pip install -r requirements.txt -r requirements-dev.txt && make check`:
+- `python3 -m ruff check .`: passed
+- `python3 -m mypy`: passed (no issues found in 364 source files)
+- `lint-imports`: passed (5 contracts kept, 0 broken)
+- `python3 -m pytest -q -n auto`: **44400 passed in 55.70s** (`tests/test_cli_bridge_aws.py`: **675 passed in 2.37s**)
+- `python3 -m tests.archtest.test_count check`: `ARCH-008: 44400 tests, floor 44400`
+
+VERDICT: APPROVE
+
