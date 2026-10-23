@@ -53,7 +53,8 @@ VM not recorded, disks not read, failure recorded).
 
 - `crc/gcp/spot_vm/disks.py` `remove_leftover_disk`: a disk delete response without `name`
   counts as deleted (parity case `disk-delete-no-op-name-counted`); exists on main: yes
-  (`crc/gcp/spot_vm.py`, disk delete after `_delete_disk`). Not fixed.
+  (`crc/gcp/spot_vm.py`, disk delete after `_delete_disk`). Not fixed. Already recorded as
+  `BUG-237` in `docs/refactor/BUGS.md` (not a new bug).
 
 ## Round 1 (Argon)
 
@@ -80,3 +81,76 @@ VM not recorded, disks not read, failure recorded).
 - `make check` (`ruff check`, `ruff format --check`, `mypy`, `lint-imports`, `pytest`): **passed** (`42474 passed`).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 182466d..HEAD`.
+
+### Round 1 check
+
+Round 1 findings hold. Its README `Public API` fix (`reject_reason()` lists `unlabelled`,
+`disk_ok_to_delete()` mentions the custom age label) and its `## Owner action` text for SAF-043 /
+SAF-044 are correct and still match the code.
+
+### Findings
+
+- **NIT** (`docs/refactor/reviews/FIX-GCP-SPOT.md`, "New bugs", fixed in this review): the
+  disk-delete-without-`name` quirk is not new. It is already `BUG-237` in `docs/refactor/BUGS.md`, and
+  the entry now says so. It is out of scope here: `BUG-229` is about the instance delete.
+- **NIT** (`crc/gcp/spot_vm/cleaner.py:188`, `:164`, `crc/gcp/spot_vm/disks.py:113`, not changed):
+  `apply_instance`, `preview_instance` and `disk_ok_to_delete` default `clock` to
+  `datetime.datetime.now`. Every production caller passes `RunContext.now` or the adapter clock,
+  so nothing reads the wall clock today. A required argument would be stricter, but that would
+  break existing direct callers in tests, which is outside this rung.
+- No BLOCKING findings.
+
+### Checks
+
+1. **Bugs fixed, with tests that fail on 182466d.** I copied `tests/test_gcp_spot_vm_fix.py` onto a
+   `182466d` worktree: 16 failed, 13 passed. Every BUG-228 and BUG-242 fix test is among the
+   16 failures. The 13 that pass on both are the BUG-229 pins and the checks that other inputs
+   behave as before.
+   - BUG-228: `reject_reason` returns `unlabelled` only when `filter_labels` is empty and the VM
+     has no labels, and this check runs after the age check. All earlier reasons and error paths
+     (for example `labels-not-a-mapping`, or a timestamp that cannot be parsed) are reached first
+     and are unchanged. Both run paths, `SpotVM.delete()` and the registered Cleaner, go through
+     `reject_reason`.
+   - BUG-242 (custom age part): `_custom_age_keeps` reads the disk's own label with
+     `validated_retention_age`. When the label is set it uses the same semantics as the
+     instance: `effective_age(retention, age)` equals `retention`, and `core_age.is_old` with
+     `MAX_AGE`. An invalid label, or a missing or unreadable `creationTimestamp`, keeps the disk
+     (fail closed). The dry-run plan, apply and the adapter all receive the injected clock.
+   - BUG-229: I agree with the owner decision. `_delete_and_wait` already records a missing
+     `name`, an empty `name`, an operation error, a poll error or a timeout as failed
+     (`logger.current().fail`), never as deleted, and keeps the leftover disks. The only thing
+     left would be deleting those disks anyway, which deletes more than today (SAF-039).
+2. **Direction rule.** Both fixes only add skips; no new SDK mutation is added. A disk without
+   the custom age label, or a run without `custom_age_tag_key` (`validated_retention_age` returns
+   None when the key is empty), makes the same calls as before. The parity oracles
+   (`tests/legacy/`) are untouched. The 12 cases that now differ are keyed one by one in
+   `DIVERGES`, all to BUG-228, and each asserts the exact new `deleted` list, the
+   `instances.delete` calls, the disks, stdout and the logs. Every other case still asserts
+   equality with the oracle. The 4 quirk checks moved to `FIXED_QUIRKS` assert both the old and
+   the new outcome. A separate test pins the BUG-242 difference (young disk: main deletes it, the
+   new code keeps it; old disk: same calls and logs as main). The `instance()` fixture in
+   `tests/test_gcp_spot_instances.py` now gets a default label, so the tests that expect a delete
+   do not use an unlabelled VM. Tests that pass explicit labels are unchanged.
+3. **Production commands.** None reach GCP Spot. No CLI flag or dependency changed.
+4. **Fail-closed paths.** The new keeps happen in `plan` / `evaluate` and in `disk_ok_to_delete`,
+   before `delete_instance` / `delete_disk`. There is no new raise.
+5. **Protected files.** `git diff 182466d..HEAD --stat` is empty for `tests/test_gcp_spot_vm.py`,
+   `tests/archtest/`, `tests/legacy/`, `docs/refactor/{PLAN,STATUS,BUGS}.md`, `CLEANUP_SAFETY.md`,
+   `.cursor/`, `AGENTS.md` and `ARCHITECTURE.md`.
+6. **README (ARCH-002).** The Safety Invariants and Public API sections of
+   `crc/gcp/spot_vm/README.md` describe both fixes and the BUG-229 status.
+7. **Unfixed bugs.** BUG-229 is under `## Owner decision`. The rest of BUG-242 (the disk's own
+   `filter_labels` / `users`) is explained in the coding summary, because the task asked only for
+   the custom age tag.
+
+### Gates
+
+- `pip install -r requirements.txt -r requirements-dev.txt`: ok.
+- `make check` (ruff check, ruff format --check, mypy, lint-imports, pytest): **passed**,
+  `42474 passed`.
+
+ROUND 2 VERDICT: APPROVE
