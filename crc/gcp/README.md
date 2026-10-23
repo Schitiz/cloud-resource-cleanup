@@ -10,12 +10,13 @@ Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.
 
 - `_base.py` (PL-GCP, refactored): `get_gcp_regions`
 - `_scan.py` (LOG-GCP): `ZoneScan` and `log_action`, the run-log helpers shared by the four cleaners
-- `disk.py`: `DiskCleaner` (registered as `gcp` / `disk`) and the `Disk` adapter: deletes unattached disks by `last_detach_timestamp` (zonal disks of every zone); label any-key filter; `notags` (as the VM cleaner) and `name_regex` (`re.search`) are applied (FIX-GCP-DISK); `age` is not used
+- `_common.py` (W2-GCP): `is_old_enough`, the age gate (timestamp, custom age label, `core_age.is_old`) shared by the disk and VM cleaners, and the `TIME_FORMAT` and `Clock` they share
+- `disk.py`: facade that re-exports the disk names (import path `crc.gcp.disk` unchanged); `disk_cleaner.py` holds `DiskCleaner` (registered as `gcp` / `disk`), `disk_adapter.py` the `Disk` adapter and `disk_settings.py` `DiskSettings` and the result helpers. Behaviour of the cleaner and adapter: deletes unattached disks by `last_detach_timestamp` (zonal disks of every zone); label any-key filter; `notags` (as the VM cleaner) and `name_regex` (`re.search`) are applied (FIX-GCP-DISK); `age` is not used
 - `disk_client.py` (FIX-GCP-DISK): `DiskView`, `GcpDiskClient` and `ComputeDiskClient`, split out of `disk.py` for the 400-line limit and re-exported by it
-- `ip.py`: `IpCleaner` (registered as `gcp` / `ip`) and the `IP` adapter: deletes RESERVED addresses (`AddressesClient().delete`, waits for the operation); substring name and exception filters
+- `ip.py`: facade that re-exports the IP names (import path `crc.gcp.ip` unchanged); `ip_cleaner.py` holds `IpCleaner` (registered as `gcp` / `ip`), `ip_adapter.py` the `IP` adapter and `ip_client.py` the client protocols and `ComputeIpClient`. Behaviour of the cleaner and adapter: deletes RESERVED addresses (`AddressesClient().delete`, waits for the operation); substring name and exception filters
 - `spot_vm/`: subpackage (GCP-4) with its own README; the import path `crc.gcp.spot_vm` is unchanged
 - `vm_client.py`: `GcpVmClient`, `InstanceView` and `ComputeVmClient` (split from `vm.py`, re-exported by it)
-- `vm.py`: `VmCleaner` (registered as `gcp` / `vm`) and the `VM` adapter: deletes (`delete`) or stops (`stop`) RUNNING instances by labels (all keys), `notags` and exception labels, and age
+- `vm.py`: facade that re-exports the VM names (import path `crc.gcp.vm` unchanged); `vm_cleaner.py` holds `VmCleaner` (registered as `gcp` / `vm`), `vm_adapter.py` the `VM` adapter and `vm_settings.py` `VmSettings`. Behaviour of the cleaner and adapter: deletes (`delete`) or stops (`stop`) RUNNING instances by labels (all keys), `notags` and exception labels, and age
 
 ## Public API
 
@@ -24,6 +25,7 @@ subpackage documents its own API in its own README. The plumbing modules (PL-GCP
 
 - `get_gcp_regions()`: returns the region names of a project (one Compute Engine regions client list call), a plain list in listing order. It builds a new client per call, has no fallback and lets every SDK error propagate. No caller on this branch (`ComputeIpClient` lists regions through its own client).
 
+- `is_old_enough`: the shared age gate of the disk and VM cleaners: parses the timestamp, reads the custom age label (fail open, BUG-004), logs an "Updating age" line when it is set and returns whether the item is old enough for the effective age; pure apart from logging.
 - `ZoneScan`: counts the resources listed and selected in one zone or region and logs the REGION line through the current run log when finished; log text only (LOG-GCP, BUG-361).
 - `log_action`: logs the ACTION line (would_delete, deleted, would_stop or stopped) of one candidate through the current run log (LOG-GCP).
 - `AddressView`: Protocol of the two address fields read (name, status); tests pass fakes.
