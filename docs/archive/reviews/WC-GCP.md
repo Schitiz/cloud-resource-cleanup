@@ -37,3 +37,35 @@ None found.
   - `ARCH-008`: 44415 tests, floor 44415 (all ARCH-001..011 and SAF-LOCK checks green)
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+### Round 1 check
+
+- Round 1's fixes (spot_vm README trim, last `main`/ratchet wording in `crc/gcp/README.md`, the stale `Disk` and `rung LOG-GCP` docstrings in `disk_settings.py` and `_scan.py`) are present and correct. Its findings were re-checked independently below; no disagreement.
+
+### Findings
+
+- **(1) Production untouched**: `crc/cli/scan.py` still imports `crc.gcp.vm.VM`; `crc/cli/routes/gcp.py` imports `ip_cleaner`, `disk_cleaner`, `vm_cleaner` and `spot_vm`; the four `@register("gcp", ...)` factories (`ip`, `disk`, `vm`, `spot_instances`) are in place. No locked-test adapter changed (`git diff 302612d..HEAD` touches no aws, azu, oci or `crc/gcp/spot_vm/*.py` code, and no `tests/test_*spot*` or `tests/test_aws_disk*` file).
+- **(2) Parity tests on the engine**: `tests/test_gcp_ip_parity.py` and `tests/test_gcp_disk_parity.py` build the cleaner through `Registry` + `build_ip_cleaner` / `build_disk_cleaner` and call `crc.core.engine.run` for every oracle case (cases list unchanged against the base). Fixed-bug divergences carry their IDs (BUG-001, BUG-063, BUG-064 for IP; BUG-005, BUG-006, BUG-126, BUG-127 for disk; BUG-358 log level). The only test functions dropped are the adapter-vs-oracle `test_matches_main` and the adapter-specific `test_cleaner_protocol_matches_main`; the new `test_engine_matches_main` keeps the full cleaner-protocol comparison (mutations and their order, results, stdout, errors, log multiset, exact log and call order where the case has one region or zone), and the new `..._lists_every_region/zone_before_it_deletes` tests assert the plan-then-apply order for every case. The exact call order of multi-region cases is no longer compared against the oracle; that follows from the one allowed ENG change (all listing before any delete), and the order of deletes is still compared exactly. Port of constructor-only cases (`default_state`, class attributes, constructor slack shapes, second `delete()` accumulation) checked: each still asserts the oracle fact and the engine-side equivalent.
+- **Mutation check (local, not committed, in a scratch copy)**: re-inverted the IP exception filter (`return not any(...)` in `IpCleaner`, the BUG-001 regression) and skipped the disk exception check in `DiskCleaner._reject`. `pytest tests/test_gcp_ip_parity.py tests/test_gcp_disk_parity.py`: 87 failed (IP: 31 `test_engine_matches_main`, 11 quirk, 5 fixed-quirk, plus default_state, BUG-358 and second-run tests; disk: 16 `test_engine_matches_main`, 8 quirk, 13 BUG-126). The parity tests reach the registered cleaners and are not vacuous.
+- **(3) Deleted names**: `crc/gcp/ip_adapter.py`, `crc/gcp/disk_adapter.py`, `crc.gcp.ip.IP` and `crc.gcp.disk.Disk` are gone; grep over `crc/`, `crc.py` and `tests/` finds no reference (only log text and the unrelated `legacy_crc_notify_reference.txt` constants). READMEs: no rung names, refactor-history, legacy-path or adapter wording for deleted classes; no links to `docs/refactor/PLAN.md`, `STATUS.md`, `FILTER_VARIANTS.md`, `LOGGING.md`, reviews or `.cursor/skills/crc-python-refactor` (the remaining `docs/refactor/BUGS.md` links point to a file that still lives there; the review link is `docs/archive/reviews/FIX-GCP-SPOT.md`). The `SpotVM` and `VM` class descriptions describe classes that still exist (locked-test shim and the CLI scan class).
+- **(4) Locked files**: no change to `tests/legacy/**`, `tests/archtest/**` (including `safety_lock.json`), the hash-locked safety tests, `BUGS.md`, `CLEANUP_SAFETY.md`, `AGENTS.md`, `ARCHITECTURE.md`, `.cursor/**`, `pyproject.toml`, `Makefile` or `requirements*.txt`.
+- **(5) Sizes and API**: largest `crc/gcp` modules are `disk_cleaner.py` (240 lines) and `vm_cleaner.py` (225); ARCH-004 (files, functions) and ARCH-002 (Public API sync for `crc/gcp` and `crc/gcp/spot_vm`) pass in the suite.
+- No fixes were needed in this round.
+
+### Gates
+
+After `pip install -r requirements.txt -r requirements-dev.txt`, `make check` (wall time 1m21s):
+
+- `ruff check .`: all checks passed
+- `mypy`: no issues found in 371 source files
+- `lint-imports`: 5 kept, 0 broken
+- `pytest -q -n auto`: 44415 passed in 61.11s (ARCH-001..011 and SAF-LOCK included)
+- ARCH-008: 44415 tests, floor 44415 (count unchanged, floor not raised)
+
+### New bugs
+
+None found.
+
+ROUND 2 VERDICT: APPROVE
