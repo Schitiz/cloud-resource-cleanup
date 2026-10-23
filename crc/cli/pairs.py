@@ -30,7 +30,7 @@ AWS_DISK_OPT_IN_MESSAGE = (
 
 
 def is_supported_pair(cloud: Any, resource: Any) -> bool:
-    """False for a (cloud, resource) pair whose `CRC` method raises for that cloud."""
+    """False for a (cloud, resource) pair the cloud does not support."""
     allowed = SUPPORTED_CLOUDS.get(resource)
     return allowed is None or cloud in allowed
 

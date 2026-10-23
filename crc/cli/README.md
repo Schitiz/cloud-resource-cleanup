@@ -12,7 +12,7 @@ plain `dict`, as on `main`.
 
 - `args.py` and `args_run.py`: `get_argparser()`, split into one private `_add_*_args` function per group of flags (selection and filter flags in `args.py`, age, notify and resource flags in `args_run.py`); the flag order is the order of `main`, which fixes the `--help` text and the key order of the returned dict. JSON and Python-literal values (`--age '{"days": 1}'`, `--filter_tags "{'k': ['v']}"`) go through `ast.literal_eval`.
 - `validate.py`: the type validators and the InfluxDB field checks.
-- `constants.py`: `CLOUDS`, `RESOURCES`, the report labels (`DELETED`, `VMS`, ...) and the operation map.
+- `constants.py`: `CLOUDS` and `RESOURCES` (the `--cloud all` and `--resource all` order).
 - `pairs.py`: the supported (cloud, resource) pairs and the unsupported-pair message; `dispatch.py` re-exports them.
 - `runner.py`: `CRC`, the run context of one cloud: the settings the bridge, the notifiers and the scan read (`cloud`, `dry_run`, `notags`, `project_id`, `resource_group`, the Slack and Influx clients, `slack_channel`, `influxdb_bucket`, `resource_suffix`) and `get_msg`. It runs nothing and sends nothing itself.
 - `main.py`: `main()`, which composes the modules below in the order of `main` on the main branch.
@@ -81,7 +81,7 @@ plain `dict`, as on `main`.
 
 1. A new flag is added to the matching `_add_*_args` group in `args.py`, with a row in the parity
    table of `tests/test_cli_args_parity.py`.
-2. Keep each file under 400 lines and each function within the ruff limits; split by group of
+2. Keep each file at 250 lines or fewer and each function within the ruff limits; split by group of
    flags or by responsibility, not by line count.
 3. Route a kind through the engine (pattern: AWS `keypair`, `routes/aws.py`). In the cloud's route file
    add an options builder (flags to the keys the registered factory reads from `RunContext.options`)

@@ -76,3 +76,22 @@ lane). Possible follow-up for the docs lane: `AGENTS.md` still names `HANDLERS`,
 ## New bugs
 
 None found.
+
+## Round 1 (Argon)
+
+### Findings
+
+- **Check (1) Production paths**: Verified `python3 crc.py --help` and dry-run argument parsing across production command shapes (AWS/GCP/Azure/OCI cleanup and `--scan_tag`), plus confirmed `crc.cli.scan` (`run_scan`, `scan_instances_with_tag`) and all 4 cloud route tables (`crc.cli.bridge.TABLES`) import and execute cleanly in tests. `crc.cli.runner.CRC` retains the exact constructor, attributes (including BUG-030 `influxdb_bucket` / `resource_suffix` conditional assignment) and `get_msg` helper used by the bridge, notifiers and scan; `scan_instances_with_tag` lives in `crc/cli/scan.py` with identical VM adapter selection, arguments and error messages.
+- **Check (2) Tests & oracle parity**: Zero tests were deleted (`tests/helpers_legacy_handlers.py` was an unreferenced helper module with no test functions). `test_cli_scan_parity.py` was retargeted to `crc.cli.scan.scan_instances_with_tag` against `load_legacy_crc()`; `test_cli_main_parity.py`, `test_cli_route_fix.py` and `test_cli_logger.py` patch `crc.cli.scan.scan_instances_with_tag` at call time; `test_core_selection.py::test_all_expansion_order_follows_crc_py` compares against `load_legacy_crc()`. No oracle comparison was dropped.
+- **Check (3) Deleted files, names & READMEs**: Confirmed `crc/cli/resource_ops.py`, `crc/cli/adapter_args.py`, `crc/cli/report_calls.py`, `crc/cli/vm_ops.py`, `crc/cli/notify.py`, `crc/cli/base.py`, `tests/helpers_legacy_handlers.py` and the unused `crc.py` re-exports are deleted and unreferenced across `crc/`, `tests/` and `crc.py`. Also removed the unused legacy report label constants (`DELETED`, `STOPPED`, `NICS`, `DISKS`, `VMS`, `IPS`, `KEYPAIRS`, `KMS`, `SPOT_INSTANCE_REQUEST`, `OPERATIONS`) from `crc/cli/constants.py` after verifying no production or test file imported them, and synced `crc/cli/README.md` and `crc/cli/pairs.py` docstring. `crc/cli/README.md` and `crc/cli/routes/README.md` have no legacy handler/path/method/rung wording.
+- **Check (4) Behaviour & locked files**: No CLI flag, output line, Slack message, Influx point, exception or exit code changed. No hash-locked safety test, `tests/legacy/*.txt` oracle or `tests/archtest/**` file was touched.
+- **Check (5) Size limits & line counts**: Every touched non-test file is well within ARCH-004 limits (max 250 lines/file, max 60 lines/function). `crc/` Python line count: 19,279 before (`7b1f9d4`) -> 18,548 after (-731 lines; `crc.py` 102 -> 31 lines).
+- **Check (6) Gates & test count**: After `pip install -r requirements.txt -r requirements-dev.txt`, full `make check` is green:
+  - `ruff check .`: passed
+  - `mypy`: passed (`Success: no issues found in 372 source files`)
+  - `lint-imports`: 5 kept, 0 broken
+  - `pytest -q -n auto`: `44415 passed in 54.96s`
+  - `ARCH-008`: 44415 tests, floor 44415 (ARCH-001..011 and SAF-LOCK all green)
+
+VERDICT: APPROVE
+
