@@ -18,3 +18,22 @@ Lane WC-GCP (branch `wc/gcp`).
 ## New bugs
 
 None found.
+
+
+## Round 1 (Argon)
+
+### Findings
+
+- **Check (1) Production paths**: Confirmed nothing used by production was deleted: `crc/cli/scan.py` still imports `crc.gcp.vm.VM`, `crc/cli/routes/gcp.py` imports `crc.gcp.ip_cleaner`, `crc.gcp.disk_cleaner`, `crc.gcp.vm_cleaner`, and `crc.gcp.spot_vm`, all four GCP registry factories (`build_ip_cleaner`, `build_disk_cleaner`, `build_vm_cleaner`, `build_spot_cleaner`) remain registered, and all five adapters used by the hash-locked safety tests (`crc.aws.disk.Disk`, `crc.aws.spot_instance_requests.SpotInstanceRequests`, `crc.azu.spot_vm.SpotVM`, `crc.gcp.spot_vm.SpotVM`, `crc.oci.spot_vm.SpotVM`) are untouched.
+- **Check (2) Parity & unit tests on `crc.core.engine.run`**: Verified `tests/test_gcp_ip_parity.py` and `tests/test_gcp_disk_parity.py` (along with `test_gcp_ip.py`, `test_gcp_ip_fix.py`, `test_gcp_disk.py`, `test_gcp_disk_fix.py`, and `test_gcp_logger.py`) drive the registered Cleaners (`IpCleaner`, `DiskCleaner`) through `crc.core.engine.run` against the full oracle case sets in `tests/legacy/gcp_ip.txt` and `tests/legacy/gcp_disk.txt`, preserving all assertions on SDK mutations, call ordering, log lines, stdout, raised errors, and fixed-bug divergences (`BUG-001`, `BUG-005`, `BUG-006`, `BUG-063`, `BUG-064`, `BUG-126`, `BUG-127`, `BUG-358`), with only the allowed `plan()`-before-`apply()` listing-error difference recorded in `ENGINE_QUIRKS`. Locally broke `IpCleaner` (`_RESERVED = "BROKEN"`) and `DiskCleaner` (inverted `disk.users` check) and confirmed `pytest tests/test_gcp_ip_parity.py tests/test_gcp_disk_parity.py` failed with 243 failures before restoring.
+- **Check (3) Deleted names & READMEs**: Confirmed `crc/gcp/ip_adapter.py`, `crc/gcp/disk_adapter.py`, `crc.gcp.ip.IP`, and `crc.gcp.disk.Disk` are deleted and unreferenced across `crc/`, `crc.py`, and `tests/`. In Round 1, also trimmed `crc/gcp/spot_vm/README.md` (text only, removing `GCP-4`/`FIX-GCP-SPOT` rung names, `docs/refactor/PLAN.md` and `docs/refactor/reviews/FIX-GCP-SPOT.md` links, and stale CLI-adapter wording), removed the remaining legacy-ratchet/`main` phrasing in `crc/gcp/README.md`, and cleaned stale `Disk` and `rung LOG-GCP` references in `crc/gcp/disk_settings.py` and `crc/gcp/_scan.py` docstrings.
+- **Check (4) Locked files**: Confirmed no hash-locked safety test, `tests/legacy/*.txt` oracle, `tests/archtest/**`, `BUGS.md`, `CLEANUP_SAFETY.md`, `AGENTS.md`, `ARCHITECTURE.md`, or build/config file was touched.
+- **Check (5) Size limits & Public API sync**: Every file in `crc/gcp/` is well within ARCH-004 limits (max 250 lines/file, max 60 lines/function) and Public API sections in `crc/gcp/README.md` and `crc/gcp/spot_vm/README.md` are in sync (ARCH-002 green).
+- **Check (6) Gates & test count**: After `pip install -r requirements.txt -r requirements-dev.txt`, `make check` passed in full:
+  - `ruff check .`: passed
+  - `mypy`: passed (`Success: no issues found in 371 source files`)
+  - `lint-imports`: 5 kept, 0 broken
+  - `pytest -q -n auto`: `44415 passed in 51.10s`
+  - `ARCH-008`: 44415 tests, floor 44415 (all ARCH-001..011 and SAF-LOCK checks green)
+
+VERDICT: APPROVE

@@ -1,6 +1,6 @@
 # Copyright (c) Yugabyte, Inc.
 
-"""Settings and result helpers of the GCP disk cleaner, shared by `DiskCleaner` and `Disk`."""
+"""Settings and result helpers of `DiskCleaner`."""
 
 import logging
 from collections.abc import Mapping, Sequence

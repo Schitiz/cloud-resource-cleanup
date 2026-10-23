@@ -33,7 +33,7 @@ The names below are synced with this README by ARCH-002. The spot_vm subpackage 
 - `build_ip_cleaner()`: registry factory behind @register("gcp", "ip"); reads project_id, name_regex and exception_regex from RunContext.options and raises ValueError without a project_id.
 - `DiskView`: Protocol of the four disk fields read (users, name, labels, last_detach_timestamp); tests pass fakes.
 - `GcpDiskClient`: Protocol of the Compute Engine calls used (list_zones, list_disks, delete_disk, get_operation, close); tests pass fakes.
-- `ComputeDiskClient`: the google-api-python-client (zones, deletes) plus google-cloud-compute (disk listing) implementation of `GcpDiskClient`; it builds the discovery service lazily, once per run, builds the disks client right after the zones were listed as main does, and close() closes the service.
+- `ComputeDiskClient`: the google-api-python-client (zones, deletes) plus google-cloud-compute (disk listing) implementation of `GcpDiskClient`; it builds the discovery service lazily, once per run, builds the disks client right after the zones were listed, and close() closes the service.
 - `DiskSettings`: frozen dataclass with the fields the cleaner reads (project_id, filter_labels, exception_labels, exception_regex, custom_age_tag_key, detach_age, slack_notify_users, slack_user_label, notags, name_regex, wait_sec, poll_sec).
 - `DiskCleaner`: the Cleaner (supports, read-only plan, mutating apply, partial_succeeded for the report-then-reraise bridge mode, plus zones, plan_zone and apply_disk); plan_zone is a lazy generator, consumed in full by plan() before apply() deletes.
 - `build_disk_cleaner()`: registry factory behind @register("gcp", "disk"); reads project_id (ValueError without it), filter_tags, exception_tags, exception_regex, notags, name_regex (ValueError for a non-list or an invalid pattern), custom_age_tag_key, detach_age, slack_notify_users and slack_user_label from RunContext.options.
@@ -65,7 +65,7 @@ The names below are synced with this README by ARCH-002. The spot_vm subpackage 
 ## Extension Rules
 
 1. New resources go in a new module with the `Cleaner` contract (`ARCHITECTURE.md`, "Add a resource cleaner"): a `Cleaner` registered with `@register("gcp", ...)`.
-2. No module of this package is in the legacy ratchet (`pyproject.toml` lists only five hash-locked safety test files); never add one. Update this README and its symbol list with any public change.
+2. Update this README and its symbol list with any public change (ARCH-002).
 3. GCP IP changes need `tests/test_gcp_ip_parity.py` (oracle `tests/legacy/gcp_ip.txt`, never edit it) to stay green.
 4. GCP disk changes need `tests/test_gcp_disk_parity.py` (oracle `tests/legacy/gcp_disk.txt`, never edit it) to stay green.
 5. GCP VM changes need `tests/test_gcp_vm_parity.py` (oracle `tests/legacy/gcp_vm.txt`, never edit it) to stay green.
