@@ -3,9 +3,9 @@
 """Azure public IP cleaner.
 
 `AzureIpCleaner` implements the `crc.core.cleaner.Cleaner` contract: `plan()` lists the public
-IP addresses (`list_all`) and filters them, `apply()` calls `begin_delete`. `IP` is the legacy
-class `crc.py` uses; it keeps its constructor and attributes and runs the cleaner IP by IP, in
-the exact call order of the original implementation.
+IP addresses of the configured resource group (`list(resource_group)`) and filters them,
+`apply()` calls `begin_delete`. `IP` is the legacy class `crc.py` uses; it keeps its
+constructor and attributes and runs the cleaner IP by IP, in the call order of the original.
 """
 
 import logging
@@ -25,8 +25,8 @@ TagSpec = Mapping[str, Sequence[str]]
 class PublicIpOperations(Protocol):
     """The two `public_ip_addresses` calls this cleaner uses."""
 
-    def list_all(self) -> Iterable[Any]:
-        """List the public IP addresses of the whole subscription."""
+    def list(self, resource_group_name: str) -> Iterable[Any]:
+        """List the public IP addresses of one resource group."""
         ...
 
     def begin_delete(self, *, resource_group_name: str, public_ip_address_name: str) -> object:
@@ -46,6 +46,19 @@ class IpNetworkClient(Protocol):
 ClientFactory = Callable[[], IpNetworkClient]
 
 
+_IN_USE_FIELDS = (
+    "ip_configuration",
+    "nat_gateway",
+    "linked_public_ip_address",
+    "service_public_ip_address",
+)
+
+
+def _in_use(ip: Any) -> bool:
+    """True when the address is attached to anything (BUG-076); absent SDK fields count as unset."""
+    return any(getattr(ip, field, None) is not None for field in _IN_USE_FIELDS)
+
+
 def _log_summary(deleted: Sequence[str], *, dry_run: bool) -> None:
     items = list(deleted)
     if not dry_run:
@@ -56,8 +69,8 @@ def _log_summary(deleted: Sequence[str], *, dry_run: bool) -> None:
 
 
 class AzureIpCleaner:
-    """Deletes public IPs without an IP configuration that match `filter_tags` (any key) and
-    do not match `exception_tags` (any key) or `notags` (all keys)."""
+    """Deletes unused public IPs of the configured resource group that match `filter_tags` (any
+    key) and do not match `exception_tags` (any key) or `notags` (all keys)."""
 
     cloud = "azure"
     kind = "ip"
@@ -80,7 +93,7 @@ class AzureIpCleaner:
         return operation is Operation.DELETE
 
     def plan(self, context: RunContext) -> Plan:
-        """List every public IP of the subscription and filter. Makes no mutating call."""
+        """List the public IPs of the configured group and filter. Makes no mutating call."""
         candidates: list[Candidate] = []
         skipped: list[Skipped] = []
         started = _logger.started()
@@ -110,8 +123,13 @@ class AzureIpCleaner:
         return Result(succeeded=tuple(deleted))
 
     def list_ips(self) -> Iterable[Any]:
-        """The (lazy) subscription-wide listing, as on `main`."""
-        return self._client_factory().public_ip_addresses.list_all()
+        """The (lazy) listing of the configured resource group only (BUG-074).
+
+        Raises `ValueError` before any SDK call when the resource group is empty.
+        """
+        if not self._resource_group:
+            raise ValueError("Azure IP cleanup needs a non-empty resource group")
+        return self._client_factory().public_ip_addresses.list(self._resource_group)
 
     def delete_candidate(self, candidate: Candidate) -> None:
         """Start the deletion of one planned address and log it."""
@@ -136,15 +154,15 @@ class AzureIpCleaner:
             bool(ip.tags) and policy.filter_tags_any_key(ip.tags, filter_tags)
         )
         exception_match = bool(exception_tags) and policy.should_skip_by_tags(
-            ip.tags, exception_tags, {}
+            ip.tags or {}, exception_tags, {}
         )
-        notags_match = bool(notags) and policy.should_skip_by_tags(ip.tags, {}, notags)
+        notags_match = bool(notags) and policy.should_skip_by_tags(ip.tags or {}, {}, notags)
         if not filter_match:
             return self._kept("no filter_tags match")
         if exception_match or notags_match:
             return self._kept("matches exception_tags or notags")
-        if ip.ip_configuration is not None:
-            return self._kept("attached to an IP configuration")
+        if _in_use(ip):
+            return self._kept("in_use")
         tags = policy.normalize_tags(getattr(ip, "tags", None))
         return Candidate(id=ip.name, name=ip.name, tags=tags), ""
 

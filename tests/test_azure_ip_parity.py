@@ -2,8 +2,12 @@
 
 Both run against the same fake Azure network client (the SDK classes `crc.azu._base` builds
 are replaced, so the real `Base` runs in both). SDK calls (in order, including the lazy
-paging of `list_all`), results, log records, stdout and raised errors must be identical for
-every case through the legacy adapter. The registered `Cleaner` path (factory with a
+paging of the listing), results, log records, stdout and raised errors must be identical for
+every case through the legacy adapter, except two documented divergences. First, every case
+lists the configured resource group (`list(resource_group)`) instead of the subscription
+(`list_all()`): BUG-074, the oracle's `("list_all",)` call is mapped to `("list", group)`.
+Second, the cases in `DIVERGING` (BUG-013, BUG-076, BUG-077) assert the new outcome and that it
+differs from the oracle. The registered `Cleaner` path (factory with a
 `RunContext`, `plan()` then `apply()` unless dry run) is compared on results, errors, stdout,
 delete calls and log records. The module lists no regions, so there is no region fallback.
 """
@@ -207,6 +211,36 @@ class Outcome:
     error: tuple[str, str] | None
 
 
+@dataclass
+class Diverges:
+    bug: str
+    deleted: list[str]
+    old_error: tuple[str, str] | None
+
+
+TYPE_ERROR = ("TypeError", "argument of type 'NoneType' is not iterable")
+ATTRIBUTE_ERROR = (
+    "AttributeError",
+    "'types.SimpleNamespace' object has no attribute 'ip_configuration'",
+)
+
+DIVERGING: dict[str, Diverges] = {
+    "untagged-with-exception-raises": Diverges("BUG-013", ["a"], TYPE_ERROR),
+    "untagged-with-notags-raises": Diverges("BUG-013", ["a"], TYPE_ERROR),
+    "untagged-raises-even-if-filter-excludes": Diverges("BUG-077", [], TYPE_ERROR),
+    "untagged-raises-after-earlier-deletes": Diverges("BUG-077", ["a", "b", "c", "d"], TYPE_ERROR),
+    "untagged-raises-in-dry-run": Diverges("BUG-013", ["a", "c"], TYPE_ERROR),
+    "untagged-with-exception-attached-ip-still-raises": Diverges("BUG-013", [], TYPE_ERROR),
+    "missing-ip-configuration-attribute": Diverges("BUG-076", ["a"], ATTRIBUTE_ERROR),
+}
+
+
+def _scoped(calls: Sequence[tuple[Any, ...]], case: Case) -> list[tuple[Any, ...]]:
+    """The oracle's calls with its subscription-wide listing mapped to the group listing."""
+    group = case.resource_group or "env-rg"
+    return [("list", group) if c == ("list_all",) else c for c in calls]
+
+
 def _load_oracle() -> Any:
     module = types.ModuleType("legacy_azu_ip")
     exec(compile(ORACLE.read_text(), str(ORACLE), "exec"), module.__dict__)
@@ -271,7 +305,21 @@ def test_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run(_new, case, monkeypatch, caplog, capsys)
-    assert new.calls == old.calls
+    if case.id in DIVERGING:
+        fix = DIVERGING[case.id]
+        assert old.error == fix.old_error, f"{fix.bug}: oracle no longer shows the bug"
+        assert new.error is None
+        assert new.deleted == fix.deleted
+        assert new.count == len(fix.deleted)
+        assert (new.error, new.deleted) != (old.error, old.deleted)
+        assert ("list", case.resource_group) in new.calls
+        deletes = [c for c in new.calls if c[0] == "begin_delete"]
+        expected = [("begin_delete", case.resource_group, n) for n in fix.deleted]
+        if case.dry_run:
+            expected = []
+        assert deletes == expected
+        return
+    assert new.calls == _scoped(old.calls, case)
     assert new.error == old.error
     assert new.deleted == old.deleted
     assert new.count == old.count
@@ -326,9 +374,15 @@ def test_cleaner_protocol_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run_cleaner(case, monkeypatch, caplog, capsys)
+    if case.id in DIVERGING:
+        fix = DIVERGING[case.id]
+        assert new.error is None
+        assert new.deleted == fix.deleted
+        assert _only(new.calls, "list", "list_all") == [("list", case.resource_group or "env-rg")]
+        return
     assert new.error == old.error
     assert new.stdout == old.stdout
-    assert _only(new.calls, "list_all") == _only(old.calls, "list_all")
+    assert _only(new.calls, "list", "list_all") == _only(_scoped(old.calls, case), "list")
     if case.fails_in_plan:
         assert _only(new.calls, "begin_delete") == []
         assert new.logs == []
@@ -344,21 +398,7 @@ def _find(case_id: str) -> Case:
     return next(c for c in CASES if c.id == case_id)
 
 
-TYPE_ERROR = ("TypeError", "argument of type 'NoneType' is not iterable")
-
 QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
-    ("untagged-with-exception-raises", lambda o: o.error == TYPE_ERROR and o.deleted == []),
-    ("untagged-with-notags-raises", lambda o: o.error == TYPE_ERROR and o.deleted == []),
-    ("untagged-raises-even-if-filter-excludes", lambda o: o.error == TYPE_ERROR),
-    (
-        "untagged-raises-after-earlier-deletes",
-        lambda o: (
-            o.error == TYPE_ERROR
-            and o.deleted == ["a", "b"]
-            and [c[0] for c in o.calls if c[0] == "begin_delete"] == ["begin_delete"] * 2
-        ),
-    ),
-    ("untagged-raises-in-dry-run", lambda o: o.error == TYPE_ERROR and o.deleted == ["a"]),
     ("exception-empty-tags-dict", lambda o: o.error is None and o.deleted == ["a"]),
     ("notags-empty-tags-dict", lambda o: o.error is None and o.deleted == ["a"]),
     ("no-filter-includes-untagged", lambda o: o.deleted == ["a", "b", "c"]),
@@ -381,7 +421,6 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
     ),
     ("resource-group-from-env", lambda o: ("begin_delete", "env-rg", "a") in o.calls),
     ("delete-error-not-called-in-dry-run", lambda o: o.error is None and o.deleted == ["a"]),
-    ("missing-ip-configuration-attribute", lambda o: o.error is not None),
     ("missing-ip-configuration-not-reached-when-filtered", lambda o: o.error is None),
     ("tag-value-none-does-not-match-empty-string-filter", lambda o: o.deleted == []),
     ("tag-value-none-does-not-match-empty-string-exception", lambda o: o.deleted == ["a"]),
@@ -418,17 +457,22 @@ def test_quirk_is_preserved(
     assert check(new)
 
 
-def test_list_is_subscription_wide_and_delete_uses_configured_group(
+def test_oracle_lists_subscription_wide_new_code_lists_the_configured_group(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """BUG-074: main lists the subscription, the fix lists only the configured group."""
     case = _find("delete")
-    for build in (_legacy, _new):
-        azure = _setup(case, monkeypatch, caplog, capsys)
-        build(case).delete()
-        assert ("list_all",) in azure.calls
-        assert ("begin_delete", "rg-test", "a") in azure.calls
+    azure = _setup(case, monkeypatch, caplog, capsys)
+    _legacy(case).delete()
+    assert ("list_all",) in azure.calls
+    assert ("begin_delete", "rg-test", "a") in azure.calls
+    azure = _setup(case, monkeypatch, caplog, capsys)
+    _new(case).delete()
+    assert ("list", "rg-test") in azure.calls
+    assert ("list_all",) not in azure.calls
+    assert ("begin_delete", "rg-test", "a") in azure.calls
 
 
 def test_repeated_delete_accumulates_like_main(
@@ -446,7 +490,7 @@ def test_repeated_delete_accumulates_like_main(
         cleaner.delete()
         results.append(
             (
-                azure.calls,
+                _scoped(azure.calls, case) if build is _legacy else azure.calls,
                 cleaner.get_deleted,
                 [(r.levelno, r.getMessage()) for r in caplog.records],
             )

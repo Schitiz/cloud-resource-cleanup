@@ -155,8 +155,8 @@ def test_ip_real_and_dry_run(
     assert _lines(caplog)[1:] == [
         "ACTION deleted cloud=azure resource=ip region=rg id=a name=a",
         "REGION cloud=azure resource=ip region=rg scanned=3 selected=1 seconds=S",
-        "SKIPPED cloud=azure resource=ip reason=attached count=1",
         "SKIPPED cloud=azure resource=ip reason=filter_tags count=1",
+        "SKIPPED cloud=azure resource=ip reason=in_use count=1",
         "RESULT cloud=azure resource=ip operation=delete dry_run=false selected=1 done=1 "
         "failed=0 skipped=2 regions=1 regions_skipped=0 duration_s=2",
     ]
