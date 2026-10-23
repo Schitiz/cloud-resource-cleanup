@@ -33,6 +33,23 @@ UTC = datetime.UTC
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=UTC)
 PROJECT = "proj-1"
 BUGS = {"BUG-358"}
+ACTION_CALLS = ("instances.delete.execute", "instances.stop.execute")
+TS_ERR = "time data {!r} does not match format '%Y-%m-%dT%H:%M:%S.%f%z'"
+NO_ATTR = "'types.SimpleNamespace' object has no attribute {!r}"
+FIX_186: dict[str, list[str]] = {
+    "age-max-age-invalid-raises": [],
+    "age-timestamp-unparseable": [],
+    "age-timestamp-without-fraction": [],
+    "age-timestamp-none-raises": [],
+    "age-error-after-earlier-delete": ["ok"],
+    "age-error-after-earlier-zone": ["ok"],
+    "instance-without-labels-attribute": [],
+    "instance-without-status-attribute": [],
+    "instances-list-permission-denied": [],
+    "instances-list-error-after-first-zone": ["a"],
+    "instances-iteration-error": ["a", "b"],
+    "instances-iteration-error-stop": ["a"],
+}
 TWO = 2
 THREE = 3
 DAY = {"days": 1}
@@ -411,6 +428,8 @@ class FakeRequest:
             if self.gcp.case.zones_response is not None:
                 return self.gcp.case.zones_response
             return {"items": [{"name": zone} for zone in self.gcp.case.zones]}
+        if self.label == "zoneOperations.get":
+            return {"status": "DONE"}
         error = self.gcp.case.action_errors.get((self.args[1], self.args[2]))
         if error is not None:
             raise error
@@ -424,6 +443,15 @@ class FakeZones:
     def list(self, *, project: str) -> FakeRequest:
         self.gcp.calls.append(("zones.list", project))
         return FakeRequest(self.gcp, "zones.list", project)
+
+
+class FakeZoneOperations:
+    def __init__(self, gcp: "FakeGcp") -> None:
+        self.gcp = gcp
+
+    def get(self, *, project: str, zone: str, operation: str) -> FakeRequest:
+        self.gcp.calls.append(("zoneOperations.get", project, zone, operation))
+        return FakeRequest(self.gcp, "zoneOperations.get", project, zone, operation)
 
 
 class FakeInstancesResource:
@@ -463,6 +491,10 @@ class FakeService:
     def instances(self) -> FakeInstancesResource:
         self.gcp.calls.append(("instances()",))
         return FakeInstancesResource(self.gcp)
+
+    def zoneOperations(self) -> FakeZoneOperations:
+        self.gcp.calls.append(("zoneOperations()",))
+        return FakeZoneOperations(self.gcp)
 
 
 class FakeInstancesClient:
@@ -615,6 +647,10 @@ def test_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run(_new, case, monkeypatch, caplog, capsys)
+    bugs = _bugs(case, old)
+    if bugs:
+        _assert_fixed(case, old, new, bugs)
+        return
     assert new.calls == old.calls
     assert new.error == old.error
     assert new.deleted == old.deleted
@@ -682,7 +718,13 @@ def test_cleaner_protocol_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run_cleaner(case, monkeypatch, caplog, capsys)
-    actions = ("instances.delete.execute", "instances.stop.execute")
+    actions = ACTION_CALLS
+    if case.id in FIX_186:
+        assert old.error is not None
+        assert new.error is None
+        assert _done(new) == _fixed_done(case)
+        assert _only(new.calls, *actions) == _only(old.calls, *actions)
+        return
     if new.error is not None:
         # main acts while listing; plan() lists everything first, so an error raised while
         # listing or filtering stops the Cleaner path before any delete or stop.
@@ -705,6 +747,128 @@ def test_cleaner_protocol_matches_main(
 
 def _listed(case: Case) -> int:
     return sum(len(v) if isinstance(v, list) else TWO for v in case.zones.values())
+
+
+def _with_waits(calls: Sequence[tuple[Any, ...]], case: Case) -> list[tuple[Any, ...]]:
+    """BUG-185: `calls` of main with the zone operation poll after every action that succeeded."""
+    out: list[tuple[Any, ...]] = []
+    for call in calls:
+        out.append(call)
+        if call[0] in ACTION_CALLS and (call[2], call[3]) not in case.action_errors:
+            out += [
+                ("zoneOperations()",),
+                ("zoneOperations.get", call[1], call[2], "operation"),
+                ("zoneOperations.get.execute", call[1], call[2], "operation"),
+            ]
+    return out
+
+
+def _bugs(case: Case, old: Outcome) -> list[str]:
+    found = []
+    if _with_waits(old.calls, case) != old.calls:
+        found.append("BUG-185")
+    if case.id in FIX_186:
+        found.append("BUG-186")
+    return found
+
+
+def _fixed_done(case: Case) -> list[str]:
+    return FIX_186[case.id]
+
+
+def _assert_fixed(case: Case, old: Outcome, new: Outcome, bugs: list[str]) -> None:
+    """A case marked with a fixed bug: it differs from main and has exactly the new outcome."""
+    assert (new.calls, new.error) != (old.calls, old.error)
+    assert new.calls == _with_waits(old.calls, case)
+    assert new.stdout == old.stdout
+    if "BUG-186" not in bugs:
+        assert new.error == old.error
+        assert (new.deleted, new.stopped, new.count) == (old.deleted, old.stopped, old.count)
+        assert new.logs == expected_logs(old.logs, BUGS, RULES)
+        return
+    assert old.error is not None
+    assert new.error is None
+    done = _fixed_done(case)
+    assert _done(new) == done
+    assert new.count == len(done)
+    extra = Counter(new.logs) - Counter(expected_logs(old.logs, BUGS, RULES))
+    assert Counter(expected_logs(old.logs, BUGS, RULES)) - Counter(new.logs) == Counter()
+    assert extra == Counter(EXTRA_LOGS[case.id])
+
+
+def _summary_logs(names: list[str], past: str = "deleted") -> list[tuple[str, int, str]]:
+    verb = past.removesuffix("d")
+    head = [("root", logging.WARNING, f"No GCP instances to {verb}.")] if not names else []
+    return [
+        *head,
+        ("root", logging.INFO, f"number of GCP instances {past}: {len(names)}"),
+        ("root", logging.WARNING, f"List of GCP instances {past}: {names}"),
+    ]
+
+
+def _failure(message: str) -> tuple[str, int, str]:
+    return ("root", logging.ERROR, message)
+
+
+EXTRA_LOGS: dict[str, list[tuple[str, int, str]]] = {
+    "age-max-age-invalid-raises": [
+        _failure(
+            "Error occurred while evaluating instance d: "
+            "malformed node or string on line 1: <ast.Name object at 0x0>"
+        ),
+        *_summary_logs([]),
+    ],
+    "age-timestamp-unparseable": [
+        _failure(f"Error occurred while evaluating instance d: {TS_ERR.format('x')}"),
+        *_summary_logs([]),
+    ],
+    "age-timestamp-without-fraction": [
+        _failure(
+            "Error occurred while evaluating instance d: "
+            + TS_ERR.format("2026-02-20T10:00:00-08:00")
+        ),
+        *_summary_logs([]),
+    ],
+    "age-timestamp-none-raises": [
+        _failure(
+            "Error occurred while evaluating instance d: "
+            "strptime() argument 1 must be str, not None"
+        ),
+        *_summary_logs([]),
+    ],
+    "age-error-after-earlier-delete": [
+        _failure(f"Error occurred while evaluating instance bad: {TS_ERR.format('x')}"),
+        *_summary_logs(["ok"]),
+    ],
+    "age-error-after-earlier-zone": [
+        _failure(f"Error occurred while evaluating instance bad: {TS_ERR.format('x')}"),
+        *_summary_logs(["ok"]),
+    ],
+    "instance-without-labels-attribute": [
+        _failure(f"Error occurred while evaluating instance a: {NO_ATTR.format('labels')}"),
+        *_summary_logs([]),
+    ],
+    "instance-without-status-attribute": [
+        _failure(f"Error occurred while evaluating instance a: {NO_ATTR.format('status')}"),
+        *_summary_logs([]),
+    ],
+    "instances-list-permission-denied": [
+        _failure("Zone z: failed listing GCP instances: 403 denied"),
+        *_summary_logs([]),
+    ],
+    "instances-list-error-after-first-zone": [
+        _failure("Zone z2: failed listing GCP instances: 403 denied"),
+        *_summary_logs(["a"]),
+    ],
+    "instances-iteration-error": [
+        _failure("Zone z: failed listing GCP instances: 503 unreachable"),
+        *_summary_logs(["a", "b"]),
+    ],
+    "instances-iteration-error-stop": [
+        _failure("Zone z: failed listing GCP instances: 503 unreachable"),
+        *_summary_logs(["a"], "stopped"),
+    ],
+}
 
 
 def _find(case_id: str) -> Case:
@@ -824,7 +988,11 @@ def test_quirk_is_preserved(
     # against the frozen crc_service oracle. Fixed cases assert the new outcome only.
     if case_id not in BUG_004_FIXED:
         assert check(old), "oracle no longer shows the quirk"
-    assert check(new)
+    if case_id in FIX_186:
+        assert new.error is None
+        assert _done(new) == _fixed_done(case)
+    else:
+        assert check(new)
 
 
 def test_service_is_closed_before_instances_are_listed_like_main(
@@ -842,7 +1010,7 @@ def test_service_is_closed_before_instances_are_listed_like_main(
         "instances.list", names.index("instances.list") + 1
     )
     assert names.count("close") == 1
-    assert new.calls == old.calls
+    assert new.calls == _with_waits(old.calls, case)
 
 
 @pytest.mark.parametrize("first", ["delete", "stop"])
@@ -864,7 +1032,9 @@ def test_second_call_accumulates_like_main(
         results.append(
             (gcp.calls, list(vm.get_deleted), list(vm.get_stopped), vm.delete_count, _logs(caplog))
         )
-    assert (*results[0][:-1], expected_logs(results[0][-1], BUGS, RULES)) == results[1]
+    expected_calls = _with_waits(results[0][0], case)
+    expected_logs_ = expected_logs(results[0][-1], BUGS, RULES)
+    assert (expected_calls, *results[0][1:-1], expected_logs_) == results[1]
 
 
 def test_class_attributes_match_main() -> None:
@@ -903,7 +1073,7 @@ def test_bug_358_label_dump_is_debug_not_info(
     assert old.logs != new.logs
     assert new.logs == expected_logs(old.logs, BUGS, RULES)
     assert [m for _, _, m in new.logs] == [m for _, _, m in old.logs]
-    assert new.calls == old.calls
+    assert new.calls == _with_waits(old.calls, case)
     assert new.stdout == old.stdout
     info = [m for _, level, m in new.logs if level == logging.INFO]
     assert not [m for m in info if m.startswith(("{", "namespace("))]
