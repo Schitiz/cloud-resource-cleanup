@@ -57,6 +57,7 @@ class AzureIpCleaner:
         self._filter_tags = filter_tags
         self._exception_tags = exception_tags
         self._notags = notags
+        self._started = 0.0
 
     def supports(self, operation: Operation) -> bool:
         return operation is Operation.DELETE
@@ -65,7 +66,7 @@ class AzureIpCleaner:
         """List the public IPs of the configured group and filter. Makes no mutating call."""
         candidates: list[Candidate] = []
         skipped: list[Skipped] = []
-        started = _logger.started()
+        self._started = started = _logger.started()
         scanned = 0
         for ip in self.list_ips():
             scanned += 1
@@ -74,19 +75,26 @@ class AzureIpCleaner:
                 candidates.append(candidate)
             else:
                 skipped.append(Skipped(id=getattr(ip, "name", ""), reason=reason))
-        _logger.region_done(self._resource_group, scanned, len(candidates), started)
         if context.dry_run:
+            _logger.region_done(self._resource_group, scanned, len(candidates), started)
             log_would_delete(self._resource_group, candidates)
             log_delete_summary("IPs", [c.id for c in candidates], dry_run=True)
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
 
     def apply(self, plan: Plan, context: RunContext) -> Result:
-        """Delete the planned addresses in plan order (nothing in a dry run)."""
+        """Delete the planned addresses in plan order (nothing in a dry run).
+
+        A real run logs its REGION line here, after the deletes, as the adapter did: an error
+        from a delete leaves it out.
+        """
         deleted: list[str] = []
         for candidate in plan.candidates:
             if not context.dry_run:
                 self.delete_candidate(candidate)
             deleted.append(candidate.id)
+        if not context.dry_run:
+            scanned = len(plan.candidates) + len(plan.skipped)
+            _logger.region_done(self._resource_group, scanned, len(plan.candidates), self._started)
         log_delete_summary("IPs", deleted, dry_run=context.dry_run)
         return Result(succeeded=tuple(deleted))
 
