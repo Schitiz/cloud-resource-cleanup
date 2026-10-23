@@ -4,7 +4,7 @@
 
 OCI cleaners (oci SDK). They delete or stop leftover instances and volumes across regions.
 
-Every module is strict-checked and none is in the legacy ratchet. `_base.py` reads the private key from `os.environ`, an owner-approved ARCH-003 allowlist entry (`tests/archtest/bans.py`), so the key is read when an OCI cleaner is built. Any change must follow `ARCHITECTURE.md` and keep `make check` green.
+Every module is strict-checked. `_base.py` reads the private key from `os.environ`, an owner-approved ARCH-003 allowlist entry (`tests/archtest/bans.py`), so the key is read when an OCI cleaner is built. Any change must follow `ARCHITECTURE.md` and keep `make check` green.
 
 Modules:
 
@@ -46,5 +46,5 @@ The names below are synced with this README by ARCH-002. The disk, vm and spot_v
    age from `crc.core.age`, SDK calls behind a Protocol in a `api.py` or `client.py` module, injected through the
    constructor.
 3. `plan()` of `DiskCleaner` (`disk/`) and `VmCleaner` (`vm/`) stays read-only: every mutating call belongs in `apply()` / `remove()`.
-4. No module of this package is in the legacy ratchet (`pyproject.toml` lists only five hash-locked safety test files); never add one. Update this README and its symbol list with any public change.
+4. Update this README and its symbol list with any public change.
 5. Record every new bug or quirk in `docs/refactor/BUGS.md` with its `main` file:line.

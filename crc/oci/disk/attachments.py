@@ -56,7 +56,7 @@ def attached_boot_volume_ids(api: VolumeApi, region: str, keep_all: KeepAll) -> 
 
 
 def note_dry_run(found: Sequence[Candidate], partial: list[str]) -> None:
-    """The ACTION lines of a dry run, as the legacy `Disk.delete()` logged them while it walked
+    """The ACTION lines of a dry run, logged per region while `plan()` walks
     the region (the engine never calls `apply()` in a dry run); `partial` collects the names."""
     for candidate in found:
         partial.append(candidate.name)
