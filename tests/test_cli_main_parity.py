@@ -159,6 +159,19 @@ def norm(value: Any) -> Any:
     return value
 
 
+def positional(args: Any, kwargs: Any, index: int, name: str) -> Any:
+    """The constructor argument at `index`, else the keyword `name`."""
+    return args[index] if len(args) > index else kwargs.get(name)
+
+
+def check_spot_target(cloud: Any, project_id: Any, resource_group: Any) -> None:
+    """The real method raises before it builds the adapter; the routes gate likewise."""
+    if cloud == "azure" and not resource_group:
+        raise ValueError("resource_group is required for Azure Spot VM cleanup")
+    if cloud == "gcp" and not project_id:
+        raise ValueError("project_id is required for GCP Spot VM cleanup")
+
+
 class Fakes:
     """The recording fakes of one run; every constructor and call lands in `events`."""
 
@@ -188,12 +201,8 @@ class Fakes:
         class FakeCRC:
             def __init__(self, *args: Any, **kwargs: Any) -> None:
                 self.cloud = args[0] if args else kwargs.get("cloud")
-                resource_group_index = 6
-                self.resource_group = (
-                    args[resource_group_index]
-                    if len(args) > resource_group_index
-                    else kwargs.get("resource_group")
-                )
+                self.project_id = positional(args, kwargs, 5, "project_id")
+                self.resource_group = positional(args, kwargs, 6, "resource_group")
                 self.fake_tag = f"CRC#{next(fakes.counter)}"
                 fakes.events.append(("CRC", norm(list(args)), norm(kwargs)))
 
@@ -202,15 +211,8 @@ class Fakes:
                     raise AttributeError(name)
 
                 def record(*args: Any, **kwargs: Any) -> Any:
-                    spot_without_group = (
-                        name == "delete_spot_instances"
-                        and self.cloud == "azure"
-                        and not self.resource_group
-                    )
-                    if spot_without_group:
-                        # The real method raises before it builds the adapter (the Azure route
-                        # gate does the same before the cleaner), so no adapter event exists.
-                        raise ValueError("resource_group is required for Azure Spot VM cleanup")
+                    if name == "delete_spot_instances":
+                        check_spot_target(self.cloud, self.project_id, self.resource_group)
                     fakes.events.append((f"crc.{name}", self.cloud, norm(list(args)), norm(kwargs)))
                     if fakes.case.crc_fail == name:
                         raise RuntimeError(f"{name} failed")

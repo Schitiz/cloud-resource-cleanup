@@ -1,7 +1,6 @@
-"""OCI route table: `disk` and `vm` (delete and stop) run through `crc.core.engine`.
+"""OCI route table: `disk`, `vm` (delete and stop) and `spot_instances` run through the engine.
 
-`spot_instances` stays on the legacy handler: under `--cloud all` it only warns and returns
-(SAF-037), and `Route.precheck` can raise but cannot skip a pair (see `crc/cli/README.md`).
+`spot_instances` skips the pair under `--cloud all` (SAF-037).
 """
 
 from typing import Any
@@ -10,7 +9,7 @@ import crc.oci.disk
 import crc.oci.spot_vm
 import crc.oci.vm  # noqa: F401
 from crc.cli.inputs import Options
-from crc.cli.routes import NotifyMode, Route
+from crc.cli.routes import NotifyMode, Route, skips
 
 
 def _disk(options: Options) -> dict[str, Any]:
@@ -43,4 +42,5 @@ def _vm(options: Options) -> dict[str, Any]:
 ROUTES: dict[str, Route] = {
     "disk": Route(_disk, notify=NotifyMode.REPORT_THEN_RERAISE),
     "vm": Route(_vm),
+    "spot_instances": Route(_spot_instances, skip=skips.explicit_cloud_spot),
 }

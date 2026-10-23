@@ -1,17 +1,16 @@
-"""GCP route table: the kinds run through `crc.core.engine`.
+"""GCP route table: ip, disk, vm and spot_instances run through `crc.core.engine`.
 
-`spot_instances` is not routed: the legacy handler warns and skips the pair under `--cloud all`
-(GCP and OCI spot VMs need an explicit cloud), and a `Route` can neither skip a pair nor run
-between the pair check and the cleaner, so a route would delete under `--cloud all`.
+`spot_instances` skips the pair under `--cloud all` (SAF-037) and needs a project.
 """
 
 from typing import Any
 
 import crc.gcp.disk_cleaner
 import crc.gcp.ip_cleaner
+import crc.gcp.spot_vm
 import crc.gcp.vm_cleaner  # noqa: F401
-from crc.cli.inputs import Options
-from crc.cli.routes import NotifyMode, Route
+from crc.cli.inputs import Options, Targets
+from crc.cli.routes import NotifyMode, Route, skips
 
 
 def _ip(options: Options) -> dict[str, Any]:
@@ -53,8 +52,26 @@ def _vm(options: Options) -> dict[str, Any]:
     return values
 
 
+def _spot(options: Options) -> dict[str, Any]:
+    return {
+        "project_id": options.project_id,
+        "filter_tags": options.filter_tags,
+        "exception_tags": options.exception_tags,
+        "notags": options.notags,
+        "age": options.age,
+        "custom_age_tag_key": options.custom_age_tag_key,
+    }
+
+
+def _spot_project(crc: Any, options: Options, targets: Targets) -> None:
+    """`delete_spot_instances` raised before it built the adapter when the project was empty."""
+    if not options.project_id:
+        raise ValueError("project_id is required for GCP Spot VM cleanup")
+
+
 ROUTES: dict[str, Route] = {
     "ip": Route(_ip),
     "disk": Route(_disk, notify=NotifyMode.REPORT_THEN_RERAISE),
     "vm": Route(_vm),
+    "spot_instances": Route(_spot, skip=skips.explicit_cloud_spot, precheck=_spot_project),
 }

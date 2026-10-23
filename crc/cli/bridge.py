@@ -121,6 +121,8 @@ def run_routed(
     crc: Any, cloud: Any, kind: Any, options: Options, targets: Targets, route: Route
 ) -> None:
     """Run one routed pair through the engine: precheck, plan, apply unless dry run, notify."""
+    if route.skip is not None and route.skip(str(cloud), options, targets):
+        return
     if route.precheck is not None:
         route.precheck(crc, options, targets)
     init_run_logging()

@@ -55,7 +55,7 @@ reused. `tests/archtest/safety_lock.json` maps IDs to the tests that lock them.
   so a listing error in a later region stops the pair before any mutation (fewer deletes,
   never more); the legacy adapter loop deleted region by region. Every AWS kind runs this way, and so
   does every Azure kind (BUG-392), where an error while paging the listing now stops the pair before
-  any delete, the GCP kinds ip, disk and vm (BUG-400), and the OCI kinds disk and vm (BUG-408).
+  any delete, the GCP kinds ip, disk and vm (BUG-400), the OCI kinds disk and vm (BUG-408), and GCP and OCI spot_instances (BUG-409).
 
 ---
 

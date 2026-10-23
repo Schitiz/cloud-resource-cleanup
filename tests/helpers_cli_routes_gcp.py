@@ -6,6 +6,11 @@ Each value is `(method, keys, stop)` as `RoutedCall` takes them: `keys` are the
 """
 
 GCP_ROUTED_CALLS: dict[tuple[str, str], tuple[str, tuple[str | None, ...], str | None]] = {
+    ("gcp", "spot_instances"): (
+        "delete_spot_instances",
+        ("filter_tags", "exception_tags", "age", "custom_age_tag_key"),
+        None,
+    ),
     ("gcp", "ip"): ("delete_ip", (None, None, "name_regex", "exception_regex"), None),
     ("gcp", "vm"): (
         "delete_vm",

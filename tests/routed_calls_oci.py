@@ -2,10 +2,15 @@
 
 One entry per kind: the oracle method, the `RunContext.options` keys in oracle argument order
 (`None` marks an argument the OCI adapter never read) and the oracle method of a stop run.
-`spot_instances` is not listed: it keeps the legacy handler (see `docs/archive/reviews/ENG-OCI.md`).
+`spot_instances` is routed in ENG-CLEAN; the oracle skips it under `--cloud all` as the route does.
 """
 
 CALLS: dict[str, tuple[str, tuple[str | None, ...], str | None]] = {
+    "spot_instances": (
+        "delete_spot_instances",
+        ("filter_tags", "exception_tags", "age", "custom_age_tag_key"),
+        None,
+    ),
     "disk": (
         "delete_disks",
         (

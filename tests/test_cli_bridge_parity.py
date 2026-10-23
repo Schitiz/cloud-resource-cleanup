@@ -186,8 +186,8 @@ def test_route_tables_route_the_aws_kinds() -> None:
             "vpc",
         ],
         "azure": ["disk", "ip", "nic", "spot_instances", "vm"],
-        "gcp": ["disk", "ip", "vm"],
-        "oci": ["disk", "vm"],
+        "gcp": ["disk", "ip", "spot_instances", "vm"],
+        "oci": ["disk", "spot_instances", "vm"],
     }
     assert bridge.is_routed_kind("keypair")
     assert bridge.is_routed_kind("disk")

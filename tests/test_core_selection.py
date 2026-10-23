@@ -108,7 +108,9 @@ def run_crc_main(
         ]
     )
     args.update(
-        resource_group="rg", cloud=cloud, resource=resource, operation_type=operation, dry_run=True
+        project_id="proj",
+        resource_group="rg",
+        cloud=cloud, resource=resource, operation_type=operation, dry_run=True
     )
     args.update(options)
     monkeypatch.setattr(cli_main, "get_argparser", lambda: args)

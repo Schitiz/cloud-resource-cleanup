@@ -309,6 +309,6 @@ def test_ip_dry_run_logs_each_region_then_its_actions_as_legacy(
     assert kinds.index("ACTION") < len(kinds) - 1 - kinds[::-1].index("REGION")
 
 
-def test_route_table_routes_the_kinds_and_leaves_spot_instances_legacy() -> None:
-    assert sorted(bridge.TABLES["gcp"]) == ["disk", "ip", "vm"]
-    assert bridge.route_for("gcp", "spot_instances") is None
+def test_route_table_routes_every_kind() -> None:
+    assert sorted(bridge.TABLES["gcp"]) == ["disk", "ip", "spot_instances", "vm"]
+    assert bridge.route_for("gcp", "spot_instances") is not None

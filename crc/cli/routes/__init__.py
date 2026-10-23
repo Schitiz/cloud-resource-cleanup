@@ -20,12 +20,14 @@ __all__ = [
     "OptionsBuilder",
     "Precheck",
     "Route",
+    "Skip",
 ]
 
 OptionsBuilder = Callable[[Options], dict[str, Any]]
 Precheck = Callable[[Any, Options, Targets], None]
 ExtraNotifiers = Callable[[Any], Sequence[Notifier]]
 AfterRun = Callable[[Any, Options, Sequence[RunOutcome]], None]
+Skip = Callable[[str, Options, Targets], bool]
 
 
 class NotifyMode(enum.Enum):
@@ -51,7 +53,10 @@ class Route:
     runs between RUN START and the cleaner, for gates that the legacy handler raised itself (the
     AWS disk opt-in). `extra_notifiers` builds notifiers that run after Slack and Influx (a
     message the report does not carry); `after` runs after the notifiers with the outcomes (the
-    console line of `snapshot`).
+    console line of `snapshot`). `skip` runs first, between RUN START and the precheck: it returns
+    True after logging its warning when the pair must not run (SAF-037: GCP and OCI
+    `spot_instances` under `--cloud all`; the kinds a cloud does not have), and then nothing is
+    called, nothing is reported and no cleaner is built.
     """
 
     options: OptionsBuilder
@@ -59,3 +64,4 @@ class Route:
     precheck: Precheck | None = None
     extra_notifiers: ExtraNotifiers | None = None
     after: AfterRun | None = None
+    skip: Skip | None = None
