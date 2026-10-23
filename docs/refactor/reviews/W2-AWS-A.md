@@ -36,3 +36,50 @@ Patch targets: tests patch only `boto3.client`, `boto3.session.Session`, `crc.se
 ## New bugs
 
 None found. Observation only, not changed: `kms/cleaner.py` `plan_keys` catches `BaseException` (also `KeyboardInterrupt`), inherited from the bare `except:` of `main` (already BUG-055 area).
+
+## Round 1 (Argon)
+
+Scope reviewed: `git diff cea0a8a..HEAD` (`crc/aws/_common.py`, `crc/aws/disk/{cleaner,client,guard,README}`, `crc/aws/elastic_ips/**`, `crc/aws/keypairs/**`, `crc/aws/kms/**`, `crc/aws/snapshot/**`, `crc/aws/README.md`, `docs/refactor/reviews/W2-AWS-A.md`).
+
+### Verification
+
+1. **No behaviour change (hunk-by-hunk comparison against `cea0a8a`):**
+   - `crc/aws/_common.py` (50 lines): extracts exact shared implementations of `ec2_regions` (`get_all_regions("ec2", "us-west-2")`), `skip_region` (`_regionlog.region_skipped` + `log_skipped_region`), `group_by_region` (`setdefault(candidate.region, []).append(candidate)`), and `log_deleted_summary` (identical warning lines for `"keypairs"`, `"Elastic IPs"`, `"KMS"`).
+   - `crc/aws/disk`: `DiskRuntime` moved from `cleaner.py` to `client.py` (re-exported in `cleaner.py` and `crc.aws.disk`); `region_guard` and `log_summary` moved from `DiskCleaner` into `guard.py` with `DiskCleaner.region_guard` and `DiskCleaner.log_summary` delegating unchanged; `apply()` uses `group_by_region(plan.candidates)`. `crc/aws/disk/__init__.py` (`Disk` adapter) is untouched.
+   - `crc/aws/keypairs`, `crc/aws/elastic_ips`, `crc/aws/kms`, `crc/aws/snapshot`: split into subpackages with `client.py` (Protocols, `boto3_client`, `*Runtime`), `cleaner.py` (`*Cleaner` and `@register` factory), `adapter.py` (legacy `Service` subclass alone in its module), plus `kms/settings.py` (`KmsSettings`), `kms/tags.py` (`NotOursError`, `tag_pairs`, `matches_filter`), and `snapshot/protection.py` (`is_tag_list`, `read_tags`, `is_protected`, `used_by_amis`). Every condition, default, SDK call order, exception handler, and log message is identical to `cea0a8a`.
+2. **Import paths and monkeypatch/mock targets:**
+   - Every symbol previously exported by `crc.aws.disk`, `crc.aws.elastic_ips`, `crc.aws.keypairs`, `crc.aws.kms`, and `crc.aws.snapshot` (and `crc.aws.disk.cleaner`) is re-exported at the same import path via `__init__.py` (`__all__`).
+   - Verified all test patch targets (`grep -rn "monkeypatch\.setattr\|mock\.patch" tests`): `boto3.client`, `boto3.session.Session`, `crc.service.init_logging`, `crc.aws._regionlog.clock`, `crc.aws.disk.boto3.client`, and `crc.aws.disk.get_all_regions` all resolve and take effect identically (`boto3.client` is looked up on the `boto3` module at call time in every `client.py`, and `crc/aws/disk/__init__.py` is unchanged).
+3. **Tests and safety locks:**
+   - Zero test files, `tests/legacy/*.txt` oracles, `tests/archtest/**`, or hash-locked safety tests (`safety_lock.json`) were modified.
+4. **Line counts (`wc -l`, all <= 250) and seam quality:**
+   - `_common.py`: 50
+   - `disk/`: `cleaner.py` 217, `client.py` 86, `guard.py` 66 (untouched: `__init__.py` 178, `detach.py` 201, `settings.py` 99, `volumes.py` 214)
+   - `elastic_ips/`: `__init__.py` 20, `adapter.py` 84, `cleaner.py` 178, `client.py` 43
+   - `keypairs/`: `__init__.py` 20, `adapter.py` 75, `cleaner.py` 162, `client.py` 45
+   - `kms/`: `__init__.py` 22, `adapter.py` 90, `cleaner.py` 207, `client.py` 65, `settings.py` 22, `tags.py` 33
+   - `snapshot/`: `__init__.py` 20, `adapter.py` 91, `cleaner.py` 192, `client.py` 52, `protection.py` 61
+5. **READMEs and ARCH-002:**
+   - `crc/aws/README.md`, `crc/aws/disk/README.md`, `crc/aws/elastic_ips/README.md`, `crc/aws/keypairs/README.md`, `crc/aws/kms/README.md`, and `crc/aws/snapshot/README.md` are short and in sync with `ARCH-002`.
+
+### Findings
+
+- **BLOCKING:** none.
+- **NIT (fixed):** `crc/aws/README.md:7` had a double comma (`W2-AWS-A,,`); `crc/aws/kms/README.md:33` and `crc/aws/snapshot/README.md:31` named `apply_region()` instead of `schedule()` and `delete_one()`. Fixed in place.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`:
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed! |
+| `mypy` | Success: no issues found in 268 source files |
+| `lint-imports` | Contracts: 5 kept, 0 broken |
+| `pytest -q` (incl. `ARCH-001..005`, `SAF-LOCK`) | 43010 passed in 154.61s |
+
+- Test count: 43010 passed at base `cea0a8a`, 43010 passed at `HEAD` (unchanged).
+- `make check` runtime: 2m38.5s wall (pytest 2m34.6s).
+
+VERDICT: APPROVE
+

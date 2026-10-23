@@ -28,7 +28,7 @@ Modules:
 ## Safety Invariants
 
 - Authoritative invariants and quirks: `crc/aws/README.md` (Safety Invariants) and `CLEANUP_SAFETY.md`; this package keeps them unchanged (W2-AWS-A split, no behaviour change).
-- `plan()` and what it calls stay read-only (ARCH-005); every mutating call stays in `apply()` / `apply_region()` and never runs in a dry run. Tests: `tests/test_aws_snapshot.py`, `tests/test_aws_snapshot_fix.py`, `tests/test_aws_snapshot_parity.py` (oracle `tests/legacy/aws_snapshot.txt`, never edit it).
+- `plan()` and what it calls stay read-only (ARCH-005); every mutating call stays in `apply()` / `delete_one()` and never runs in a dry run. Tests: `tests/test_aws_snapshot.py`, `tests/test_aws_snapshot_fix.py`, `tests/test_aws_snapshot_parity.py` (oracle `tests/legacy/aws_snapshot.txt`, never edit it).
 
 ## Extension Rules
 
