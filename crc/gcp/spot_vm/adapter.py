@@ -141,7 +141,7 @@ class SpotVM(Service):
 
     def _disk_ok_to_delete(self, service: Any, disk_ref: DiskRef, fallback_zone: str) -> bool:
         return leftover_disks.disk_ok_to_delete(
-            ComputeSpotClient(service), self._settings(), disk_ref, fallback_zone
+            ComputeSpotClient(service), self._settings(), disk_ref, fallback_zone, self._clock
         )
 
     def _delete_disk(self, service: Any, disk_ref: DiskRef, fallback_zone: str) -> None:
@@ -168,6 +168,7 @@ class SpotVM(Service):
                         self.instance_names_to_delete,
                         self.disks_to_delete,
                         dry_run=self.dry_run,
+                        clock=self._clock,
                     )
         finally:
             self._client.close()

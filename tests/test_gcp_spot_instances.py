@@ -30,7 +30,7 @@ def instance(name: str, disks: Sequence[Any] = (), labels: Mapping[str, str] | N
     return types.SimpleNamespace(
         name=name,
         status="RUNNING",
-        labels=dict(labels or {}),
+        labels=dict(labels if labels is not None else {"team": "ci"}),
         scheduling=types.SimpleNamespace(preemptible=True, provisioning_model=""),
         disks=list(disks),
         metadata=None,
