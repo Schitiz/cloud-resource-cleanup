@@ -10,6 +10,7 @@ Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.
 
 - `_base.py` (rung PL-OCI): `Base`: API signing key config from `OCI_PRIVATE_KEY_CONTENT` / `OCI_PRIVATE_KEY_FILE`, identity, compute and block storage clients cached per region, region and availability domain lookup
 - `_logger.py` (rung LOG-OCI): private glue from the OCI cleaners to `crc.core.logger` (REGION, ACTION, skip and failure reports; log text only, no public name)
+- `_common.py`: helpers shared by the OCI cleaners (`group_by_region`)
 - `connectivity.py` (refactored, rung PL-OCI): `CONNECTIVITY_ERRORS` and `log_skipped_region`
 - `disk/`: the disk cleaner subpackage (`DiskCleaner` registered as `oci` / `disk`, the `Disk` adapter and the SDK Protocols); deletes available block and boot volumes not attached; freeform tag any-key filter
 - `spot_vm/`: the Spot VM cleaner subpackage (`SpotVmCleaner`, the `SpotVM` adapter, the SDK Protocols and the leftover volume handling); terminates preemptible instances and deletes leftover volumes; skips OKE and instance pool members
@@ -24,6 +25,7 @@ no __all__.
 - `Base`: OCI signing key config from the OCI_PRIVATE_KEY_CONTENT or OCI_PRIVATE_KEY_FILE environment variable (KeyError when neither is set), identity, compute and block storage clients cached per region, region subscription and availability domain lookup with the connectivity fallback.
 - `log_skipped_region()`: logs the warning that a region (or one call in it) was skipped for a connectivity error; used with CONNECTIVITY_ERRORS, the tuple of the three SDK errors (ConnectTimeout, RequestException, ServiceError) that skip a region.
 - Rung LOG-OCI glue to the core run log (module _logger, log text only): `region_started()` and `region_done()` (the REGION line), `region_skipped()` (counts a region skipped for a connectivity error), `record_action()` (one ACTION line per resource acted on), `record_skip()` (counts a skipped resource by reason) and `record_failure()` (adds to the end-of-run failure list).
+- `group_by_region()`: groups planned candidates by region in first-seen order (module _common, used by the disk and vm cleaners' apply()).
 
 ## Safety Invariants
 
