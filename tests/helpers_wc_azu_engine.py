@@ -3,6 +3,9 @@
 from datetime import datetime
 from typing import Any
 
+import crc.azu.disk
+import crc.azu.ip
+import crc.azu.nic  # noqa: F401
 from crc.core import engine
 from crc.core.cleaner import Operation, RunContext
 from crc.core.registry import Registry, get

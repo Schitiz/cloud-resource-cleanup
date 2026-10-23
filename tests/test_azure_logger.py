@@ -14,7 +14,7 @@ import pytest
 
 from crc.azu import _logger
 from crc.azu.disk import AzureDiskCleaner, Disk, DiskSettings
-from crc.azu.nic import NIC, AzureNicCleaner
+from crc.azu.nic import AzureNicCleaner
 from crc.azu.spot_vm import SpotVM
 from crc.azu.vm import VM, VmCleaner, VmSettings
 from crc.core import logger
@@ -24,7 +24,7 @@ from tests import helpers_azure_ip as hi
 from tests import helpers_azure_nic as hn
 from tests import helpers_azure_spot as hs
 from tests import helpers_azure_vm as hv
-from tests.helpers_wc_azu_engine import engine_run
+from tests.helpers_wc_azu_engine import candidate_ids, engine_run
 
 _PREFIXES = ("RUN START", "REGION", "ACTION", "SKIPPED", "ERRORS", "FAILED", "RESULT")
 ENV = {"env": ["ci"]}
@@ -182,6 +182,11 @@ def test_ip_real_and_dry_run(
     assert "selected=1 done=0" in lines[-1]
 
 
+def _engine_nic(*, dry_run: bool) -> Any:
+    options = {"resource_group": "rg", "name_regex": ["nic"], "exception_regex": None}
+    return engine_run("nic", options, dry_run=dry_run, now=hn.NOW)
+
+
 # ----- nic ----------------------------------------------------------------------------------
 
 
@@ -195,13 +200,12 @@ def test_nic_failure_after_three_attempts_is_listed(
     )
     azure.install(monkeypatch)
     _begin("nic", dry_run=False)
-    adapter = NIC("rg", False, ["nic"], None)
-    adapter.delete()
+    outcome = _engine_nic(dry_run=False)
     logger.finish()
-    assert adapter.get_deleted == ["nic-a"]
+    assert candidate_ids(outcome) == ["nic-a"]
     assert _lines(caplog)[1:] == [
-        "ACTION deleted cloud=azure resource=nic region=rg id=nic-a name=nic-a",
         "REGION cloud=azure resource=nic region=rg scanned=3 selected=2 seconds=S",
+        "ACTION deleted cloud=azure resource=nic region=rg id=nic-a name=nic-a",
         "SKIPPED cloud=azure resource=nic reason=in_use count=1",
         "ERRORS count=1",
         "FAILED cloud=azure resource=nic region=rg id=nic-b error=RuntimeError: busy",
@@ -218,7 +222,7 @@ def test_nic_dry_run_and_no_double_action_from_plan_and_apply(
     azure = hn.FakeAzure([hn.nic("nic-a")])
     azure.install(monkeypatch)
     _begin("nic", dry_run=True)
-    NIC("rg", True, ["nic"], None).delete()
+    _engine_nic(dry_run=True)
     logger.finish()
     assert "ACTION would_delete cloud=azure resource=nic region=rg id=nic-a name=nic-a" in _lines(
         caplog

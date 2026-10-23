@@ -5,9 +5,10 @@ from typing import Any
 
 import pytest
 
-from crc.azu.nic import NIC, AzureNicCleaner
+from crc.azu.nic import AzureNicCleaner
 from crc.core.cleaner import Operation, RunContext
 from tests.helpers_azure_nic import NOW, FakeAzure, nic
+from tests.helpers_wc_azu_engine import candidate_ids, engine_run
 
 SDK_CALLS = ("list", "list_all", "begin_delete", "result")
 
@@ -24,6 +25,17 @@ def _sdk(azure: FakeAzure) -> list[tuple[Any, ...]]:
     return [c for c in azure.calls if c[0] in SDK_CALLS]
 
 
+def _engine(
+    group: str, name_regex: Any, exception_regex: Any = (), *, dry_run: bool
+) -> Any:
+    options = {
+        "resource_group": group,
+        "name_regex": name_regex,
+        "exception_regex": list(exception_regex),
+    }
+    return engine_run("nic", options, dry_run=dry_run, now=NOW)
+
+
 def _in_use(**attrs: Any) -> types.SimpleNamespace:
     return types.SimpleNamespace(name="nic-a", virtual_machine=None, **attrs)
 
@@ -33,8 +45,7 @@ def test_only_the_configured_group_is_listed_and_acted_on_BUG_111_BUG_122(
 ) -> None:
     azure = FakeAzure([nic("nic-a")])
     azure.install(monkeypatch)
-    cleaner = NIC("rg-job", False, ["nic"], [])
-    cleaner.delete()
+    outcome = _engine("rg-job", ["nic"], dry_run=False)
     assert ("list_all",) not in azure.calls
     assert _sdk(azure) == [
         ("list", "rg-job"),
@@ -42,13 +53,13 @@ def test_only_the_configured_group_is_listed_and_acted_on_BUG_111_BUG_122(
         ("begin_delete", "rg-job", "nic-a"),
         ("result", "nic-a"),
     ]
-    assert cleaner.get_deleted == ["nic-a"]
+    assert candidate_ids(outcome) == ["nic-a"]
 
 
 def test_group_comes_from_env_when_not_given_BUG_111(monkeypatch: pytest.MonkeyPatch) -> None:
     azure = FakeAzure([nic("nic-a")])
     azure.install(monkeypatch)
-    NIC("", True, ["nic"], []).delete()
+    _engine("", ["nic"], dry_run=True)
     assert ("list", "env-rg") in azure.calls
 
 
@@ -115,13 +126,13 @@ def test_invalid_patterns_raise_value_error_before_any_sdk_call_BUG_113(
     assert azure.calls == []
 
 
-def test_adapter_invalid_pattern_raises_before_any_sdk_call_BUG_113(
+def test_engine_invalid_pattern_raises_before_any_sdk_call_BUG_113(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     azure = FakeAzure([nic("nic-a")])
     azure.install(monkeypatch)
     with pytest.raises(ValueError, match="Invalid name_regex pattern"):
-        NIC("rg", False, ["nic("], []).delete()
+        _engine("rg", ["nic("], dry_run=False)
     assert _sdk(azure) == []
 
 
@@ -162,10 +173,8 @@ def test_vm_attached_nic_is_in_use_and_missing_attributes_default_to_free_BUG_11
     assert [c.id for c in plan.candidates] == ["nic-a"]
 
 
-def test_adapter_keeps_nic_in_use_BUG_114(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_engine_keeps_nic_in_use_BUG_114(monkeypatch: pytest.MonkeyPatch) -> None:
     azure = FakeAzure([_in_use(private_endpoint={"id": "pe"})])
     azure.install(monkeypatch)
-    cleaner = NIC("rg", False, ["nic"], [])
-    cleaner.delete()
-    assert cleaner.get_deleted == []
+    assert candidate_ids(_engine("rg", ["nic"], dry_run=False)) == []
     assert [c for c in azure.calls if c[0] == "begin_delete"] == []
