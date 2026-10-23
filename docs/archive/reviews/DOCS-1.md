@@ -58,7 +58,32 @@ Files this lane may not edit still point at moved docs. Mapping: `docs/refactor/
 `.cursor/skills/crc-maintain/` (`BEHAVIOUR_FIX.md` -> `fix-bug.md`, `REVIEW_CHECKLIST.md` -> `review.md`).
 Most package READMEs only need the "see `docs/refactor/PLAN.md`" lines removed (rung history).
 
-
+- `crc/aws/README.md:7,9,51,71` (`docs/refactor/PLAN.md`, `FILTER_VARIANTS.md`, `.cursor/skills/crc-python-refactor/BEHAVIOUR_FIX.md`)
+- `crc/aws/disk/README.md:59` (`docs/refactor/PLAN.md`)
+- `crc/aws/elastic_ips/README.md:30` (`docs/refactor/PLAN.md`)
+- `crc/aws/keypairs/README.md:27` (`docs/refactor/PLAN.md`)
+- `crc/aws/kms/README.md:38` (`docs/refactor/PLAN.md`)
+- `crc/aws/snapshot/README.md:35` (`docs/refactor/PLAN.md`)
+- `crc/aws/vm/README.md:55` (`docs/refactor/PLAN.md`)
+- `crc/aws/vpc/README.md:42` (`docs/refactor/PLAN.md`)
+- `crc/azu/README.md:7,9,37,51` (`docs/refactor/PLAN.md`, `FILTER_VARIANTS.md`, `.cursor/skills/crc-python-refactor/BEHAVIOUR_FIX.md`)
+- `crc/azu/disk/README.md:33` (`docs/refactor/PLAN.md`)
+- `crc/azu/ip/README.md:29` (`docs/refactor/PLAN.md`)
+- `crc/azu/nic/README.md:32` (`docs/refactor/PLAN.md`)
+- `crc/azu/vm/README.md:46` (`FILTER_VARIANTS.md`)
+- `crc/core/README.md:10,17,141,159,167` (`docs/refactor/FILTER_VARIANTS.md`, `PLAN.md`, `LOGGING.md`, `reviews/FIX-CORE-AGE.md`)
+- `crc/core/logger.py:3` (`docs/refactor/LOGGING.md`)
+- `crc/core/policy.py:4` (`docs/refactor/FILTER_VARIANTS.md`)
+- `crc/gcp/README.md:7,9,56,69,74` (`docs/refactor/PLAN.md`, `FILTER_VARIANTS.md`, `LOGGING.md`, `.cursor/skills/crc-python-refactor/BEHAVIOUR_FIX.md`)
+- `crc/gcp/spot_vm/README.md:5,58` (`docs/refactor/reviews/FIX-GCP-SPOT.md`, `docs/refactor/PLAN.md`)
+- `crc/oci/README.md:7,9,33,39,45` (`docs/refactor/PLAN.md`, `FILTER_VARIANTS.md`, `LOGGING.md`, `.cursor/skills/crc-python-refactor/BEHAVIOUR_FIX.md`)
+- `crc/oci/disk/README.md:42,47` (`docs/refactor/FILTER_VARIANTS.md`, `PLAN.md`)
+- `crc/oci/spot_vm/README.md:71` (`docs/refactor/PLAN.md`)
+- `crc/oci/vm/README.md:40,50` (`docs/refactor/FILTER_VARIANTS.md`, `PLAN.md`)
+- `tests/README.md:19,65` (`docs/refactor/LOGGING.md`, `.cursor/skills/crc-python-refactor/SKILL.md`)
+- `tests/legacy/README.md:65` (`.cursor/skills/crc-python-refactor/BEHAVIOUR_FIX.md`)
+- `tests/helpers_log_fix.py:6`, `tests/log_fix_aws_compute.py:6`, `tests/log_fix_azure.py:4`, `tests/log_fix_gcp.py:5`, `tests/log_fix_oci.py:4` (`docs/refactor/LOGGING.md`)
+- `tests/test_aws_kms_parity.py:697`, `tests/test_gcp_ip_parity.py:37` (`BEHAVIOUR_FIX.md`)
 - `docs/refactor/BUGS.md` (4 rows cite archived reviews or PLAN rung names; must stay as is, per owner).
 
 ## New bugs
@@ -69,13 +94,61 @@ No code bugs fixed. Doc lies and stale wording noticed (not fixed; owners of tho
 - `crc/core/engine.py:35-36` comment calls `vpc` label "a placeholder for the wiring rung".
 - `crc/core/selection.py:1-5` says "the wiring rung only calls `build_selection()`"; production selection is
   `crc/cli/dispatch.py` `validate_targets`, so `selection.py` is not what `main()` uses.
+- `crc/aws/keypairs/__init__.py:6` docstring references rung name `ENG-0`.
 - `crc/cli/routes/azu.py:1` says "Empty until its lane migrates them".
 - `crc/cli/README.md` Extension Rules 1 ("only in a rung that allows a new flag") and the rung / FIX-* wording
   throughout its Safety Invariants.
 - `tests/archtest/bug_refs.py:15` remediation cites "AGENTS.md hard rule 11" and "main-branch file:line";
   the rule is now `AGENTS.md` rule 5 and locations are current `file:line`.
+- `tests/archtest/frozen_inputs.py:13-14` remediation cites "AGENTS.md hard rules 5 and 7"; in `AGENTS.md`
+  `tests/legacy/*.txt` is now rule 3 and `requirements*.txt` is rule 7.
 - `docs/refactor/bugs/README.md` and `docs/refactor/bugs/pending/README.md` still describe refactor lanes and
   behaviour-fix rungs (files kept as is, per the contract).
 - Parity tests against `tests/legacy/crc_main.txt` make a new optional flag fail
   (`tests/test_cli_args_parity.py` `DEFAULTS_EXPECTED` and the oracle comparison); `AGENTS.md` tells agents to
   extend the expected tables, which the engine/test lanes should confirm is workable.
+
+## Round 1 (Argon)
+
+### Findings
+
+- The rewrite of `AGENTS.md`, `ARCHITECTURE.md`, `CLEANUP_SAFETY.md`, `.cursor/rules/*.mdc`,
+  `.cursor/skills/crc-maintain/*`, `docs/logging.md`, `docs/README.md`, `docs/refactor/README.md`,
+  `docs/archive/README.md`, `.github/CODEOWNERS`, `.github/PULL_REQUEST_TEMPLATE.md` and
+  `.github/ISSUE_TEMPLATE/*.md`, plus the new `ARCH-010` and `ARCH-011` checks and the `ARCH-002`
+  relaxation, meets the DOCS-1 contract and the guidance in `AGENT-NATIVE-AUDIT.md` (sections 2,
+  3.1, 3.5, 3.6 and 4).
+- Two minor cleanups applied in Round 1:
+  1. Replaced the remaining prose phrase "refactor history" in `AGENTS.md:43`, `docs/README.md:12`
+     and `docs/refactor/README.md:5` with "Archived history" / "Historical documents" so
+     `grep -rni "rung\|refactor\|R0a\|R4"` on active docs matches only the preserved
+     `docs/refactor/BUGS.md` and `docs/refactor/bugs/` paths.
+  2. Expanded `## Links to fix` and `## New bugs` above with the exact `file:line` inventory across
+     `crc/**/README.md`, `crc/core/*.py` and `tests/**` for the follow-up docs lane.
+
+### Gates and checks
+
+1. **New-agent onboarding & code spot-checks (12 verified):** Reading `AGENTS.md` (105 lines) plus
+   at most two linked files (`ARCHITECTURE.md` or `.cursor/skills/crc-maintain/fix-bug.md` +
+   `CLEANUP_SAFETY.md`) gives complete, accurate instructions to fix a bug, add/change a cleaner on
+   the engine path, change a CLI flag under the `cloud-resource-cleanup-triggers` contract, or
+   review a PR. Spot-checked against code:
+   - `CLAUDE.md -> AGENTS.md` and `.claude/skills/crc-maintain -> ../../.cursor/skills/crc-maintain` symlinks (`AGENTS.md:3`).
+   - `crc.py` re-export shim (`AGENTS.md:33`, `crc.py:1-102`).
+   - `Makefile` targets `check`, `check-fast`, `lint`, `test-file`, `raise-test-floor` (`AGENTS.md:17-22`, `Makefile:1-26`).
+   - Engine routing in `crc/cli/dispatch.py:186-189`, `crc/cli/bridge.py:25-77`, and `crc/cli/routes/aws.py:1-20` (`AGENTS.md:81-86`, `ARCHITECTURE.md:36-47`).
+   - Legacy `HANDLERS` fallback in `crc/cli/dispatch.py:146-156` (`AGENTS.md:84-86`, `ARCHITECTURE.md:44-47`).
+   - `crc/core/engine.py:34-121` `run()`, `KIND_LABELS`, `Notifier.fail_open` (`ARCHITECTURE.md:50-55`).
+   - `crc/core/registry.py:12-83` `@register`, `DEFAULT_REGISTRY`, `DuplicateCleanerError`, `UnknownCleanerError` (`ARCHITECTURE.md:57-61`).
+   - `crc/core/cleaner.py:18-143` `Cleaner` protocol and frozen dataclasses (`ARCHITECTURE.md:65-73`).
+   - `crc/aws/keypairs/` model cleaner (`cleaner.py`, `client.py`, `__init__.py`) (`ARCHITECTURE.md:101-116`).
+   - `crc/cli/args.py` / `args_run.py` `_add_*_args` groups and `tests/test_cli_args_parity.py` (`AGENTS.md:95-97`).
+   - `crc/cli/scan.py:131-152` read-only `--scan_tag` with `sys.exit(0)` (`ARCHITECTURE.md:20-21`, `CLEANUP_SAFETY.md:42-43`).
+   - `crc/core/logger.py:16-26,115-199` run-log line formats and `_OPTION_KEYS` order (`docs/logging.md:31-67`).
+2. **No refactor or rung history in active docs:** `grep -rni "rung\|refactor\|R0a\|R4" AGENTS.md ARCHITECTURE.md CLEANUP_SAFETY.md .cursor docs/*.md` matches only `docs/refactor/BUGS.md` and `docs/refactor/bugs/` path references.
+3. **Safety rules and bug register:** No `SAF-001`..`SAF-046` rule weakened, dropped or renumbered (`test_safety_lock.py` 16/16 green); `docs/refactor/BUGS.md` and `docs/refactor/bugs/` have zero diff.
+4. **New & updated mechanical checks:** `ARCH-010` (`doc_budget.py`, `test_arch010_doc_budget.py`), `ARCH-011` (`doc_links.py`, `test_arch011_doc_links.py`) and relaxed `ARCH-002` (`readmes.py`, `test_arch002_readmes.py`) pass with `tmp_path` self-tests and `REMEDIATION:` paragraphs.
+5. **Scope, `git mv` and links:** Only allowed files changed (plus `.claude/skills/crc-maintain` symlink target update so it does not dangle); `git mv` (`R100`) used for archived files; all relative links in active docs resolve (`ARCH-011` green).
+6. **Full `make check`:** `43095 passed in 52.59s` (total `make check` wall time `58.6s`; `ARCH-008: 43095 tests, floor 43078`).
+
+VERDICT: APPROVE

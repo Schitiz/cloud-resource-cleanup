@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The bug register of CRC. The refactor itself is finished and its history is in
+The bug register of CRC. Historical documents live in
 `docs/archive/`; this directory keeps only the register and the holding area for new rows.
 
 ## Public API
