@@ -78,3 +78,31 @@ Scope reviewed: `git diff 182466d..HEAD` (`crc/aws/disk/volumes.py`, `crc/aws/di
 Test count: 42444 before (`182466d`), 42469 before review (`13596ce`), 42473 after review (+29 total).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 182466d..HEAD` (commits `13596ce`, `2113e01`). Round 1 fixes checked first: the exact `Divergence` specs, `FIXED_QUIRKS`, the run-log `SKIPPED` assertions and the two production-command tests are in place and correct. The checks below were done again independently.
+
+1. **Bugs fixed, with tests that fail on `182466d`.** I copied `tests/test_aws_disk_fix.py` and `tests/test_aws_disk_parity.py` into a worktree at `182466d`: 20 failed and 532 passed. The failures are every BUG-282 and BUG-283 case except the controls, both production-command tests, and the two diverging parity cases in `test_matches_main`, `test_cleaner_protocol_matches_main`, `test_fixed_quirk_is_pinned` and `test_skip_lines_are_debug_only_in_new_code`. All of them pass on HEAD.
+   - BUG-282 (`crc/aws/disk/volumes.py:58-66`): `_sensitive_yb_task` folds keys the same way as `policy._folded_key` (`crc/core/policy.py:244`). It judges every folded key, so `yb_task=""` before `YB-Task=prod` is kept, which is the input in the row. There is only one code path: `Disk._should_skip`/`_is_candidate` (`crc/aws/disk/__init__.py:143-151`) and `DiskCleaner` (`cleaner.py:218`) both go through `VolumeFilter`.
+   - BUG-283 (`crc/aws/disk/volumes.py:197-214`): the extra floor is `floor + detach_age`, applied only when both `age` and `detach_age` are set. `normalize_age` accepts only days and hours, so the conversion `{"hours": total // 3600}` is exact. The new floor is never below the old one. The extra floor also applies when CloudWatch returns data points. That keeps more and is within the row: a data point only shows the last attachment to a running instance, so it cannot rule out a later attachment to a stopped instance.
+2. **Direction rule and parity.** `tests/legacy/` is untouched. Only `yb-task-key-variants` (BUG-282) and `detach-age-and-age` (BUG-283) diverge. Each pins the oracle's old outcome and the exact new calls, deleted labels, count, logs and stdout. The only call difference is the volume dropped from the `get_metric_data` query (a read that is no longer made), and the new deletes are a strict subset of the old ones. Every other case still asserts full equality, and there is no global loosening (`FIXED_BUGS` is unchanged).
+3. **Production commands.** `crc.py`, the CLI and the settings are unchanged. Command 1 now needs 10 days, or the custom age plus 3 days; command 2 needs 37 days. Both are pinned end to end in `tests/test_aws_disk_fix.py:185-282`. The selection is otherwise unchanged, and the change is intended by BUG-283.
+4. **Fail closed.** No new raise. The new skip is decided in read-only `plan`/`is_candidate`, before any `delete_volume`.
+5. **Protected files.** `git diff --stat 182466d..HEAD` shows no change to `tests/test_aws_disk.py`, `tests/archtest/**`, `tests/legacy/**`, `CLEANUP_SAFETY.md`, `docs/refactor/PLAN.md`, `STATUS.md`, `BUGS.md`, `AGENTS.md`, `ARCHITECTURE.md` or `.cursor/**`.
+6. **READMEs (ARCH-002).** The Safety Invariants in `crc/aws/disk/README.md:47-48` and the AWS-4 entry in `crc/aws/README.md:86` are updated. The public API is unchanged, so its list needs no edit.
+7. **Owner decision.** It is present and accurate: detach-only runs, and volumes older than age plus `detach_age` detached moments ago from a stopped instance, need CloudTrail.
+
+### Findings
+
+No BLOCKING findings.
+
+- **NIT** `crc/aws/disk/volumes.py:63`: `(value or "").strip()` raises `AttributeError` for a non-string value on a second or later folded `yb_task` key. Before, only the first key was read. The per-volume `except` catches it, so the volume is kept and an error is logged. That is fail closed, and EC2 always returns string tag values, so it was not changed.
+- **NIT** (outside the rung scope, not edited) `crc/core/policy.py:272-274`: `aws_disk_has_sensitive_yb_task` is still exported and still judges only the first folded key (its docstring says so). The disk cleaner no longer uses it. Proposed: a later core rung either removes it or makes it judge every folded key like `_sensitive_yb_task`.
+- **NIT** `CLEANUP_SAFETY.md` proposed text: I agree with the "## Owner action" text above (SAF-025 floor and the `yb_task` rule).
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt`, then `make check`: ruff passed; mypy found no issues in 229 source files; lint-imports kept 5 contracts; pytest: **42473 passed** (142 s), exit 0.
+
+ROUND 2 VERDICT: APPROVE
