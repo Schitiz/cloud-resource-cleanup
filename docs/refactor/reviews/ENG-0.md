@@ -63,3 +63,50 @@ Scope reviewed: `git diff 0240820..HEAD` on branch `eng/bridge` (lane `ENG-0`).
 - `python3 -m tests.archtest.test_count check`: `ARCH-008: 43078 tests, floor 43078`
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 0240820..HEAD` on `eng/bridge` (commits `ff2f58c`, `438bf9b`).
+
+### Round 1 fixes checked
+
+- `init_run_logging()` (`crc/cli/bridge.py`) calls `Service()` after `route.precheck` and before `engine.run`, the point where `KeyPairs.__init__` ran `Service.__init__` (after the `cloud != "aws"` check of `delete_keypairs`). Correct; `test_bridge_reaches_the_cleaner_with_the_flags` asserts `init_logging("logs/crc.log")`.
+- `provide_legacy_keypairs()` in `tests/test_cli_args_parity.py`: confirmed, the file now passes on its own.
+- `build_keypair_cleaner` passes the raw `name_regex` / `exception_regex`: matches `KeyPairs(dry_run, name_regex, exception_regex, age)`. The `None` cases are covered by `name-regex-none` / `exception-regex-none` in `tests/test_aws_keypair_parity.py`.
+
+### Independent checks
+
+1. **Routed pair parity (aws / keypair)**: OK.
+   - Selection: same `plan_region` filter. Mutations within a region: `apply()` groups the plan by region in plan order, which is the per-region set order of `main`. `test_engine_matches_main` asserts the `delete_key_pair` calls are equal except in the interleaved-error cases, where the new path deletes nothing.
+   - Notifications: Slack text and recipients, Influx points, stdout and the raised error are equal to oracle `CRC.delete_keypairs`. `tests/test_cli_bridge_parity.py` checks this across every Slack and Influx mode, dry run, 4 id sets and plan errors. Slack is sent only when a Slack client is set and Influx only when an Influx client is set, Slack first, as `report_result` did. When `plan()` raises, neither is sent, as before.
+   - Run log and gates: RUN START / RESULT still come from `dispatch._run_handler`. `validate_targets` / BUG-017 now count routed kinds (`is_routed_kind`), so `--cloud gcp --resource keypair` still raises "Keypair operation is only supported on AWS." and `--cloud all` still skips. Exit codes are unchanged. A dry run never calls `apply()` (the engine), and `plan()` logs `would_delete` per region in place of the old `apply_region`, so dry-run log order is identical.
+   - Allowed difference: plan-all-regions-before-apply is recorded once in BUG-383 and once in `CLEANUP_SAFETY.md`; nothing else in either file changed.
+2. **Parity tests not vacuous**: OK.
+   - Mutation check: with `run_routed` turned into a no-op, 278 keypair cases fail across `test_cli_main_parity.py` (`ROUTED_CALLS` events vs the oracle), `test_cli_bridge_parity.py` and `test_cli_logger.py`. The fake cleaner is reached through `bridge.build_registry`, which is looked up at call time.
+   - Module-level checks: `test_cli_crc_parity.py` dropped its `keypairs` op, but `test_cli_bridge_parity.py` compares the same oracle method end to end and asserts the options and `dry_run` the cleaner receives. The gcp ValueError case of that op is now covered by `validate_targets` (BUG-017 tests). `test_aws_keypair_parity.py` drives the real Cleaner through `engine.run` against `tests/legacy/aws_keypairs.txt`.
+3. **Hash-locked safety tests**: the 5 files and `tests/archtest/safety_lock.json` are untouched and pass; their adapters were not touched. The 5 `tests/test_<name>_engine.py` Cleaner copies were **not written**. This is non-blocking for ENG-0 because no locked adapter changed, but each lane that turns one of those adapters into a shim must deliver its copy.
+4. **Protected files**: no change to `tests/legacy/*`, `tests/archtest/*` (apart from `test_count_floor.txt` via `make raise-test-floor`), AGENTS.md, ARCHITECTURE.md, `.cursor/**`, pyproject.toml, Makefile, `requirements*.txt`, PLAN.md or STATUS.md.
+5. **Limits and READMEs**: lane source files are at most 245 lines (`crc/cli/dispatch.py`), ARCH-004 is green, and the Public API sections of `crc/cli`, `crc/cli/routes`, `crc/aws` and `crc/aws/keypairs` match the code.
+
+### Fix made in round 2
+
+- `crc/cli/README.md` Extension Rules item 3 said to delete the `dispatch.HANDLERS` entry when routing a kind. For a kind routed on one cloud but still legacy on another supported cloud (for example `ip`), that would make the legacy pair run nothing between RUN START and RESULT. The rule now says to keep the entry while any supported cloud still uses the legacy path. Docs only.
+
+### Notes for the owner (non-blocking)
+
+- Lane boundary vs pattern: later lanes may edit only `crc/cli/routes/<cloud>.py` and `crc/<cloud>/**`. Deleting an adapter also means editing its `CRC` method and imports in `crc/cli/resource_ops.py` / `vm_ops.py`, the `crc.py` re-export, and the CLI test seams (`ROUTED_CALLS`, `test_cli_bridge_parity.py`, `provide_legacy_keypairs`-style stand-ins for each deleted name the oracle imports). Either allow those edits per lane or batch them in one follow-up lane.
+- With plan before apply, the non-dry-run log order across several regions also changes: all REGION lines, then all ACTION lines. This follows directly from the allowed difference, which is why `test_engine_matches_main` compares logs only for dry-run and single-region cases.
+
+## New bugs
+
+- `crc/cli/bridge.py:74`: `now` is read once per pair (`datetime.now(UTC)`), where `KeyPairs.delete` read `runtime.clock()` per region. A key pair crossing the age threshold during the run is now kept in later regions. The effect is fewer deletes, never more, and it is not covered by BUG-383.
+- `crc/aws/keypairs/cleaner.py:83`: `apply()` calls `boto3.client("ec2", region)` a second time for each region with candidates (once in `plan()` at line 65). The call does not mutate anything, but the SDK call sequence differs from `main`. The parity test filters out `client` calls.
+- `crc/cli/notify.py:159`: `notify_deleted_keypair_via_slack` is dead in production (already listed by the coder).
+
+### Gates (round 2)
+
+- `pip install -r requirements.txt -r requirements-dev.txt`, then `make check`: ruff passed, mypy strict passed (337 files), lint-imports passed (contracts KEPT), ARCH-001..009 and SAF-LOCK passed.
+- **43078 passed in 53.46s** (`make check` wall time 1m14s); `ARCH-008: 43078 tests, floor 43078`.
+- Isolated runs: `test_cli_bridge_parity.py` 196, `test_aws_keypair_parity.py` 116, `test_cli_crc_parity.py` 11744, `test_cli_logger.py` 7, `test_cli_dispatch_fix.py` 31, all passing.
+
+ROUND 2 VERDICT: APPROVE

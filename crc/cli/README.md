@@ -95,7 +95,9 @@ plain `dict`, as on `main`.
 3. Route a kind through the engine (pattern: AWS `keypair`, `routes/aws.py`). In the cloud's route file
    add an options builder (flags to the keys the registered factory reads from `RunContext.options`)
    and `"kind": Route(builder)` to `ROUTES`, and import the cleaner package so it registers. Then delete
-   the adapter, its `CRC` method and its `dispatch.HANDLERS` entry, and retarget the tests: the
+   the adapter, its `CRC` method and its `dispatch.HANDLERS` entry (keep the entry while any supported
+   cloud still runs the kind on the legacy path: a supported pair with neither a route nor a handler
+   runs nothing between RUN START and RESULT), and retarget the tests: the
    adapter's parity test drives the Cleaner through `engine.run` with the same oracle cases; the CLI
    parity tests (`test_cli_main_parity.py` `ROUTED_CALLS`, `test_cli_logger.py`) use
    `tests/helpers_cli_routes.FakeCleaners`, which patches `bridge.build_registry` and
