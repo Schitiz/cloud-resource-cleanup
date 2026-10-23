@@ -90,12 +90,53 @@ def _skip_region(region: str, error: BaseException) -> None:
     log_skipped_region(region, _SKIP_CONTEXT, error)
 
 
-def _is_protected(tags: Any, snap_id: str, exception_tags: Any) -> bool:
+def _skip_failed_region(region: str, error: BaseException) -> None:
+    """BUG-149: a non-connectivity error while listing a region is recorded and the region
+    skipped; the other regions continue."""
+    _regionlog.region_skipped(region, error)
+    logging.error(
+        "Region %s: skipped %s — error while listing (%s): %s",
+        region,
+        _SKIP_CONTEXT,
+        type(error).__name__,
+        error,
+    )
+    logger.current().fail(region, "-", error)
+
+
+def _is_tag_list(tags: Any) -> bool:
+    return isinstance(tags, list) and all(isinstance(t, Mapping) for t in tags)
+
+
+def _read_tags(tags: Any) -> dict[str, Any]:
+    """BUG-144: tag map of a list of tag entries; an entry without `Key` is ignored and a
+    missing `Value` reads as ''. Non-list or non-mapping `tags` still raise as on main."""
+    if not tags:
+        return {}
+    if not _is_tag_list(tags):
+        return {t["Key"]: t["Value"] for t in tags}
+    tag_map: dict[str, Any] = {}
+    for entry in tags:
+        if "Key" not in entry:
+            logging.debug(f"Ignoring a tag entry without Key: {dict(entry)}")
+            continue
+        tag_map[entry["Key"]] = entry.get("Value", "")
+    return tag_map
+
+
+def _is_protected(
+    tags: Any,
+    snap_id: str,
+    exception_tags: Any,
+    tag_map: dict[str, Any] | None = None,
+) -> bool:
     """Any exception tag key present (with a listed value, when values are given) protects.
-    Every tag entry must have `Key` and `Value`, else `KeyError` as on main."""
+    `tag_map` is the already read `_read_tags` result; tags that are not a list of mappings
+    still raise as on main."""
     if not tags or not exception_tags:
         return False
-    tag_map = {t["Key"]: t["Value"] for t in tags}
+    if tag_map is None:
+        tag_map = _read_tags(tags)
     for key, values in exception_tags.items():
         if policy.exception_tags_any(tag_map, {key: values}):
             logging.debug(f"Snap {snap_id} has tag {key}")
@@ -152,6 +193,9 @@ class SnapshotCleaner:
                 decisions = list(self.iter_region(client, region, context.now))
             except CONNECTIVITY_ERRORS as e:
                 _skip_region(region, e)
+                continue
+            except Exception as e:
+                _skip_failed_region(region, e)
                 continue
             self._clients[region] = client
             selected = 0
@@ -216,19 +260,23 @@ class SnapshotCleaner:
         run.action("deleted", region, snap_id)
         return None
 
-    def is_protected(self, tags: Any, snap_id: str) -> bool:
+    def is_protected(self, tags: Any, snap_id: str, tag_map: dict[str, Any] | None = None) -> bool:
         """Whether an exception tag protects the snapshot (logs the matching key)."""
-        return _is_protected(tags, snap_id, self._exception_tags)
+        return _is_protected(tags, snap_id, self._exception_tags, tag_map)
 
     def _decide(
         self, snap: Mapping[str, Any], region: str, now: datetime.datetime, used: set[str]
     ) -> Decision:
         snap_id = snap["SnapshotId"]
         start_time = snap["StartTime"]
+        tags = snap.get("Tags")
+        # Tags that are not a list of mappings are read only after the age gate, so they
+        # raise for old snapshots only, as on main.
+        tag_map = _read_tags(tags) if self._exception_tags and _is_tag_list(tags) else None
         if not policy.snapshot_old_enough(start_time, now, self._age_days):
             logger.current().skip("too_young")
             return Skipped(id=snap_id, reason="newer than age_days")
-        if self.is_protected(snap.get("Tags"), snap_id):
+        if self.is_protected(tags, snap_id, tag_map):
             logger.current().skip("exception_tag")
             return Skipped(id=snap_id, reason="has an exception tag")
         if snap_id in used:
@@ -321,3 +369,5 @@ class Snapshot(Service):
                 _regionlog.region_done(region, scanned, selected, started)
             except CONNECTIVITY_ERRORS as e:
                 _skip_region(region, e)
+            except Exception as e:
+                _skip_failed_region(region, e)
