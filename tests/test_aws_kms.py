@@ -108,12 +108,15 @@ def test_plan_filters_by_pairs() -> None:
     aws = Aws({"old": OLD})
     assert cleaner(aws, filter_tags={"team": ["qa"]}).plan(context()).candidates
     assert not cleaner(aws, filter_tags={"team": ["dev"]}).plan(context()).candidates
-    assert not cleaner(aws, filter_tags={"team": ["qa", "dev"]}).plan(context()).candidates
+    assert cleaner(aws, filter_tags={"team": ["qa", "dev"]}).plan(context()).candidates
+    assert cleaner(aws, filter_tags={"team": []}).plan(context()).candidates
+    assert not cleaner(aws, filter_tags={"other": []}).plan(context()).candidates
 
 
 def test_plan_exception_tags_skip_the_key_through_keyerror() -> None:
     aws = Aws({"old": OLD})
     assert not cleaner(aws, exception_tags={"team": []}).plan(context()).candidates
+    assert not cleaner(aws, exception_tags={"other": []}).plan(context()).candidates
 
 
 def test_plan_unreachable_region_is_marked_and_logged(caplog: pytest.LogCaptureFixture) -> None:
