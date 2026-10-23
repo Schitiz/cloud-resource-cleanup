@@ -185,13 +185,13 @@ def test_route_tables_route_the_aws_kinds() -> None:
             "vm",
             "vpc",
         ],
-        "azure": [],
+        "azure": ["disk", "ip", "nic", "spot_instances", "vm"],
         "gcp": [],
         "oci": [],
     }
     assert bridge.is_routed_kind("keypair")
     assert bridge.is_routed_kind("disk")
-    assert not bridge.is_routed_kind("nic")
+    assert bridge.is_routed_kind("nic")
     assert bridge.route_for("azure", "keypair") is None
 
 

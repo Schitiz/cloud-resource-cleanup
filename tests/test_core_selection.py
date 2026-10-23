@@ -104,11 +104,12 @@ def run_crc_main(
             "kms_pending_window",
             "kms_key_description",
             "kms_user",
-            "resource_group",
             "scan_tag",
         ]
     )
-    args.update(cloud=cloud, resource=resource, operation_type=operation, dry_run=True)
+    args.update(
+        resource_group="rg", cloud=cloud, resource=resource, operation_type=operation, dry_run=True
+    )
     args.update(options)
     monkeypatch.setattr(cli_main, "get_argparser", lambda: args)
     monkeypatch.setattr(cli_context, "CRC", FakeCRC)

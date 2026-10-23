@@ -8,6 +8,7 @@ after the run and the raised error (type and message) or exit code must be equal
 """
 
 import functools
+import importlib
 import importlib.util
 import io
 import itertools
@@ -33,6 +34,7 @@ from crc.cli import scan as cli_scan
 from crc.core import logger
 from crc.core.cleaner import Candidate, Operation, Plan, Result, RunContext
 from tests.helpers_cli_routes import FakeCleaners, provide_legacy_keypairs
+from tests.helpers_routed_calls import RoutedCall
 
 provide_legacy_keypairs()
 
@@ -186,6 +188,12 @@ class Fakes:
         class FakeCRC:
             def __init__(self, *args: Any, **kwargs: Any) -> None:
                 self.cloud = args[0] if args else kwargs.get("cloud")
+                resource_group_index = 6
+                self.resource_group = (
+                    args[resource_group_index]
+                    if len(args) > resource_group_index
+                    else kwargs.get("resource_group")
+                )
                 self.fake_tag = f"CRC#{next(fakes.counter)}"
                 fakes.events.append(("CRC", norm(list(args)), norm(kwargs)))
 
@@ -194,6 +202,15 @@ class Fakes:
                     raise AttributeError(name)
 
                 def record(*args: Any, **kwargs: Any) -> Any:
+                    spot_without_group = (
+                        name == "delete_spot_instances"
+                        and self.cloud == "azure"
+                        and not self.resource_group
+                    )
+                    if spot_without_group:
+                        # The real method raises before it builds the adapter (the Azure route
+                        # gate does the same before the cleaner), so no adapter event exists.
+                        raise ValueError("resource_group is required for Azure Spot VM cleanup")
                     fakes.events.append((f"crc.{name}", self.cloud, norm(list(args)), norm(kwargs)))
                     if fakes.case.crc_fail == name:
                         raise RuntimeError(f"{name} failed")
@@ -300,21 +317,7 @@ def run_new(case: Case, monkeypatch: pytest.MonkeyPatch) -> Outcome:
     return execute(NEW_MODULE.main, case, fakes)
 
 
-@dataclass(frozen=True)
-class RoutedCall:
-    """The oracle `CRC` call of a routed kind, and which of its arguments reach the cleaner.
-
-    `keys` are the `RunContext.options` keys, in the order of the oracle call arguments. A
-    `None` key is an argument the legacy adapter never used (the AWS IP adapter dropped the
-    regexes, the AWS disk adapter the Slack owner flags); the oracle event loses that position.
-    `stop` is the oracle method of a stop run, which takes the first four keys.
-    """
-
-    method: str
-    keys: tuple[str | None, ...]
-    stop: str | None = None
-
-
+EVENT_WITH_KWARGS = 3
 ROUTED_CALLS: dict[str, RoutedCall] = {
     "keypair": RoutedCall("delete_keypairs", ("name_regex", "exception_regex", "age")),
     "ip": RoutedCall("delete_ip", ("filter_tags", "exception_tags", None, None)),
@@ -358,13 +361,32 @@ ROUTED_CALLS: dict[str, RoutedCall] = {
 }
 
 
+def routed_call(cloud: str, kind: str) -> RoutedCall | None:
+    """The oracle call of a routed pair: the shared (AWS) table, or the cloud's own module."""
+    if cloud == "aws":
+        return ROUTED_CALLS.get(kind)
+    try:
+        module = importlib.import_module(f"tests.helpers_routed_{cloud}")
+    except ImportError:
+        return None
+    table: dict[str, RoutedCall] = module.ROUTED_CALLS
+    return table.get(kind)
+
+
 def strip_unused_args(events: Events) -> Events:
-    """Drop the oracle call arguments that the routed AWS adapters never read."""
-    inverse = {call.method: call for call in ROUTED_CALLS.values()}
+    """Drop the oracle call arguments that the routed adapters never read."""
     kept: Events = []
     for event in events:
-        call = inverse.get(str(event[0]).removeprefix("crc."))
-        if call is not None and event[0].startswith("crc.") and event[1] == "aws":
+        call = None
+        if str(event[0]).startswith("crc.") and len(event) > EVENT_WITH_KWARGS:
+            for kind in bridge.TABLES.get(str(event[1]), {}):
+                candidate = routed_call(str(event[1]), kind)
+                if candidate is not None and str(event[0]).removeprefix("crc.") in (
+                    candidate.method,
+                    candidate.stop,
+                ):
+                    call = candidate
+        if call is not None:
             args = [a for a, key in zip(event[2], call.keys, strict=False) if key is not None]
             event = (event[0], event[1], args, event[3])
         kept.append(event)
@@ -389,7 +411,8 @@ def install_routed_fakes(fakes: Fakes, monkeypatch: pytest.MonkeyPatch) -> None:
     cleaners = FakeCleaners().install(monkeypatch)
     for cloud, table in bridge.TABLES.items():
         for kind in table:
-            call = ROUTED_CALLS[kind]
+            call = routed_call(cloud, kind)
+            assert call is not None, f"no ROUTED_CALLS entry for {cloud} {kind}"
             if kind == "snapshot":
                 cleaners.side_effect[(cloud, kind)] = snapshot_side_effect(fakes)
                 cleaners.plans[(cloud, kind)] = Plan(
