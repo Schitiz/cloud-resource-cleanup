@@ -83,3 +83,40 @@ Scope reviewed: `git diff d4f9b66..HEAD` on branch `eng/clean1` (lane `CLEAN-1`)
 - `python3 -m tests.archtest.test_count check`: `ARCH-008: 44400 tests, floor 44400`
 
 VERDICT: CHANGES_REQUESTED
+
+## Round 2 (Opus)
+
+Scope: `git diff d4f9b66..HEAD` (4 commits, including round 1 `8ff7497`). No code changes in this round.
+
+### Round 1 fixes checked
+- `tests/test_cli_dispatch_fix.py`: the removed `FakeAdapter` / `FakeNIC` patches on `resource_ops` were unreachable; the tests now assert `cleaners.runs` and so still reach the fake cleaner. Correct.
+- The `oracle` loaders of `test_cli_args_parity`, `test_cli_crc_parity`, `test_cli_bridge_parity`, `test_cli_bridge_aws`, `test_cli_bridge_oci`, `test_cli_main_parity` (`ORACLE_MODULE`, `RUN_ORACLE`) and the `crc_cli` fixtures of `test_core_engine` / `test_core_report` now use `load_legacy_crc()`. That changes only the oracle side: it now runs main's CLI against main's adapters instead of the current adapters. Correct, and the tests are green.
+- The added `gcp spot_instance_requests` case in `test_cli_route_skip.py` is correct.
+
+### Findings
+1. **Check 1 (routed pairs match legacy): OK.** The four skip-only routes reproduce the deleted handlers exactly. They use the same logger name (`crc.cli.dispatch`) and the same warning text (asserted for each cloud in `test_cli_route_skip.py`). They run inside the same RUN START / RESULT pair, after `make_crc` as before, and build no registry, notifier or `Service`. `validate_targets` keeps its order and its disk opt-in gate (`HANDLERS ∪ routed` equals `routed`, since every handler kind is routed). I checked that `is_supported_pair(cloud, kind)` matches `route_for(cloud, kind) is not None` for all 4 clouds × 10 kinds (no mismatch), so no supported pair silently runs nothing. No new behaviour difference, so no BUGS.md or CLEANUP_SAFETY.md edit is needed (the plan-all-regions sentence already exists, CLEANUP_SAFETY.md:54).
+2. **Check 2 (vacuous tests): none found (not blocking).** No test still patches `dispatch.HANDLERS` or a `resource_ops` / `vm_ops` adapter on a path that production dispatch runs. `install_routed_fakes` skips only the `skips.no_options` routes, which have no cleaner. Every other routed pair still needs a `ROUTED_CALLS` entry and reaches the recording fake.
+3. **Steps (2) and (3) incomplete (lane scope, not a correctness defect).** Three groups of tests still compare against the current `CRC` methods (`crc.cli.runner.CRC`, `resource_ops.py`, `vm_ops.py`, `notify.py`, `adapter_args.py`, `report_calls.py`), which production dispatch no longer calls:
+   - `test_cli_crc_parity.py` (`compare()` runs `NewCRC` with fakes patched into `vm_ops` / `resource_ops`, and `test_every_adapter_name_is_patched_in_the_new_modules`) and `test_notify_parity.py`. These tests are not vacuous, because their fakes are reached, but they now assert facts about dead code only.
+   - `tests/helpers_legacy_handlers.py`, a test-only copy of the deleted handlers, is the legacy side of `test_cli_bridge_azu.py` and `test_cli_bridge_gcp.py`.
+   - `test_cli_bridge_oci.py` binds the current OCI adapters into the oracle module.
+
+   Until these are moved to `load_legacy_crc()` (asserting each BUG-NNN divergence explicitly), the dead CLI modules and the `crc.py` re-exports cannot be deleted. The `crc/` line count is still 19448 → 19381 lines, -67 (`crc/**/*.py` plus `crc.py`; 19346 → 19279 without `crc.py`, as round 1 reported).
+4. **Check 3 (hash-locked tests): OK.** None of the 5 locked files or `safety_lock.json` changed, and all pass. The 5 engine copies existed before this lane. Their docstrings list the same SAF IDs as the lock, and their test counts are 13/13 (aws disk), 25/24 (aws spot requests), 17/8 (gcp spot VM); the azure and oci copies name every locked SAF ID.
+5. **Check 4 (protected files): OK.** No `tests/legacy/*.txt`, archtest code, guardrail or requirements file was edited. The only archtest change is `test_count_floor.txt`, through `make raise-test-floor`.
+6. **Check 5 (limits and READMEs): OK.** The `crc/` files this lane touched are all under 250 lines (ARCH-004 green). `crc/cli/README.md` and `crc/cli/routes/README.md` list the new `skips` functions and no longer mention `HANDLERS` (ARCH-002 green).
+
+### Gates
+`pip install -r requirements.txt -r requirements-dev.txt`, then `make check`:
+- ruff: OK
+- mypy strict: no issues in 364 files
+- lint-imports: 5 contracts kept
+- pytest: **44400 passed in 56.61s** (`make check` 1m17s wall time)
+- ARCH-008: 44400 tests, floor 44400
+
+## New bugs
+- None.
+
+The branch is green and behaviour-preserving, so it is safe as an intermediate state. The lane goal of deleting the legacy CLI layer is not reached: the step (2) retargets and the step (3) deletions listed in finding 3 remain.
+
+ROUND 2 VERDICT: CHANGES_REQUESTED
