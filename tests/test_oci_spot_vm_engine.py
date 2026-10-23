@@ -140,6 +140,22 @@ def test_dry_run_plan_records_volume_without_api_call() -> None:
     assert [c for c in client.calls if c[0] in ("delete_volume", "terminate_instance")] == []
 
 
+def test_engine_built_dry_run_plan_records_volume_without_api_call() -> None:
+    """The factory builds the cleaner with `engine=True`; its dry run must not mutate either."""
+    client = FakeClient([instance()], {"ocid1.instance.oc1..test": ["vol-keep"]})
+    engine_cleaner = SpotVmCleaner(
+        lambda region: RegionClients(client, client, "cmp"),
+        lambda: ["us-ashburn-1"],
+        settings(),
+        paginate,
+        engine=True,
+    )
+    plan = engine_cleaner.plan(context(dry_run=True))
+    assert plan.related == {"Disk": ("vol-keep",)}
+    assert [c.id for c in plan.candidates] == [c.name for c in plan.candidates]
+    assert [c for c in client.calls if c[0] in ("delete_volume", "terminate_instance")] == []
+
+
 def test_filter_requires_tags_on_instance() -> None:
     assert not matches_filter_tags(settings(), instance(tags={}))
     assert matches_filter_tags(settings(), instance(tags={"yb_task": "itest"}))

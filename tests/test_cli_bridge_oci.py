@@ -311,6 +311,9 @@ def test_routed_pair_matches_the_legacy_adapter(
         assert new["calls"] == {"r1": [], "r2": []}
         assert old["calls"]["r1"], "the legacy path deleted region r1 before the listing error"
         assert not _by_kind(new["run"], "ACTION")
+        assert not any("name-" in str(call) for call in new["slack"] + new["influx"])
+        if kind.name == "vm":
+            assert new["slack"] == old["slack"] == [] and new["influx"] == old["influx"] == []
         return
     assert new["run"][-1] == old["run"][-1]
     for tag in ("ACTION", "SKIPPED", "ERRORS", "FAILED"):

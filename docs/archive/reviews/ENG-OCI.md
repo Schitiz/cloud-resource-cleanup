@@ -58,3 +58,46 @@ Scope reviewed: `git diff 6a98441..HEAD` on branch `eng/oci` (lane `ENG-OCI`).
 - `python3 -m tests.archtest.test_count check`: `ARCH-008: 43940 tests, floor 43940`
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 6a98441..HEAD` on `eng/oci` (coder commit `d1f5827`, round 1 commit `7dbc575`).
+
+### Round 1 fixes and findings re-checked
+
+- Round 1 gave `SpotVmCleaner` the `engine` flag (`build_spot_vm_cleaner` passes `engine=True`), added the `_spot_instances` options builder (not in `ROUTES`) and the `spot_instances` cases of `tests/test_cli_bridge_oci.py`, which drive `bridge.run_routed` with an ad hoc `Route`. Correct: a dry-run `plan()` now logs the ACTION lines and names candidates by display name. `apply()` in a dry run no longer records them twice. Directly built cleaners (`engine=False`, the locked `SpotVM` adapter) are unchanged.
+- `spot_instances` staying on the legacy handler is confirmed. `dispatch._run_handler` skips the handler of any routed pair, and `dispatch._spot_instances` returns after a warning under `--cloud all` (SAF-037), with no Slack or Influx. `Route.precheck` can only raise, and raising would change the exception. The bridge needs a skip hook (owner action above).
+
+### Independent checks
+
+1. **Parity of the routed pairs** (`disk`, `vm` delete, `vm` stop).
+   - Read `crc/cli/routes/oci.py` against `dispatch._disk` / `_vm` and the oracle `CRC.delete_disks` / `delete_vm` / `_delete_vm` / `stop_vm`.
+   - `resource_states` reaches the cleaner only for delete and only when it is truthy. This matches the oracle `_delete_vm`, which falls back to `vm.delete()` when `instance_state` is falsy. Stop always uses `RUNNING`.
+   - `notags` comes from the flag, as `CRC.__init__` passed it to the adapters.
+   - The dry-run ACTION lines are logged per region inside `plan()`, in decision order and before the REGION line. Candidate ids are display names, so the RESULT `selected=` count and the Slack and Influx names match. Re-ran the "later region raises unexpectedly" real-run case of each kind and printed both sides:
+     - vm (delete and stop): no Slack or Influx on either side, and the same exception.
+     - disk: the legacy path deleted `name-a` and `name-b` in r1 and reported them before re-raising. The routed path deletes nothing, reports `0` disks, then re-raises the same error.
+   - Both are the allowed plan-all-regions-before-apply difference: fewer deletes, never more, recorded once as BUG-408 in `docs/refactor/BUGS.md` (end of the low group, counts line updated) and once in `CLEANUP_SAFETY.md`.
+   - The test checked only mutations and ACTION lines for that case. **Fixed in review:** it now also asserts that the routed Slack and Influx output carries no resource names, and that vm sends nothing on either side.
+2. **Non-vacuity of the parity tests.** Mutation check on `crc/cli/routes/oci.py` (reverted):
+   - Dropping `custom_age_tag_key` from the disk options, or forcing `instance_state`, fails `test_main_matches_oracle[oci-vm-delete-*-all_filters]` and the disk rows (4 failures).
+   - So the OCI rows reach the `FakeCleaners` fakes through `bridge.build_registry` and compare them with the oracle `crc.delete_disks` / `crc.delete_vm` / `crc.stop_vm` events.
+   - `test_cli_bridge_oci.py` runs the real `_run_handler` path with the registered factories, and its non-vacuity test asserts ACTION lines, display names and mutation.
+   - `test_cli_crc_parity.py` and `test_cli_args_parity.py` are unchanged and still reach the `CRC` methods, which still exist.
+3. **Locked safety tests.**
+   - `tests/test_oci_spot_vm.py`, the other 4 locked files and `tests/archtest/safety_lock.json` are untouched and pass.
+   - `tests/test_oci_spot_vm_engine.py` covers every case of the locked file (the adapter `_delete_volume` dry-run case maps to `test_dry_run_plan_records_volume_without_api_call`) and SAF-040, 041, 043, 044, 045 and 046.
+   - The copy built `SpotVmCleaner` only with `engine=False`. **Fixed in review:** added `test_engine_built_dry_run_plan_records_volume_without_api_call`, an `engine=True` dry run: no terminate or delete call, leftover volume reported, ids are names.
+4. **Protected files.** No oracle, archtest (other than `test_count_floor.txt` via `make raise-test-floor`), guardrail or requirements file was edited. `bridge.py`, `routes/__init__.py`, `dispatch.py`, `resource_ops.py`, `vm_ops.py`, `notify.py` and `crc.py` are untouched. The shared test edits are the `"oci"` entry in `test_cli_bridge_parity.py` and the generic `cloud_calls` / `routed_call` lookup in `test_cli_main_parity.py`; per-cloud data lives in `tests/routed_calls_oci.py`.
+5. **Limits and READMEs.** The largest touched source files are `crc/oci/disk/cleaner.py` (246 lines) and `crc/oci/vm/cleaner.py` (243); no function is over 60 lines (ARCH-004 green). The READMEs of `crc/cli`, `crc/cli/routes`, `crc/oci`, `crc/oci/disk`, `crc/oci/vm` and `crc/oci/spot_vm` are in sync (ARCH-002 green).
+
+### New bugs (round 2)
+
+- `crc/oci/disk/cleaner.py:98-101` with `crc/cli/bridge.py` `_ReportThenRaise.plan` (real run, unexpected error in a later region): the routed RESULT line says `selected=0 done=0 failed=0`, while r1's REGION line says `selected=3`. The re-raise plan only holds `partial_succeeded`, which is empty before `apply()`. Run-log quirk of BUG-408 (no extra mutation); not fixed.
+
+### Gates
+
+- After `pip install -r requirements.txt -r requirements-dev.txt`, `make check` before the review changes: ruff, mypy strict (348 files), lint-imports (5 contracts kept), ARCH-001..009, SAF-LOCK green; **43940 passed in 60.48s** (wall time 1m19s).
+- After the review changes (`make raise-test-floor`, then `make check`): all gates green; **43941 passed in 54.73s** (wall time 1m02s), floor raised 43940 to 43941.
+
+ROUND 2 VERDICT: APPROVE
