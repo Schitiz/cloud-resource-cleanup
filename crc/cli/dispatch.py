@@ -248,7 +248,7 @@ def run_dispatch(context: RunContext, options: Options, targets: Targets) -> Non
     """Run every selected resource on every selected cloud, in the order of `main`."""
     skipped = validate_targets(targets)
     for cloud in targets.clouds:
-        crc = make_crc(context, cloud)
+        crc: Any = None
         for resource in targets.resources:
             handler = HANDLERS.get(resource)
             if handler is None:
@@ -256,4 +256,6 @@ def run_dispatch(context: RunContext, options: Options, targets: Targets) -> Non
             if (cloud, resource) in skipped:
                 _skip_pair(cloud, resource, options)
                 continue
+            if crc is None:
+                crc = make_crc(context, cloud)
             _run_handler(handler, crc, cloud, resource, options, targets)

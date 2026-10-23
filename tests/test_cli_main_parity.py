@@ -586,7 +586,12 @@ def diverging_outcome(case: Case, expected: Outcome) -> tuple[str, Outcome] | No
         return "BUG-017", without_reset(
             expected, before_first_cleaner(expected.events), ("error", ValueError, message)
         )
-    events = [event for event in expected.events if event not in bad]
+    bad_clouds = {e[1] for e in bad}
+    events = [
+        event
+        for event in expected.events
+        if event not in bad and not (event[0] == "CRC" and event[1][0] in bad_clouds)
+    ]
     warnings = [
         (logging.WARNING, SKIP_WARNING.format(resource=RESOURCE_OF_CALL[e[0]], cloud=e[1]))
         for e in bad

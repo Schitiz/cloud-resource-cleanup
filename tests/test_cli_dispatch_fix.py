@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from crc.cli import dispatch
+from crc.cli import dispatch, resource_ops
 from crc.cli.constants import CLOUDS, RESOURCES
 from crc.cli.context import RunContext
 from crc.cli.inputs import Options, Targets, read_options, resolve_targets
@@ -95,10 +95,13 @@ def test_bug_017_cloud_all_skips_unsupported_pairs_with_a_warning(
     recorder.install(monkeypatch)
     options = make_options("all", resource)
     targets = resolve_targets(options)
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.INFO):
         dispatch.run_dispatch(CONTEXT, options, targets)
-    assert [call for call in recorder.calls if call[0] == resource] == [
-        (resource, cloud) for cloud in CLOUDS if cloud in supported
+    assert recorder.calls == [
+        pair
+        for cloud in CLOUDS
+        if cloud in supported
+        for pair in (("CRC", cloud), (resource, cloud))
     ]
     warned = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert warned == [
@@ -106,6 +109,53 @@ def test_bug_017_cloud_all_skips_unsupported_pairs_with_a_warning(
         for cloud in CLOUDS
         if cloud not in supported
     ]
+    skipped_logs = [
+        r.getMessage()
+        for r in caplog.records
+        if r.name == "crc.run" and r.getMessage().startswith("SKIPPED ")
+    ]
+    assert skipped_logs == [
+        f"SKIPPED cloud={cloud} resource={resource} reason=unsupported_cloud_resource count=1"
+        for cloud in CLOUDS
+        if cloud not in supported
+    ]
+
+
+@pytest.mark.parametrize(
+    ("resource", "adapter_attr", "expected_cloud"),
+    [
+        ("keypair", "KeyPairs", "aws"),
+        ("nic", "NIC", "azure"),
+        ("kms", "Kms", "aws"),
+    ],
+)
+def test_bug_017_cloud_all_real_crc_does_not_build_skipped_clouds(
+    monkeypatch: pytest.MonkeyPatch,
+    resource: str,
+    adapter_attr: str,
+    expected_cloud: str,
+) -> None:
+    deleted: list[str] = []
+
+    class FakeAdapter:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def delete(self) -> None:
+            deleted.append(expected_cloud)
+
+    monkeypatch.setattr(resource_ops, adapter_attr, FakeAdapter)
+    options = read_options(
+        {
+            "cloud": "all",
+            "resource": resource,
+            "operation_type": "delete",
+            "kms_key_description": "desc",
+            "kms_user": "arn:user",
+        }
+    )
+    dispatch.run_dispatch(CONTEXT, options, resolve_targets(options))
+    assert deleted == [expected_cloud]
 
 
 @pytest.mark.parametrize("resource", ["disk", "all"])
