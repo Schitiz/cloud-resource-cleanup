@@ -127,19 +127,19 @@ def test_a_skipped_pair_builds_no_registry_and_no_notifier(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     fakes = FakeCleaners().install(monkeypatch)
-    built: list[str] = []
+    built: list[tuple[str, str]] = []
 
     def notifiers(crc: Any, route: Any) -> list[Any]:
-        built.append("notifiers")
+        built.append((crc.cloud, "notifiers"))
         return []
 
     def registry() -> Any:
-        built.append("registry")
+        built.append(("registry", "registry"))
         return fakes.registry
 
     monkeypatch.setattr(bridge, "build_notifiers", notifiers)
     monkeypatch.setattr(bridge, "build_registry", registry)
-    for cloud, expected in (("oci", ["registry", "notifiers"]), ("all", ["registry", "notifiers"])):
+    for cloud, expected_cloud in (("oci", "oci"), ("all", "azure")):
         built.clear()
         run_with(monkeypatch, cloud)
-        assert built == expected
+        assert built == [("registry", "registry"), (expected_cloud, "notifiers")]

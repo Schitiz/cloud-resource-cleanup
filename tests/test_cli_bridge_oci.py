@@ -23,8 +23,6 @@ import pytest
 
 from crc.cli import bridge, dispatch
 from crc.cli.inputs import Targets, read_options
-from crc.cli.routes import Route
-from crc.cli.routes import oci as oci_routes
 from crc.cli.runner import CRC as NewCRC
 from crc.core import logger
 from crc.oci.disk import Disk, DiskRuntime
@@ -228,15 +226,6 @@ def _capture() -> Iterator[Collector]:
 def _act(run: Run, crc: Any, options: Any, targets: Targets) -> None:
     kind = run.kind
     if run.routed:
-        if kind.name == "spot_instances":
-            logger.begin("oci", kind.name, kind.operation, run.dry, dispatch._run_options(options))
-            try:
-                bridge.run_routed(
-                    crc, "oci", kind.name, options, targets, Route(oci_routes._spot_instances)
-                )
-            finally:
-                logger.finish()
-            return
         assert bridge.route_for("oci", kind.name) is not None
         handler = dispatch.HANDLERS.get(kind.name)
         dispatch._run_handler(handler, crc, "oci", kind.name, options, targets)

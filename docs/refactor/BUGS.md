@@ -435,7 +435,7 @@ Related: `docs/refactor/FILTER_VARIANTS.md` (how each module filters, section 7 
 
 ## Counts
 
-402 rows: critical 5, high 27, medium 65, low 305. 62 fixed and 5 partly fixed (the LOG rungs, wave FIX-1, ENG-0, ENG-1, ENG-AZU, ENG-GCP and ENG-OCI); the others are open. BUG-366 to BUG-379 were found by the FIX-1 reviews, BUG-380 to BUG-387 by the W2 reviews, BUG-388 to BUG-390 by ENG-0, BUG-391 to BUG-408 by the ENG lanes (IDs 398, 399 and 404 to 407 unused).
+403 rows: critical 5, high 27, medium 65, low 306. 63 fixed and 5 partly fixed (the LOG rungs, wave FIX-1, ENG-0, ENG-1, ENG-AZU, ENG-GCP, ENG-OCI and ENG-CLEAN); the others are open. BUG-366 to BUG-379 were found by the FIX-1 reviews, BUG-380 to BUG-387 by the W2 reviews, BUG-388 to BUG-390 by ENG-0, BUG-391 to BUG-409 by the ENG lanes (IDs 398, 399 and 404 to 407 unused).
 
 ## Notes
 

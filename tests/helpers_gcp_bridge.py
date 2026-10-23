@@ -36,12 +36,23 @@ def instance(
     status: str = "RUNNING",
     created: str = OLD,
     labels: Mapping[str, str] | None = None,
+    spot: bool = False,
+    disks: Sequence[Any] = (),
 ) -> Any:
     return types.SimpleNamespace(
         name=name,
         status=status,
         labels={"k": "v"} if labels is None else dict(labels),
         creation_timestamp=created,
+        scheduling=types.SimpleNamespace(preemptible=spot, provisioning_model=None),
+        disks=list(disks),
+        metadata=None,
+    )
+
+
+def attached_disk(name: str, zone: str = "z1", auto_delete: bool = False) -> Any:
+    return types.SimpleNamespace(
+        source=f"projects/proj/zones/{zone}/disks/{name}", auto_delete=auto_delete
     )
 
 
@@ -111,6 +122,9 @@ class FakeGcp:
     def get_operation(self, project_id: str, scope: str, zone: str, name: str) -> dict[str, str]:
         return {"status": "DONE"}
 
+    def get_disk(self, project: str, scope: str, location: str, disk: str) -> dict[str, Any]:
+        return {"labels": {}}
+
     def close(self) -> None:
         if self.fail_close or (
             self.fail_close_after_delete and any(c[0] == "delete_disk" for c in self.calls)
@@ -174,6 +188,8 @@ def install(monkeypatch: pytest.MonkeyPatch, client: FakeGcp) -> None:
         monkeypatch.setattr(f"crc.gcp.{module}.ComputeDiskClient", lambda: client)
     for module in ("vm_adapter", "vm_cleaner"):
         monkeypatch.setattr(f"crc.gcp.{module}.ComputeVmClient", lambda: client)
+    for module in ("adapter", "cleaner"):
+        monkeypatch.setattr(f"crc.gcp.spot_vm.{module}.ComputeSpotClient", lambda: client)
     ticks = itertools.cycle([0.0, 7.0])
     monkeypatch.setattr(_scan, "time", types.SimpleNamespace(monotonic=lambda: next(ticks)))
     monkeypatch.setattr("crc.service.init_logging", lambda *a, **k: None)

@@ -45,3 +45,39 @@ new file `tests/test_cli_route_skip.py`). `make check` is green.
 
 ### New bugs
 - None found.
+
+## Round 1 (Argon)
+
+Scope reviewed: `git diff f6f209e..HEAD` on branch `eng/clean` (lane `ENG-CLEAN`, commit `048883a`).
+
+### Findings & fixes made in review
+
+1. **Completed step (1) bridge parity coverage for GCP and OCI `spot_instances` and tightened `Route.skip` test** (`tests/helpers_gcp_bridge.py`, `tests/test_cli_bridge_gcp.py`, `tests/test_cli_bridge_oci.py`, `tests/test_cli_route_skip.py`, `docs/refactor/BUGS.md`):
+   - `tests/test_cli_bridge_gcp.py` had its route-table assertion updated to include `spot_instances`, but did not include `spot_instances` in `CASES` or the error-handling parametrizations (`test_routed_run_equals_legacy_handler`, `test_one_failed_delete_is_recorded_and_the_run_goes_on`, `test_first_zone_listing_error_gives_the_same_run`, `test_project_listing_error_raises_the_same_error_after_the_same_report`, `test_later_listing_error_deletes_fewer_never_more`). Added `spot` and `spot-nothing` cases (driving real `SpotVMCleaner` vs legacy `SpotVM` with attached `autoDelete=false` and `autoDelete=true` disks) across all 23 new test cases.
+   - `tests/test_cli_bridge_oci.py::_act` still had a pre-routing `if kind.name == "spot_instances":` workaround that bypassed `dispatch._run_handler` and constructed an ad-hoc `Route(oci_routes._spot_instances)`. Removed the workaround so `spot_instances` is exercised through `dispatch._run_handler` and `bridge.route_for("oci", "spot_instances")` like `disk` and `vm`.
+   - `tests/test_cli_route_skip.py::test_a_skipped_pair_builds_no_registry_and_no_notifier` did not record which cloud built the notifiers, so under `--cloud all` it could not distinguish `azure` building notifiers from `gcp` or `oci` building them. Updated it to record `(crc.cloud, "notifiers")` and assert that only `azure` builds notifiers under `--cloud all`.
+   - Synced the `## Counts` summary line in `docs/refactor/BUGS.md` for the added `BUG-409` row (403 rows, low 306, 63 fixed).
+2. **Blocking — Incomplete task scope (steps (1) warn-only handlers, (2) dead legacy code removal, and (3) `crc/core/selection.py` disposition)**:
+   - The coder followed the prompt's fallback ("If short on time, do (1), then delete in this order and stop green: notify and CRC methods, HANDLERS, adapters"), completing `Route.skip` and routing GCP and OCI `spot_instances`, and stopping green when time ran out.
+   - However, against the full lane scope:
+     - **Step (1) remaining**: `crc/cli/dispatch.py::HANDLERS` still has 6 entries (`disk`, `ip`, `nic`, `vm`, `spot_instance_requests`, `spot_instances`), and the two warn-only pairs (`spot_instances` on AWS, `spot_instance_requests` on non-AWS) still run through legacy dispatch handlers (`_spot_instances`, `_spot_instance_requests`) instead of routes (`Route.skip`).
+     - **Step (2) not done**: Dead legacy methods and branches in `crc/cli/resource_ops.py`, `crc/cli/vm_ops.py`, `crc/cli/notify.py`, `crc/cli/adapter_args.py`, `crc/cli/report_calls.py`, `HANDLERS` in `crc/cli/dispatch.py`, adapter re-exports in `crc.py`, and unused adapter classes in `crc/<cloud>/**` (all adapters except the 5 hash-locked ones and the 4 VM adapters used by `scan_instances_with_tag`) have not been deleted yet, and the tests that directly invoke legacy `HANDLERS`/`CRC`/adapters (`test_cli_crc_parity.py`, `test_cli_bridge_*.py`, `test_cli_dispatch_fix.py`, and module parity tests) have not been retargeted to the Cleaner/engine path. `crc/` Python line count was 19,301 before (`f6f209e`) and is 19,346 after (`HEAD`).
+     - **Step (3) not done**: `crc/core/selection.py` (`build_selection`, `SelectionOptions`) is still present; either `Selection` should be kept minimal (or moved) and `build_selection` + `tests/test_core_selection.py` deleted once CLI tests cover every case, or its concrete coverage gaps must be listed under Owner actions.
+
+### Checklist verification
+
+1. **CLI result parity for every routed pair**: All 20cleanup pairs (`aws` `disk`/`ip`/`keypair`/`kms`/`snapshot`/`spot_instance_requests`/`vm`/`vpc`, `azure` `disk`/`ip`/`nic`/`spot_instances`/`vm`, `gcp` `disk`/`ip`/`spot_instances`/`vm`, `oci` `disk`/`spot_instances`/`vm`) are now in `bridge.TABLES` and verified against the legacy path (selection, mutations and order within a region, `RUN START`/`RESULT`, Slack text and recipients including leftover `Disk` section with `notify_empty=False`, Influx points, console/log lines, exceptions/exit codes, `SAF-037` `--cloud all` skip warning on GCP/OCI `spot_instances`, `--project_id` precheck on GCP `spot_instances`, dry run never mutating). The only behaviour change is plan-all-regions-before-apply for GCP and OCI `spot_instances`, recorded in `BUG-409` (`docs/refactor/BUGS.md`) and one clause in `CLEANUP_SAFETY.md`.
+2. **Parity tests non-vacuous**: `test_cli_main_parity.py` (via `GCP_ROUTED_CALLS` and `tests/routed_calls_oci.py`), `test_cli_bridge_gcp.py` (124 tests), `test_cli_bridge_oci.py` (104 tests), `test_cli_bridge_azu.py`, `test_cli_bridge_aws.py`, `test_cli_bridge_parity.py`, `test_cli_route_skip.py`, `test_cli_crc_parity.py`, `test_cli_args_parity.py`, `test_core_selection.py`, and all module parity tests reach real or recording fake cleaners and assert the oracle facts.
+3. **Hash-locked safety tests & engine copies**: All 5 hash-locked test files (`tests/test_aws_disk.py`, `tests/test_aws_spot_instance_requests.py`, `tests/test_azu_spot_vm.py`, `tests/test_gcp_spot_vm.py`, `tests/test_oci_spot_vm.py`) and `tests/archtest/safety_lock.json` are untouched and passing. Verified that all 5 engine copies exist and pass (`tests/test_aws_disk_engine.py`, `tests/test_aws_spot_instance_requests_engine.py`, `tests/test_azu_spot_vm_engine.py`, `tests/test_gcp_spot_vm_engine.py`, `tests/test_oci_spot_vm_engine.py`), covering every locked SAF ID.
+4. **Protected files**: No oracle (`tests/legacy/*.txt`), archtest (`tests/archtest/*.py`, `safety_lock.json`, `frozen_inputs.json`), guardrail (`AGENTS.md`, `ARCHITECTURE.md`, `.cursor/**`, `pyproject.toml`, `Makefile`), or `requirements*.txt` file was edited; `tests/archtest/test_count_floor.txt` raised to `44396` via `make raise-test-floor`.
+5. **Limits & README sync**: All touched files are well under 250 lines and functions under 60 lines (`ARCH-004`); `crc/cli/README.md` and `crc/cli/routes/README.md` are in sync (`ARCH-002`).
+
+### Gates & test count
+
+- `python3 -m ruff check .`: passed
+- `python3 -m mypy`: passed (361 source files)
+- `lint-imports`: passed (5 contracts kept, 0 broken)
+- `python3 -m pytest -q -n auto`: **44396 passed in 55.14s** (`make check` total ~66s)
+- `python3 -m tests.archtest.test_count check`: `ARCH-008: 44396 tests, floor 44396`
+
+VERDICT: CHANGES_REQUESTED

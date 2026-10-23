@@ -18,6 +18,7 @@ from tests.helpers_gcp_bridge import (
     FakeGcp,
     Outcome,
     address,
+    attached_disk,
     disk,
     instance,
     run_pair,
@@ -66,6 +67,25 @@ def vms() -> FakeGcp:
     )
 
 
+def spots() -> FakeGcp:
+    return FakeGcp(
+        {
+            "z1": [
+                instance(
+                    "vm1",
+                    spot=True,
+                    labels={"k": "v", "ttl": "{'hours': 1}"},
+                    disks=[attached_disk("sd1"), attached_disk("sd-auto", auto_delete=True)],
+                ),
+                instance("vm2", spot=True, created="2999-01-01T00:00:00.000000+00:00"),
+                instance("vm-std", spot=False),
+                instance("vm-exc", spot=True, labels={"k": "v", "keep": "yes"}),
+            ],
+            "z2": [instance("vm3", spot=True, disks=[attached_disk("sd2", zone="z2")])],
+        }
+    )
+
+
 DISK_GUARDS: dict[str, Any] = {
     "detach_age": AGE,
     "exception_tags": {"keep": ["yes"]},
@@ -100,6 +120,12 @@ CASES: dict[str, tuple[str, dict[str, Any], Callable[[], FakeGcp]]] = {
         "vm",
         {"age": AGE, "filter_tags": {"other": ["v"]}, "operation_type": "delete"},
         vms,
+    ),
+    "spot": ("spot_instances", {**VM_GUARDS, "operation_type": "delete"}, spots),
+    "spot-nothing": (
+        "spot_instances",
+        {"age": AGE, "filter_tags": {"other": ["v"]}, "operation_type": "delete"},
+        spots,
     ),
 }
 
@@ -176,7 +202,7 @@ def test_routed_run_equals_legacy_handler(
     if dry_run:
         assert not [c for c in new.gcp_calls if c[0].startswith(("delete", "stop"))]
         assert any(line.startswith("ACTION") for line in old.run_log) == (
-            case != "vm-nothing"
+            case not in ("vm-nothing", "spot-nothing")
         )
         assert new.gcp_calls == old.gcp_calls
     else:
@@ -184,14 +210,14 @@ def test_routed_run_equals_legacy_handler(
 
 
 @pytest.mark.parametrize("dry_run", [False, True], ids=["real", "dry"])
-@pytest.mark.parametrize("case", ["ip", "disk", "vm-delete", "vm-stop"])
+@pytest.mark.parametrize("case", ["ip", "disk", "vm-delete", "vm-stop", "spot"])
 def test_one_failed_delete_is_recorded_and_the_run_goes_on(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     case: str,
     dry_run: bool,
 ) -> None:
-    fail = {"ip": "a-2", "disk": "d1", "vm-delete": "vm1", "vm-stop": "vm1"}[case]
+    fail = {"ip": "a-2", "disk": "d1", "vm-delete": "vm1", "vm-stop": "vm1", "spot": "vm1"}[case]
 
     def prepare(client: FakeGcp) -> None:
         client.fail_delete = fail
@@ -205,7 +231,7 @@ def test_one_failed_delete_is_recorded_and_the_run_goes_on(
 
 
 @pytest.mark.parametrize("dry_run", [False, True], ids=["real", "dry"])
-@pytest.mark.parametrize("case", ["ip", "disk", "vm-delete"])
+@pytest.mark.parametrize("case", ["ip", "disk", "vm-delete", "spot"])
 def test_first_zone_listing_error_gives_the_same_run(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -222,7 +248,7 @@ def test_first_zone_listing_error_gives_the_same_run(
 
 
 @pytest.mark.parametrize("dry_run", [False, True], ids=["real", "dry"])
-@pytest.mark.parametrize("case", ["ip", "disk", "vm-delete", "vm-stop"])
+@pytest.mark.parametrize("case", ["ip", "disk", "vm-delete", "vm-stop", "spot"])
 def test_project_listing_error_raises_the_same_error_after_the_same_report(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -262,7 +288,7 @@ def test_owner_pings_with_a_project_listing_error_differ_known(
     assert new.influx[0][3]["count"] == old.influx[0][3]["count"] == 0
 
 
-@pytest.mark.parametrize("case", ["ip", "disk", "vm-delete"])
+@pytest.mark.parametrize("case", ["ip", "disk", "vm-delete", "spot"])
 def test_later_listing_error_deletes_fewer_never_more(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, case: str
 ) -> None:
