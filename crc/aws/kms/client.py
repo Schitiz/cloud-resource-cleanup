@@ -1,6 +1,6 @@
 # Copyright (c) Yugabyte, Inc.
 
-"""Typed KMS client Protocols, default factory, constants and the injected runtime of `Kms`."""
+"""Typed KMS client Protocols, default factory, constants and the injected runtime."""
 
 import datetime
 from collections.abc import Callable, Iterable, Mapping
@@ -57,9 +57,8 @@ def boto3_client(region: str) -> KmsClient:
 
 @dataclass(frozen=True, slots=True)
 class KmsRuntime:
-    """Injected collaborators of `Kms`: the SDK client factory and the clock that supplies
-    `now` (the cleaner itself never reads the clock)."""
+    """Injectable collaborators: the SDK client factory and the clock that supplies `now`
+    (the cleaner itself reads `RunContext.now`)."""
 
     client_factory: ClientFactory = boto3_client
     clock: Clock = datetime.datetime.now
-

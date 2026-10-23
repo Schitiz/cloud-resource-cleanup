@@ -5,9 +5,10 @@ import json
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from crc.aws.kms import Kms, KmsCleaner, KmsRuntime, KmsSettings
+from crc.aws.kms import KmsCleaner, KmsSettings
 from crc.core import policy
 from crc.core.cleaner import Operation, RunContext
+from tests.helpers_wc_aws1_engine import deleted_ids, run_cleaner
 
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=datetime.UTC)
 CREATED = NOW - datetime.timedelta(days=3)
@@ -141,10 +142,9 @@ def test_bug_055_skipped_key_is_never_scheduled() -> None:
     )
     tags: dict[str, list[dict[str, str]]] = {"bad": [], "good": []}
     fake = FakeKms(tags, {"bad": mixed})
-    runtime = KmsRuntime(client_factory=lambda region: fake, clock=lambda: NOW)
-    kms = Kms(False, {}, {}, "ci", USER, 7, {"days": 1}, "", runtime)
-    kms.delete()
-    assert kms.get_deleted == ["good"]
+    settings = KmsSettings({}, {}, "ci", USER, 7, {"days": 1}, "")
+    outcome = run_cleaner("aws", "kms", KmsCleaner(lambda region: fake, settings), now=NOW)
+    assert deleted_ids(outcome) == ["good"]
     assert [c for c in fake.calls if c[0] == "schedule_key_deletion"] == [
         ("schedule_key_deletion", "good")
     ]

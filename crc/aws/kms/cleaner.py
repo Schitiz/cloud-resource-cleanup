@@ -4,7 +4,7 @@
 
 `KmsCleaner` implements the `crc.core.cleaner.Cleaner` contract: `plan()` lists the keys
 (`list_keys`) and decides on them (`list_resource_tags`, `describe_key`, `get_key_policy`),
-`apply()` calls `schedule_key_deletion`. The legacy class `crc.py` uses lives in `adapter.py`.
+`apply()` calls `schedule_key_deletion`.
 """
 
 import json

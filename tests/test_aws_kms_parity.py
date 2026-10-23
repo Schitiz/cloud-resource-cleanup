@@ -1,10 +1,9 @@
-"""Parity: `crc.aws.kms.Kms` against main (`tests/legacy/aws_kms.txt`).
+"""Parity: the KMS Cleaner, run through `crc.core.engine`, against main's `Kms`
+(`tests/legacy/aws_kms.txt`).
 
-Both run against the same fake `boto3.client`; SDK calls (in order), results, log records,
-stdout and raised errors must be identical for every case. The registered `Cleaner` path
-(factory with a `RunContext`, `plan()` then `apply()` unless dry run) is compared on results,
-errors, stdout, SDK calls and log records. `kms` works in one region and never lists regions
-(no `describe_regions` fallback to cover); a test asserts that.
+Both run against the same fake `boto3.client`; SDK calls (in order, ignoring client creation),
+results, log records, stdout and raised errors must match for every case. `kms` works in one
+region and never lists regions (no `describe_regions` fallback to cover); a test asserts that.
 """
 
 import datetime
@@ -20,10 +19,13 @@ from typing import Any
 import pytest
 from botocore.exceptions import ClientError, ConnectTimeoutError, EndpointConnectionError
 
-from crc.aws.kms import Kms, KmsCleaner, KmsRuntime, build_kms_cleaner
+from crc.aws.kms import KmsCleaner, KmsSettings, build_kms_cleaner
+from crc.core import engine
 from crc.core.cleaner import Cleaner, Operation, RunContext
-from crc.core.registry import get
+from crc.core.registry import Registry, get
+from crc.core.selection import Selection
 from tests.helpers_log_fix import expected_logs
+from tests.helpers_wc_aws1_engine import deleted_ids, run_cleaner
 from tests.log_fix_aws_misc import RULES
 
 ORACLE = Path(__file__).parent / "legacy" / "aws_kms.txt"
@@ -611,10 +613,6 @@ def _legacy(case: Case) -> Any:
     return _load_oracle().Kms(*_args(case))
 
 
-def _new(case: Case) -> Any:
-    return Kms(*_args(case))
-
-
 def _setup(
     case: Case,
     monkeypatch: pytest.MonkeyPatch,
@@ -712,24 +710,18 @@ def test_every_diverging_case_has_an_expected_outcome() -> None:
     assert {c.id for c in CASES if c.diverges} == set(FIXED)
 
 
-@pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
-def test_matches_main(
-    case: Case,
-    debug_logs: None,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
-    if case.diverges:
-        assert_fixed(case, old, new)
-        return
-    assert new.calls == old.calls
-    assert new.error == old.error
-    assert new.deleted == old.deleted
-    assert new.logs == expected_logs(old.logs, LOG_BUGS, rules=RULES)
-    assert new.stdout == old.stdout
+def _assert_fixed_logs(case: Case, new: Outcome) -> None:
+    """The log lines that state the fixed outcome: selection count, one line per scheduled key
+    (none in a dry run) and the summary."""
+    messages = [m for _, _, m in new.logs]
+    deleted = new.deleted
+    assert f"total number of active Jenkins keys = {len(deleted)}" in messages
+    assert [m for m in messages if m.startswith("CMK - ")] == (
+        [] if case.dry_run else [f"CMK - {k} Deleted from AWS console" for k in deleted]
+    )
+    summary = [m for m in messages if "AWS KMS" in m]
+    assert summary[-1].endswith(f"{deleted}")
+    assert all(lvl < logging.ERROR for _, lvl, _ in new.logs)
 
 
 def _run_cleaner(
@@ -753,15 +745,13 @@ def _run_cleaner(
         },
         now=datetime.datetime.now(),
     )
-    cleaner = get("aws", "kms")(ctx)
+    registry = Registry()
+    registry.register("aws", "kms")(build_kms_cleaner)
     error: tuple[str, str] | None = None
     deleted: list[str] = []
     try:
-        plan = cleaner.plan(ctx)
-        if case.dry_run:
-            deleted = [c.id for c in plan.candidates]
-        else:
-            deleted = list(cleaner.apply(plan, ctx).succeeded)
+        (outcome,) = engine.run(Selection((("aws", "kms"),)), ctx, registry)
+        deleted = deleted_ids(outcome)
     except Exception as e:
         error = (type(e).__name__, str(e))
     return _outcome(aws, caplog, capsys, deleted, error)
@@ -780,12 +770,10 @@ def test_cleaner_protocol_matches_main(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    adapter = _run(_new, case, monkeypatch, caplog, capsys)
     new = _run_cleaner(case, monkeypatch, caplog, capsys)
     if case.diverges:
         assert_fixed(case, old, new)
-        assert _without_client(new.calls) == _without_client(adapter.calls)
-        assert new.logs == adapter.logs
+        _assert_fixed_logs(case, new)
         return
     assert new.error == old.error
     assert new.stdout == old.stdout
@@ -795,6 +783,19 @@ def test_cleaner_protocol_matches_main(
     assert new.deleted == old.deleted
     if case.fails_in_plan:
         assert not [c for c in new.calls if c[0] == "schedule_key_deletion"]
+
+
+@pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
+def test_engine_dry_run_never_schedules(
+    case: Case,
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    dry = Case(**{**case.__dict__, "dry_run": True})
+    new = _run_cleaner(dry, monkeypatch, caplog, capsys)
+    assert not [c for c in new.calls if c[0] == "schedule_key_deletion"]
 
 
 def _find(case_id: str) -> Case:
@@ -870,14 +871,12 @@ def test_quirk_is_preserved(
 ) -> None:
     case = _find(case_id)
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
     cleaner = _run_cleaner(case, monkeypatch, caplog, capsys)
     # BUG-004/BUG-016: the oracle class inherits the live crc.service.Service, so it cannot
     # show the old custom-age-tag behaviour here; tests/test_crc_service_parity.py pins it
     # against the frozen crc_service oracle. Fixed cases assert the new outcome only.
     if case_id not in BUG_004_FIXED:
         assert check(old), "oracle no longer shows the quirk"
-    assert check(new)
     assert check(cleaner)
 
 
@@ -887,29 +886,31 @@ def test_no_region_listing(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     case = _find("schedule")
-    new = _run(_new, case, monkeypatch, caplog, capsys)
+    new = _run_cleaner(case, monkeypatch, caplog, capsys)
     assert new.calls[0] == ("client", "kms", "us-west-2")
     assert [c for c in new.calls if c[0] in ("describe_regions", "session")] == []
 
 
-def test_accumulates_over_delete_calls_like_main(
+def test_repeated_runs_repeat_the_calls_like_main(
     debug_logs: None,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """The oracle accumulates over two `delete()` calls; each engine run starts from a clean
+    state and repeats the same SDK calls and log lines."""
     case = _find("schedule")
-    results = []
-    for build in (_legacy, _new):
-        aws = _setup(case, monkeypatch, caplog, capsys)
-        cleaner = build(case)
-        cleaner.delete()
-        cleaner.delete()
-        results.append(
-            (aws.calls, list(cleaner.get_deleted), [r.getMessage() for r in caplog.records])
-        )
-    assert results[0] == results[1]
-    assert results[0][1] == ["k1", "k2", "k1", "k2"]
+    aws = _setup(case, monkeypatch, caplog, capsys)
+    legacy = _legacy(case)
+    legacy.delete()
+    legacy.delete()
+    old_calls = _without_client(aws.calls)
+    old_lines = [r.getMessage() for r in caplog.records]
+    assert list(legacy.get_deleted) == ["k1", "k2", "k1", "k2"]
+    runs = [_run_cleaner(case, monkeypatch, caplog, capsys) for _ in range(2)]
+    assert [r.deleted for r in runs] == [["k1", "k2"], ["k1", "k2"]]
+    assert old_calls == _without_client(runs[0].calls) * 2
+    assert len(old_lines) == len([m for _, _, m in runs[0].logs]) * 2
 
 
 SKIP_TAGS: Sequence[Any] = [
@@ -924,9 +925,9 @@ SKIP_TAGS: Sequence[Any] = [
 SKIP_SPECS: Sequence[Any] = [{}, None, {"a": []}, {"a": ["1"]}, {"a": ["x"]}, {"b": []}]
 
 
-def _skip_outcome(obj: Any, tag_items: Any) -> tuple[str, Any]:
+def _skip_outcome(decide: Callable[[Any], bool], tag_items: Any) -> tuple[str, Any]:
     try:
-        return ("ok", obj._should_skip_kms(tag_items))
+        return ("ok", decide(tag_items))
     except Exception as e:
         return (type(e).__name__, str(e))
 
@@ -939,8 +940,25 @@ def test_should_skip_kms_matches_main(
     monkeypatch.setattr("crc.service.init_logging", lambda *args, **kwargs: None)
     args: tuple[Any, ...] = (False, {}, spec, DESC, USER, 7, {"days": 1}, "")
     old = _load_oracle().Kms(*args)
-    new = Kms(*args)
-    assert _skip_outcome(new, tag_items) == _skip_outcome(old, tag_items)
+    ctx = RunContext(
+        dry_run=False,
+        operation=Operation.DELETE,
+        options={
+            "filter_tags": {},
+            "exception_tags": spec,
+            "kms_key_description": DESC,
+            "kms_user": USER,
+            "kms_pending_window": 7,
+            "age": {"days": 1},
+            "custom_age_tag_key": "",
+        },
+        now=CLOCK_NOW,
+    )
+    new = build_kms_cleaner(ctx)
+    assert isinstance(new, KmsCleaner)
+    assert _skip_outcome(new.should_skip, tag_items) == _skip_outcome(
+        old._should_skip_kms, tag_items
+    )
 
 
 def test_registered_factory_builds_cleaner() -> None:
@@ -956,12 +974,10 @@ def test_runtime_injection_replaces_boto3(monkeypatch: pytest.MonkeyPatch) -> No
     case = _find("schedule")
     calls: list[tuple[Any, ...]] = []
     monkeypatch.setattr("boto3.client", lambda *a, **k: pytest.fail("boto3 used"))
-    runtime = KmsRuntime(
-        client_factory=lambda region: FakeKms(case, calls), clock=lambda: CLOCK_NOW
-    )
-    kms = Kms(False, {}, {}, DESC, USER, 7, {"days": 1}, "", runtime)
-    kms.delete()
-    assert kms.get_deleted == ["k1", "k2"]
+    settings = KmsSettings({}, {}, DESC, USER, 7, {"days": 1}, "")
+    cleaner = KmsCleaner(lambda region: FakeKms(case, calls), settings)
+    outcome = run_cleaner("aws", "kms", cleaner, now=CLOCK_NOW)
+    assert deleted_ids(outcome) == ["k1", "k2"]
 
 
 @pytest.mark.parametrize(
@@ -978,7 +994,7 @@ def test_key_skipped_is_debug(
     """BUG-357: the oracle warns `KEY SKIPPED`, the new code logs the same text at DEBUG."""
     case = _find(case_id)
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
+    new = _run_cleaner(case, monkeypatch, caplog, capsys)
     assert old.logs != new.logs
     assert ("root", logging.WARNING, "KEY SKIPPED k1") in old.logs
     assert ("root", logging.DEBUG, "KEY SKIPPED k1") in new.logs
