@@ -349,3 +349,7 @@ def test_real_vm_cleaner_through_bridge_matches_oracle_report_names_and_ids(
 
     new = _run(case, run_real_vm)
     assert new == old
+    method = "terminate_instances" if operation == "delete" else "stop_instances"
+    mutating = {"terminate_instances", "stop_instances"}
+    mutations = [call for call in client.calls if call[0] in mutating]
+    assert mutations == ([] if dry_run else [(method, ("i-1",)), (method, ("i-2",))])

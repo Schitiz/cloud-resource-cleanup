@@ -41,3 +41,54 @@ Ran `pip install -r requirements.txt -r requirements-dev.txt && make check`:
 
 VERDICT: APPROVE
 
+
+## Round 2 (Opus)
+
+Scope: `git diff 2bd8e67..HEAD` on `cl2/aws` (commits `fcaf6d9`, `9d11156`), plus this round's fix.
+
+### Round 1 check
+
+Round 1 made no fixes and reported no findings. Its claims hold: the diff of
+`tests/test_cli_bridge_aws.py` is the single import line (`tests.test_cli_crc_parity` ->
+`tests.helpers_cl2_aws`), and an AST comparison of `tests/helpers_cl2_aws.py` against
+`tests/test_cli_crc_parity.py` shows every copied definition (`FULL`, `EMPTY`, `SLACK_MODES`,
+`INFLUX_MODES`, `Scenario`, `Logs`, `make_fake`, `FakeSlack`, `FakeWriter`, `FakeInflux`, `Case`,
+`build`, `scenario_grid`, `AGE`) byte-identical; only the `oracle` fixture differs (module name
+`legacy_crc_main_cl2_aws`).
+
+### Findings
+
+1. **Fixed (test strengthening, no assertion removed):** the real `VmCleaner` test compared only
+   result/Slack/Influx/stdout, so dropping an SDK `terminate_instances`/`stop_instances` call in
+   `crc/aws/vm/cleaner.py` passed all 675 cases (pre-existing gap, not introduced by the lane; the
+   oracle side drives fake adapters, so its SDK calls cannot be compared). Added a fixed expectation
+   in `test_real_vm_cleaner_through_bridge_matches_oracle_report_names_and_ids`: no mutating call
+   in a dry run, otherwise exactly `(method, ("i-1",))`, `(method, ("i-2",))` in that order.
+2. Note (no action): importing the test still loads `crc.cli.resource_ops`, `vm_ops`, `notify`,
+   `adapter_args`, `report_calls` transitively via production `crc.cli.runner` (the allowed `CRC`
+   context object). The deletion lane must cut that import in `runner.py`; the test files themselves
+   do not reference them.
+
+### Checks
+
+1. **grep:** neither owned file imports `crc.cli.resource_ops|vm_ops|notify|adapter_args|report_calls`,
+   `tests.helpers_legacy_handlers` or `tests.test_cli_crc_parity`; every `delete_*`/`stop_*` call is
+   in a `KINDS` lambda run only on `oracle.CRC` (`_legacy`); `NewCRC` is only constructed as context.
+2. **Comparisons:** all comparisons are unchanged and still against `load_legacy_crc()`; the file
+   never asserted run-log lines (the bridge's `init_run_logging` is patched out and stdout equals the
+   oracle's), and exact equality passes, so there is no fixed-bug divergence needing a BUG-NNN.
+   675 cases before and after.
+3. **Mutations (local, reverted):** Slack text in `crc/core/report.py:182` ("following" ->
+   "followng") -> 220 failed; `VmCleaner.apply` dropping the last succeeded name -> 2 failed;
+   skipping `terminate_instances` for `i-2` -> passed before the fix, 1 failed after it.
+4. **Files changed:** `tests/test_cli_bridge_aws.py`, `tests/helpers_cl2_aws.py`, this review file.
+   No `crc/**`, other tests, hash-locked tests, `tests/legacy/*.txt` or `tests/archtest/**`.
+6. **Gates:** `pip install -r requirements.txt -r requirements-dev.txt && make check`: ruff, mypy,
+   lint-imports pass; **44400 passed in 53.49s** (`make check` 1m12.6s wall);
+   `ARCH-008: 44400 tests, floor 44400`. `tests/test_cli_bridge_aws.py`: 675 passed in 2.5s.
+
+## New bugs
+
+None found.
+
+ROUND 2 VERDICT: APPROVE
