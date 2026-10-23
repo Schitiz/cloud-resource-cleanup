@@ -10,9 +10,10 @@ call order of the original implementation.
 """
 
 import logging
+import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 import boto3
 
@@ -20,7 +21,8 @@ from crc.aws import _regionlog
 from crc.aws._base import get_all_regions
 from crc.aws.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
 from crc.aws.vpc.client import Ec2Client, Ec2Resource, Vpc
-from crc.aws.vpc.teardown import tear_down
+from crc.aws.vpc.delete import Sleeper, delete_vpc_with_retries
+from crc.aws.vpc.teardown import has_instances, tear_down
 from crc.core import logger, policy
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext, Skipped
 from crc.core.registry import register
@@ -29,7 +31,6 @@ from crc.service import Service
 _SERVICE_NAME = "ec2"
 _DEFAULT_REGION = "us-west-2"
 _SKIP_CONTEXT = "VPC cleanup"
-_DELETE_RETRIES = 5
 _PROTECTED = "protected"
 
 TagSpec = Mapping[str, Sequence[str]]
@@ -56,12 +57,13 @@ def _all_regions() -> Sequence[str]:
 
 @dataclass(frozen=True, slots=True)
 class VpcRuntime:
-    """Injected collaborators of `VPC`: the SDK client and resource factories and the region
-    lister (no clock: the module has no age gate)."""
+    """Injected collaborators of `VPC`: the SDK client and resource factories, the region
+    lister and the sleep between `delete_vpc` retries (no clock: the module has no age gate)."""
 
     client_factory: ClientFactory = _boto3_client
     resource_factory: ResourceFactory = _boto3_resource
     list_regions: RegionLister = _all_regions
+    sleep: Sleeper = time.sleep
 
 
 def _skip_region(region: str, error: BaseException) -> None:
@@ -76,24 +78,6 @@ def _log_summary(deleted: Sequence[str], *, dry_run: bool) -> None:
     else:
         logging.warning(f"Number of AWS VPCs deleted: {len(items)}")
         logging.warning(f"List of AWS VPCs deleted: {items}")
-
-
-def _delete_vpc_with_retries(client: Ec2Client, vpc: Vpc, region: str | None = None) -> None:
-    run = logger.current()
-    last_error: Exception | None = None
-    for _ in range(_DELETE_RETRIES):
-        try:
-            client.delete_vpc(VpcId=vpc.id)
-            break
-        except Exception as e:
-            last_error = e
-            logging.error(e)
-            logging.error(f"Failed deleting VPC {vpc.id}. Retrying...")
-    else:
-        logging.error(f"Failed to Delete VPC {vpc.id} after {_DELETE_RETRIES} retries")
-        run.fail(region, vpc.id, last_error or "delete_vpc failed")
-        return
-    run.action("deleted", region, vpc.id)
 
 
 class VpcCleaner:
@@ -119,14 +103,17 @@ class VpcCleaner:
         self._exception_tags = exception_tags
         self._notags = notags
         self._vpcs: dict[tuple[str, str], list[Vpc]] = {}
+        self.sleep: Sleeper = time.sleep
 
     def supports(self, operation: Operation) -> bool:
         return operation is Operation.DELETE
 
     def plan(self, context: RunContext) -> Plan:
-        """List every region and decide. Makes no mutating call. Every listed VPC is a
-        candidate (main records them all before the skip check, BUG-012); protected ones carry
-        `protected` in `extra` and are listed in `skipped` too."""
+        """List every region and decide. Makes no mutating call. Default VPCs are skipped and
+        never candidates (BUG-083). Every other listed VPC is a candidate (main records them
+        all before the skip check); protected ones carry `protected` in `extra` and are listed
+        in `skipped` too. Raises `ValueError` before any SDK call when `filter_tags` is empty."""
+        self.require_filter_tags()
         self._vpcs.clear()
         vpc_filter = self.build_filter()
         candidates: list[Candidate] = []
@@ -155,15 +142,25 @@ class VpcCleaner:
         by_region: dict[str, list[Candidate]] = {}
         for candidate in plan.candidates:
             by_region.setdefault(candidate.region, []).append(candidate)
+        kept: set[int] = set()
         for region, items in by_region.items():
             try:
                 client = self._client_factory(region)
                 ec2 = self._resource_factory(region)
-                self.apply_region(client, ec2, items)
+                kept.update(id(c) for c in self.apply_region(client, ec2, items))
             except CONNECTIVITY_ERRORS as e:
                 _skip_region(region, e)
+        ids = [c.id for c in plan.candidates if id(c) not in kept]
         _log_summary(ids, dry_run=False)
         return Result(succeeded=tuple(ids))
+
+    def require_filter_tags(self) -> None:
+        """BUG-083: an empty `filter_tags` would select every VPC of every region."""
+        if not self._filter_tags:
+            raise ValueError(
+                "AWS VPC cleanup needs non-empty filter_tags: an empty tag filter would select "
+                "every VPC of every region; refusing to list or delete any"
+            )
 
     def build_filter(self) -> list[dict[str, Any]]:
         """EC2 `tag:key` filters of `filter_tags` (the values list is passed unchanged)."""
@@ -194,6 +191,10 @@ class VpcCleaner:
         candidates: list[Candidate] = []
         skipped: list[Skipped] = []
         for vpc_id, vpc in zip(ids, vpcs, strict=True):
+            if self.is_default(vpc):
+                logger.current().skip("default_vpc")
+                skipped.append(Skipped(id=vpc_id, reason="default VPC"))
+                continue
             protected = False if dry_run else self.is_protected(vpc)
             self._vpcs.setdefault((region, vpc_id), []).append(vpc)
             candidates.append(
@@ -202,23 +203,34 @@ class VpcCleaner:
             if protected:
                 logger.current().skip("protected")
                 skipped.append(Skipped(id=vpc_id, reason="matches exception_tags or notags"))
-        _regionlog.region_done(region, len(ids), len(ids) - len(skipped), started)
+        selected = sum(1 for c in candidates if not c.extra[_PROTECTED])
+        _regionlog.region_done(region, len(ids), selected, started)
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
 
     def apply_region(
         self, client: Ec2Client, ec2: Ec2Resource, candidates: Sequence[Candidate]
-    ) -> None:
-        """Tear down every unprotected candidate of one region."""
+    ) -> list[Candidate]:
+        """Tear down every unprotected candidate of one region. Returns the unprotected
+        candidates that were kept (instances left, or the VPC could not be deleted)."""
+        kept: list[Candidate] = []
         for candidate in candidates:
             vpc = self._vpcs[(candidate.region, candidate.id)].pop(0)
             if candidate.extra[_PROTECTED]:
                 continue
-            self.delete_vpc(client, ec2, vpc, region=candidate.region)
+            if not self.delete_vpc(client, ec2, vpc, region=candidate.region):
+                kept.append(candidate)
+        return kept
+
+    @staticmethod
+    def is_default(vpc: Vpc) -> bool:
+        """BUG-083: a default VPC is never touched. Anything but an explicit `False` counts
+        as default (fail closed)."""
+        return vpc.is_default is not False
 
     def is_protected(self, vpc: Vpc) -> bool:
-        """BUG-012: main hands the boto3 Vpc resource to a function that iterates tags, so with
-        `exception_tags` or `notags` set a real run raises `TypeError` (a Vpc is not iterable)."""
-        return self.should_skip(cast("Iterable[Mapping[str, str]]", vpc))
+        """Exception tags / notags decision on the VPC's own tags (BUG-012). An untagged VPC
+        (boto3 returns `None`) has no tags."""
+        return self.should_skip(vpc.tags or [])
 
     def should_skip(self, tags: Iterable[Mapping[str, str]]) -> bool:
         """Exception tags (any key) and notags (all keys) decision for one VPC's tags."""
@@ -238,14 +250,20 @@ class VpcCleaner:
 
     def delete_vpc(
         self, client: Ec2Client, ec2: Ec2Resource, vpc: Vpc, *, region: str | None = None
-    ) -> None:
-        """Detach and delete everything the VPC owns, in the order of main, then the VPC."""
+    ) -> bool:
+        """Detach and delete everything the VPC owns, in the order of main, then the VPC.
+        A VPC with instances in its subnets is kept before anything is touched (BUG-088).
+        Returns True when the VPC was deleted."""
+        if has_instances(vpc):
+            logger.current().skip("has_instances")
+            logging.debug(f"Keeping VPC {vpc.id}: instances in its subnets")
+            return False
         try:
             tear_down(client, ec2, vpc)
         except Exception as e:
             logger.current().fail(region, vpc.id, e)
             raise
-        _delete_vpc_with_retries(client, vpc, region)
+        return delete_vpc_with_retries(client, vpc, region, self.sleep)
 
 
 @register("aws", "vpc")
@@ -303,7 +321,7 @@ class VPC(Service):
 
     def _cleaner(self) -> VpcCleaner:
         runtime = self._runtime
-        return VpcCleaner(
+        cleaner = VpcCleaner(
             runtime.client_factory,
             runtime.resource_factory,
             runtime.list_regions,
@@ -311,6 +329,8 @@ class VPC(Service):
             self.exception_tags,
             self.notags,
         )
+        cleaner.sleep = runtime.sleep
+        return cleaner
 
     def _get_filter(self) -> list[dict[str, Any]]:
         return self._cleaner().build_filter()
@@ -326,6 +346,7 @@ class VPC(Service):
         """Delete (or, in a dry run, only list) the matching VPCs of every region."""
         runtime = self._runtime
         cleaner = self._cleaner()
+        cleaner.require_filter_tags()
         vpc_filter = cleaner.build_filter()
         run = logger.current()
         for region in runtime.list_regions():
@@ -333,12 +354,13 @@ class VPC(Service):
             try:
                 client = runtime.client_factory(region)
                 ec2 = runtime.resource_factory(region)
-                vpcs = cleaner.list_vpcs(ec2, vpc_filter)
+                listed = cleaner.list_vpcs(ec2, vpc_filter)
+                vpcs = [vpc for vpc in listed if not self._skip_default(cleaner, vpc)]
                 self.vpc_ids_to_delete.extend(self.get_vpc_ids(vpcs))
                 if self.dry_run:
                     for vpc in vpcs:
                         run.action("would_delete", region, vpc.id)
-                    _regionlog.region_done(region, len(vpcs), len(vpcs), started)
+                    _regionlog.region_done(region, len(listed), len(vpcs), started)
                     continue
                 selected = 0
                 for vpc in vpcs:
@@ -346,8 +368,16 @@ class VPC(Service):
                         run.skip("protected")
                         continue
                     selected += 1
-                    cleaner.delete_vpc(client, ec2, vpc, region=region)
-                _regionlog.region_done(region, len(vpcs), selected, started)
+                    if not cleaner.delete_vpc(client, ec2, vpc, region=region):
+                        self.vpc_ids_to_delete.remove(vpc.id)
+                _regionlog.region_done(region, len(listed), selected, started)
             except CONNECTIVITY_ERRORS as e:
                 _skip_region(region, e)
         _log_summary(self.vpc_ids_to_delete, dry_run=self.dry_run)
+
+    @staticmethod
+    def _skip_default(cleaner: VpcCleaner, vpc: Vpc) -> bool:
+        if not cleaner.is_default(vpc):
+            return False
+        logger.current().skip("default_vpc")
+        return True

@@ -1,6 +1,7 @@
 # Copyright (c) Yugabyte, Inc.
 
-"""Teardown of what an AWS VPC owns before the VPC itself is deleted (order of `main`)."""
+"""Teardown of what an AWS VPC owns before the VPC itself is deleted (order of `main`, without
+the instance termination step: a VPC with instances is kept, BUG-088)."""
 
 from crc.aws.vpc.client import Ec2Client, Ec2Resource, Vpc
 
@@ -26,10 +27,10 @@ def _delete_route_tables(vpc: Vpc) -> None:
             rt.delete()
 
 
-def _terminate_instances(vpc: Vpc) -> None:
-    for subnet in vpc.subnets.all():
-        for instance in subnet.instances.all():
-            instance.terminate()
+def has_instances(vpc: Vpc) -> bool:
+    """True when any subnet of the VPC still has an instance (BUG-088). Read-only: instances
+    are never terminated here; the VPC is kept until its instances are gone."""
+    return any(True for subnet in vpc.subnets.all() for _ in subnet.instances.all())
 
 
 def _delete_endpoints(client: Ec2Client, vpc: Vpc) -> None:
@@ -71,7 +72,6 @@ def tear_down(client: Ec2Client, ec2: Ec2Resource, vpc: Vpc) -> None:
     _detach_default_dhcp_options(ec2, vpc)
     _delete_gateways(vpc)
     _delete_route_tables(vpc)
-    _terminate_instances(vpc)
     _delete_endpoints(client, vpc)
     _delete_security_groups(vpc)
     _delete_peering_connections(client, ec2, vpc)
