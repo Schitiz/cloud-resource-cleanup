@@ -64,7 +64,7 @@ Round 1 fixes checked: the parity comparison now uses `new.calls == _expected_ca
 - (3) Production commands: none use `--resource vpc`.
 - (4) The fail-closed path (`require_filter_tags`) runs before `list_regions` and before any client or resource is created.
 - (5) `git diff 182466d..HEAD` does not touch any locked test, `safety_lock.json`, PLAN.md, STATUS.md, BUGS.md, CLEANUP_SAFETY.md or `tests/legacy/`.
-- (6) README Safety Invariants and Public API are updated. I fixed two NITs in `crc/aws/vpc/README.md`. The Public API line of `VpcCleaner` now lists `require_filter_tags`, `is_default` and the `sleep` attribute, and notes that `apply_region`/`delete_vpc` now report which VPCs were kept. The quirk list said "BUG-084 to BUG-095", which included the fixed BUG-087 and BUG-088; it now reads "BUG-084 to BUG-086 and BUG-089 to BUG-095".
+- (6) README Safety Invariants and Public API are updated. I fixed two NITs in `crc/aws/vpc/README.md`. The Public API line of `VpcCleaner` now lists `require_filter_tags`, `is_default` and the injected retry sleep, and notes that `apply_region`/`delete_vpc` now report which VPCs were kept. The quirk list said "BUG-084 to BUG-095", which included the fixed BUG-087 and BUG-088; it now reads "BUG-084 to BUG-086 and BUG-089 to BUG-095".
 - (7) Owner decision: the remainders (protected VPCs still listed as deleted, the age gate, the dry run not running the instance scan, terminated instances still blocking) are explained there.
 
 ### Findings

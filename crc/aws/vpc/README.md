@@ -14,7 +14,7 @@ Modules:
 ## Public API
 
 - `VPC`: adapter that crc.py calls (delete(), get_deleted, delete_count, vpc_ids_to_delete, get_vpc_ids); runs the cleaner region by region, VPC by VPC, in the order of main.
-- `VpcCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus require_filter_tags, build_filter, list_vpcs, plan_region, apply_region, is_default, is_protected, should_skip and delete_vpc used by the adapter; apply_region and delete_vpc report which VPCs were kept; the `sleep` attribute is the injected sleep between delete retries).
+- `VpcCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus require_filter_tags, build_filter, list_vpcs, plan_region, apply_region, is_default, is_protected, should_skip and delete_vpc used by the adapter; apply_region and delete_vpc report which VPCs were kept; it also holds the injected sleep between delete retries).
 - `VpcRuntime`: frozen dataclass with the injected client factory, resource factory and region lister of VPC (and the sleep between delete retries; no clock: the module has no age gate).
 - `build_vpc_cleaner()`: registry factory behind @register("aws", "vpc"); reads filter_tags, exception_tags and notags from RunContext.options.
 - `has_instances()`: (teardown.py) read-only scan, True when a subnet of the VPC has an instance; the VPC is then kept (BUG-088).
