@@ -46,9 +46,10 @@ attached NICs is now `reason=in_use` (was `reason=attached`), log text only.
 
 ## New bugs
 
-- `crc/core/policy.py` `nic_name_included` / `nic_name_excluded` (plain-substring helpers) are no longer used by
-  `crc/azu/nic.py`; they are only exercised by `tests/test_core_policy.py` (dead code, exists on main: no, it was
-  added by the refactor). Not removed here because `crc/core/` is outside this rung.
+- `crc/core/policy.py:207` `nic_name_included` (plain-substring helper) is no longer used by `crc/azu/nic.py`
+  (`nic_name_excluded` still is, for the literal `exception_regex` fallback); it is only exercised by
+  `tests/test_core_policy.py` (dead code, exists on main: no, it was added by the refactor). Not removed here
+  because `crc/core/` is outside this rung.
 - `docs/refactor/BUGS.md` `BUG-118` (non-string `exception_regex` entry raising `TypeError` only when evaluated)
   is now a `ValueError` before any SDK call as a side effect of `BUG-113`; the `None`-name `TypeError` is kept.
 
@@ -109,3 +110,70 @@ None. No issues in do-not-edit files (`AGENTS.md`, `ARCHITECTURE.md`, `CLEANUP_S
 Test count: 42444 passed at `182466d`, 42474 passed now (+30).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 182466d..HEAD` (same 8 files as Round 1; Round 1's restore of the 25 out-of-scope files holds).
+Round 1 fixes checked: README `## Purpose` / `NicOperations` wording, `tuple[str, ...]` patterns, `exception_regex`
+compiled even when `name_regex` is empty, `BUG-114` parity case and full-outcome `DIVERGING` predicates: all present
+and correct.
+
+### Checks
+
+1. **Bugs fixed, test fails on `182466d`**: `tests/test_azure_nic_fix.py` run against `crc/azu/nic.py` from
+   `182466d` (rest of HEAD unchanged): 22 failed, 3 passed. The 3 that pass are by design
+   (`yb-itest` regex case, `test_production_values_select_the_same_nics_BUG_113`,
+   `test_exception_literal_substring_still_excludes_BUG_113`: parity guards). `BUG-111` / `BUG-122`: both
+   `list_nics()` calls are `network_interfaces.list(self._resource_group)`; the group is never derived from the
+   listed resource. `BUG-113`: `re.search`, `ValueError` before any SDK call, empty `name_regex` entry dropped.
+   `BUG-114`: `virtual_machine` / `private_endpoint` / `private_link_service`, skip reason `in_use`.
+2. **Direction rule / parity**: `tests/legacy/` untouched. Unmarked cases assert full equality with only the
+   `BUG-111` call rename (`_normalised`), which is justified because `BUG-111` changes the listing call for
+   every input. Every `DIVERGING` entry is tagged `BUG-113` or `BUG-114` and asserts the exact new outcome. Nothing
+   main kept is deleted for `exception_regex` (regex OR literal substring; `[""]` fails closed) or for in-use NICs.
+   One input deletes more than main: a `name_regex` entry with regex metacharacters (`nic-.*` now selects
+   `nic-1`; parity case `filter-regex-syntax-is-literal`). That is the owner-approved `BUG-113` decision
+   ("entries are regular expressions matched with re.search") and cannot be done any other way; noted under
+   Owner decision below so the owner sees it. Production values have no metacharacters.
+3. **Production command**: `--name_regex '["yb-itest", "yb-itests", "ui-auto"]'` with `--exception_regex` unset
+   (`crc/cli/args.py:111`, default `None`, so `_compile` gives `()`): same flags, same NIC selection; the
+   listing is now scoped to `$RESOURCE_GROUP` as the notes require. Run-log skip slug `attached` becomes `in_use`.
+4. **Fail closed**: `prepare()` runs first in `plan()`, `apply()` and `NIC.delete()`; `NIC._cleaner()` builds no
+   client (`get_network_client` is passed as a factory), so `ValueError` comes before any SDK call
+   (`azure.calls == []` asserted).
+5. **Protected files**: no diff in `PLAN.md`, `STATUS.md`, `BUGS.md`, `CLEANUP_SAFETY.md`, `tests/archtest/**`,
+   `tests/legacy/**`, the five hash-locked tests, `AGENTS.md`, `ARCHITECTURE.md`, `.cursor/**`.
+6. **README (`ARCH-002`)**: Safety Invariants are correct. Fixed in Round 2: the `AzureNicCleaner` Public API bullet
+   lacked the new public `prepare()`.
+7. **Owner decisions**: documented. Addition: `name_regex` regex semantics can select more NICs than main for
+   entries containing regex metacharacters (see check 2); owner-approved in the task notes, no production impact.
+
+### Fixed in Round 2
+
+- `crc/azu/README.md:37`: `AzureNicCleaner` bullet now lists `prepare` (compiles the patterns, `ValueError` before
+  any SDK call).
+- `crc/azu/nic.py` `NIC` class docstring: "cleans all unattached NICs" became "cleans all NICs of the resource
+  group that are not in use".
+- This file, "New bugs": `nic_name_excluded` is still used (literal `exception_regex` fallback); only
+  `nic_name_included` is dead.
+
+### BLOCKING
+
+None.
+
+### NIT
+
+- `tests/test_azure_nic_parity.py` `test_matches_main` / `test_cleaner_protocol_matches_main`: the
+  `(new.calls, new.error, new.deleted) != (old...)` check is always true because of the `BUG-111` call rename.
+  It is harmless because every `new_shows` predicate asserts the exact outcome. Left as is.
+- No issues in do-not-edit files.
+
+### Gates & test count
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check` (HEAD `9c3a2d0`): ruff all checks
+passed; mypy no issues in 229 source files; lint-imports 5 kept, 0 broken; pytest 42474 passed. After the Round 2
+doc-only edits: `ruff check .` clean, `tests/archtest` + Azure NIC/logger tests 304 passed.
+
+Test count: 42474 passed.
+
+ROUND 2 VERDICT: APPROVE

@@ -266,7 +266,7 @@ def build_nic_cleaner(context: RunContext) -> Cleaner:
 class NIC(Service):
     """
     This class provides an implementation of the Service class for managing NICs on Azure Cloud.
-    By default, it cleans all unattached NICs.
+    By default, it cleans all NICs of the resource group that are not in use.
 
     Attributes: `nics_names_to_delete` (names deleted, or listed in a dry run), `base`,
     `dry_run`, `name_regex`, `exception_regex`. `get_deleted` and `delete_count` read the result.

@@ -34,7 +34,7 @@ copyright comment and declares no export list.
 - `DeletePoller`: Protocol of the handle begin_delete returns (result()).
 - `NicOperations`: Protocol of the two network_interfaces calls used, list and begin_delete (positional arguments); tests pass fakes.
 - `NicNetworkClient`: Protocol of the network client part used (the network_interfaces operations).
-- `AzureNicCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus list_nics, decide and attempt_delete used by the adapter); the client factory is injected through the constructor.
+- `AzureNicCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus prepare (compiles name_regex / exception_regex, ValueError before any SDK call), list_nics, decide and attempt_delete used by the adapter); the client factory is injected through the constructor.
 - `build_nic_cleaner()`: registry factory behind @register("azure", "nic"); reads resource_group, name_regex and exception_regex from RunContext.options and builds the client from `Base`.
 - `NIC`: adapter crc.py calls (delete(), get_deleted, delete_count, nics_names_to_delete, base); runs the cleaner NIC by NIC in the order of main.
 - `SdkDisk`: Protocol of the Azure disk fields read (name, tags, time_created, disk_state).
