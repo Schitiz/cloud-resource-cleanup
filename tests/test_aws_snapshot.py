@@ -187,13 +187,14 @@ def test_adapter_runs_the_cleaner_with_injected_runtime(
     assert adapter.deleted_snapshots == ["a"]
 
 
-def test_adapter_deletes_as_it_goes(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_adapter_deletes_as_it_goes_and_skips_the_region_on_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr("crc.service.init_logging", lambda *args, **kwargs: None)
     client = FakeClient([snap("a"), {"SnapshotId": "b"}])
     runtime = SnapshotRuntime(
         client_factory=lambda region: client, list_regions=lambda: ["r"], clock=lambda: NOW
     )
     adapter = Snapshot(False, 90, None, runtime)
-    with pytest.raises(KeyError):
-        adapter.delete()
+    adapter.delete()
     assert adapter.get_deleted == ["a"]

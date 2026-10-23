@@ -292,6 +292,29 @@ CASES = [
 ]
 
 
+DIVERGES: Mapping[str, str] = {
+    "tag-missing-value-raises": "BUG-144",
+    "tag-missing-key-raises": "BUG-144",
+    "tag-malformed-after-deleted-snapshot": "BUG-144",
+    "missing-start-time": "BUG-149",
+    "missing-snapshot-id": "BUG-149",
+    "missing-snapshots-key": "BUG-149",
+    "naive-start-time": "BUG-149",
+    "start-time-string": "BUG-149",
+    "tags-is-dict": "BUG-149",
+    "exception-tags-not-a-dict": "BUG-149",
+    "ami-ebs-none-raises": "BUG-149",
+    "ami-missing-images-key": "BUG-149",
+    "describe-unexpected-error": "BUG-149",
+    "describe-snapshots-client-error-propagates": "BUG-149",
+    "describe-images-client-error-propagates": "BUG-149",
+}
+"""Cases whose outcome differs from the oracle on purpose; their new outcome is asserted in
+`tests/test_aws_snapshot_fix.py`. Every other case still equals the oracle."""
+
+SAME_CASES = [c for c in CASES if c.id not in DIVERGES]
+
+
 class FakeEc2:
     def __init__(self, aws: "FakeAws", region: str) -> None:
         self.aws = aws
@@ -444,7 +467,7 @@ def debug_logs(caplog: pytest.LogCaptureFixture) -> None:
 LOG_BUGS = {"BUG-359"}
 
 
-@pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
+@pytest.mark.parametrize("case", SAME_CASES, ids=[c.id for c in SAME_CASES])
 def test_matches_main(
     case: Case,
     debug_logs: None,
@@ -476,7 +499,7 @@ def _split_logs(logs: list[tuple[str, int, str]]) -> tuple[list[Any], list[Any]]
     )
 
 
-@pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
+@pytest.mark.parametrize("case", SAME_CASES, ids=[c.id for c in SAME_CASES])
 def test_cleaner_protocol_matches_main(
     case: Case,
     debug_logs: None,
@@ -509,7 +532,7 @@ def _single_region_error_free_matches_exactly(case: Case) -> bool:
     return len(case.regions) == 1 and not case.delete_errors
 
 
-@pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
+@pytest.mark.parametrize("case", SAME_CASES, ids=[c.id for c in SAME_CASES])
 def test_cleaner_protocol_logs_in_order_when_nothing_interleaves(
     case: Case,
     debug_logs: None,
@@ -553,12 +576,6 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
         lambda o: o.error is not None and o.error[0] == "TypeError" and o.calls == [],
     ),
     ("age-days-overflow", lambda o: o.error is not None and o.error[0] == "OverflowError"),
-    ("naive-start-time", lambda o: o.error is not None and o.error[0] == "TypeError"),
-    ("missing-start-time", lambda o: o.error == ("KeyError", "'StartTime'") and o.deleted == ["a"]),
-    (
-        "missing-snapshot-id",
-        lambda o: o.error == ("KeyError", "'SnapshotId'") and o.deleted == ["a"],
-    ),
     ("exception-key-only", lambda o: o.deleted == ["b"]),
     ("exception-value-match", lambda o: o.deleted == ["b"]),
     ("exception-value-case-sensitive", lambda o: o.deleted == ["a"]),
@@ -568,27 +585,16 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
     ("exception-second-key-logged", lambda o: _logged(o, "Snap a has tag b")),
     ("exception-tags-empty", lambda o: o.deleted == ["a"]),
     ("untagged-deleted", lambda o: o.deleted == ["a", "b"]),
-    ("tag-missing-value-raises", lambda o: o.error == ("KeyError", "'Value'") and o.deleted == []),
-    ("tag-missing-key-raises", lambda o: o.error == ("KeyError", "'Key'")),
     ("tag-malformed-ignored-without-exception-tags", lambda o: o.deleted == ["a"]),
     ("tag-malformed-on-young-snapshot-not-read", lambda o: o.error is None and o.deleted == []),
-    (
-        "tag-malformed-after-deleted-snapshot",
-        lambda o: o.error == ("KeyError", "'Value'") and o.deleted == ["a"],
-    ),
-    ("tags-is-dict", lambda o: o.error is not None and o.error[0] == "TypeError"),
-    ("exception-tags-not-a-dict", lambda o: o.error is not None and o.error[0] == "AttributeError"),
     ("exception-tags-duplicate-tag-last-wins", lambda o: o.deleted == ["a"]),
     ("ami-uses-snapshot", lambda o: o.deleted == ["b"]),
     ("ami-in-other-region-not-used", lambda o: o.deleted == ["a"]),
     ("ami-snapshot-id-empty", lambda o: o.deleted == ["a"]),
-    ("ami-ebs-none-raises", lambda o: o.error is not None and o.error[0] == "AttributeError"),
-    ("ami-missing-images-key", lambda o: o.error == ("KeyError", "'Images'") and o.deleted == []),
     (
         "ami-and-protected-logs-protection-only",
         lambda o: (
-            _logged(o, "Snap a has tag keep")
-            and not any("used by AMI" in r[2] for r in o.logs)
+            _logged(o, "Snap a has tag keep") and not any("used by AMI" in r[2] for r in o.logs)
         ),
     ),
     (
@@ -607,13 +613,6 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
         lambda o: o.deleted == ["c"] and any("skipped snapshot cleanup" in r[2] for r in o.logs),
     ),
     ("describe-images-connection-error-skips-region", lambda o: o.deleted == ["c"]),
-    (
-        "describe-images-client-error-propagates",
-        lambda o: (
-            o.error is not None
-            and not any(c == ("describe_snapshots", "ap-south-1", ("self",)) for c in o.calls)
-        ),
-    ),
     ("describe-regions-client-error-propagates", lambda o: o.error is not None and o.deleted == []),
     ("describe-regions-connection-error-falls-back", lambda o: o.deleted == ["a"]),
     ("duplicate-ids-in-region", lambda o: o.deleted == ["a", "a", "b"]),
@@ -677,8 +676,6 @@ def _protected_outcome(
         ([tag("env", "pro")], {"env": "production"}),
         ([tag("b"), tag("a")], {"a": [], "b": []}),
         ([tag("env", "prod"), tag("env", "dev")], {"env": ["prod"]}),
-        ([{"Key": "k"}], {"keep": []}),
-        ([{"Value": "v"}], {"keep": []}),
         ({"keep": "x"}, {"keep": []}),
         ([tag("keep")], ["keep"]),
     ],
