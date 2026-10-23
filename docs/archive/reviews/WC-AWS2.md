@@ -47,3 +47,36 @@ None found.
   - `ARCH-008`: 44415 tests, floor 44415 (ARCH-001..009 and SAF-LOCK all green)
 
 VERDICT: APPROVE
+
+
+## Round 2 (Opus)
+
+### Round 1 fixes and findings
+
+- Rechecked Argon's fixes (`crc/aws/vm/README.md` wording, `crc/aws/disk/README.md` file-length line): correct and in lane.
+- Argon's claims on checks 1, 4, 5 and 6 reproduced independently (below). Its "break a cleaner" check was repeated with different mutations.
+
+### Findings
+
+- **Check (1) Production paths**: `crc/cli/scan.py` (VM adapters), `crc/cli/routes/aws.py`, the `aws` / `snapshot` and `aws` / `vpc` registry factories, and the five adapters built by the hash-locked tests (`crc.aws.disk.Disk`, `crc.aws.spot_instance_requests.SpotInstanceRequests`, azure/gcp/oci `SpotVM`) are untouched. Only `crc/aws/snapshot/adapter.py`, `crc/aws/vpc/adapter.py` and their now-unused runtime/clock helpers (`SnapshotRuntime`, `Clock`, `_UTC_CLOCK` in `snapshot/client.py`, `VpcRuntime`) were deleted.
+- **Check (2) Parity tests**: `tests/test_aws_snapshot_parity.py` and `tests/test_aws_vpc_parity.py` run the registered Cleaner through `crc.core.engine.run` (`tests/helpers_wc_aws2_engine.py::run_through_engine`, which wraps the real registry factory in a fresh `Registry`) for every oracle case, `QUIRKS`, and `DIVERGES` / `DIVERGING` case (BUG-012, BUG-083, BUG-087, BUG-088, BUG-144, BUG-149). The strict per-stream comparison (non-delete calls in order, delete calls in order, plan logs and delete logs against `expected_logs`; VPC: calls per region, log multiset, summary lines, full logs for single-VPC cases) lives in the pre-existing `test_cleaner_protocol_matches_main` tests, now also engine-driven. Broke both cleaners locally (not committed), with mutations different from round 1: `used_by_amis` never adds a snapshot id, and `tear_down` skips `sg.delete()`. 85 parity tests failed, including the engine-driven `test_matches_main` (3 snapshot, 36 VPC) and `test_cleaner_protocol_matches_main` (3 snapshot, 36 VPC). Both files restored.
+- **Check (3) Names and READMEs**: `git grep` finds no `SnapshotRuntime`, `VpcRuntime`, `crc.aws.snapshot.Snapshot`, `crc.aws.vpc.VPC` or `adapter` module import in `crc/`, `crc.py` or `tests/` (only the frozen `tests/legacy/crc_main.txt` oracle). READMEs carry no rung names, refactor history, legacy-path wording or links to moved docs; `docs/refactor/BUGS.md` links are valid (the file exists). The remaining `adapter` wording is for the kept `VM` (scan) and `SpotInstanceRequests` (locked test) classes, plus the `elastic_ips` / `kms` lines left for WC-AWS1.
+- **Fixed**: `crc/aws/snapshot/README.md` (Safety Invariants) said "a listing error in a later region stops the run before the earlier regions are deleted". That is false for snapshots: `SnapshotCleaner.plan` (`crc/aws/snapshot/cleaner.py:93`) catches every per-region error, records it and skips only that region (BUG-149; `test_listing_error_through_the_engine_skips_only_that_region`). Rewritten to say that, and that only `describe_regions` errors or an invalid `age_days` stop the run before any delete.
+- **Check (4) Locked files**: the diff touches none of the five hash-locked test files (`tests/test_aws_disk.py`, `tests/test_aws_spot_instance_requests.py`, `tests/test_{azu,gcp,oci}_spot_vm.py`), no `tests/legacy/*.txt`, nothing in `tests/archtest/**`, `BUGS.md` or `CLEANUP_SAFETY.md`.
+- **Check (5) Sizes and Public API**: largest touched `crc/` file is `crc/aws/vpc/cleaner.py` (243 lines); no touched `crc/` function exceeds 60 lines. `__all__` of `crc.aws.snapshot` and `crc.aws.vpc` match their README Public API sections (ARCH-002 green).
+
+### Notes (non-blocking)
+
+- In both parity files, `test_matches_main` is now a weaker duplicate of `test_cleaner_protocol_matches_main`: it compares mutations (VPC) or a call/log multiset (snapshot) instead of exact order. The exact adapter interleaving cannot hold under the allowed ENG change, and the ordered per-stream comparison survives in the protocol tests, so no oracle fact is lost there.
+- When the run raises (VPC error cases that are not `fails_in_plan`, and snapshot error cases), neither VPC parity test compares log lines any more; the deleted adapter test did. A trial `Counter` comparison of logs (skip warnings excluded) fails in 23 VPC error cases because the oracle's logs after an abort differ from the plan-first Cleaner's. Owner may want a dedicated assertion for the error-path log lines.
+- `test_diverging_case_in_a_dry_run_through_the_engine_never_deletes` (15 cases in `tests/test_aws_snapshot_fix.py`) replaces the 15 removed adapter parameters to keep the test count; its assertions (no error, no `delete_snapshot`, empty stdout) are weaker than the fixed-outcome test they replace, but valid dry-run safety checks.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt`, `rm -rf .mypy_cache`, `make check`: ruff passed, mypy strict passed, lint-imports 5 kept / 0 broken, `pytest -q -n auto`: 44415 passed in 56.56s (`make check` 1m18s wall clock), ARCH-008: 44415 tests, floor 44415; ARCH-001..009 and SAF-LOCK green. Rerun after the README fix: green, 44415 passed in 55.81s (`make check` 1m05s).
+
+## New bugs
+
+None found.
+
+ROUND 2 VERDICT: APPROVE
