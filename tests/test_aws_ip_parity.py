@@ -416,15 +416,73 @@ def debug_logs(caplog: pytest.LogCaptureFixture) -> None:
 
 BUG_011_OLD = ("TypeError", "'bool' object is not iterable")
 
-# BUG-011: notags no longer raises; the new outcome of each diverging case (the oracle
-# still raises the TypeError, asserted in `_assert_diverges`).
-DIVERGED: Mapping[str, Callable[[Outcome], bool]] = {
-    "notags-raises-type-error": lambda o: o.error is None and o.deleted == [],
-    "notags-raises-in-first-region-skips-later-regions": lambda o: (
-        o.error is None and o.deleted == ["1.1.1.1", "2.2.2.2"]
+_DESCRIBE_W2 = [
+    ("client", "ec2", "us-west-2"),
+    ("describe_regions", "us-west-2"),
+    ("client", "ec2", "us-west-2"),
+    ("describe_addresses", "us-west-2"),
+]
+_KEPT_OUTCOME = Outcome(
+    calls=_DESCRIBE_W2,
+    deleted=[],
+    count=0,
+    logs=[
+        ("root", logging.INFO, "Retrieved list of regions: ['us-west-2']"),
+        ("root", logging.WARNING, "number of AWS Elastic IPs deleted: 0"),
+        ("root", logging.WARNING, "List of AWS Elastic IPs deleted: []"),
+        ("root", logging.INFO, "count of items in deleted_ips: 0"),
+    ],
+    stdout="",
+    error=None,
+)
+
+# BUG-011: notags no longer raises; exact new Outcome (calls, deleted, count, logs,
+# stdout, error) for each diverging case (the oracle still raises the TypeError,
+# asserted in `_assert_diverges`).
+DIVERGED: Mapping[str, Outcome] = {
+    "notags-raises-type-error": _KEPT_OUTCOME,
+    "notags-raises-in-first-region-skips-later-regions": Outcome(
+        calls=[
+            *_DESCRIBE_W2,
+            ("release_address", "us-west-2", "eipalloc-1.1.1.1"),
+            ("client", "ec2", "eu-west-1"),
+            ("describe_addresses", "eu-west-1"),
+            ("release_address", "eu-west-1", "eipalloc-2.2.2.2"),
+        ],
+        deleted=["1.1.1.1", "2.2.2.2"],
+        count=TWO,
+        logs=[
+            ("root", logging.INFO, "Retrieved list of regions: ['us-west-2', 'eu-west-1']"),
+            ("root", logging.INFO, "Deleted IP: 1.1.1.1"),
+            ("root", logging.INFO, "Deleted IP: 2.2.2.2"),
+            ("root", logging.WARNING, "number of AWS Elastic IPs deleted: 2"),
+            (
+                "root",
+                logging.WARNING,
+                "List of AWS Elastic IPs deleted: ['1.1.1.1', '2.2.2.2']",
+            ),
+            ("root", logging.INFO, "count of items in deleted_ips: 2"),
+        ],
+        stdout="",
+        error=None,
     ),
-    "notags-dry-run-raises": lambda o: o.error is None and o.deleted == [],
-    "notags-exception-hit-on-second-tag-raises": lambda o: o.error is None and o.deleted == [],
+    "notags-dry-run-raises": Outcome(
+        calls=_DESCRIBE_W2,
+        deleted=[],
+        count=0,
+        logs=[
+            ("root", logging.INFO, "Retrieved list of regions: ['us-west-2']"),
+            (
+                "root",
+                logging.WARNING,
+                "List of AWS Elastic IPs (Total: 0) which will be deleted: []",
+            ),
+            ("root", logging.INFO, "count of items in deleted_ips: 0"),
+        ],
+        stdout="",
+        error=None,
+    ),
+    "notags-exception-hit-on-second-tag-raises": _KEPT_OUTCOME,
 }
 
 
@@ -432,7 +490,7 @@ def _assert_diverges(case: Case, old: Outcome, new: Outcome) -> None:
     assert case.diverges == "BUG-011"
     assert old.error == BUG_011_OLD, "oracle no longer shows BUG-011"
     assert new != old
-    assert DIVERGED[case.id](new)
+    assert new == DIVERGED[case.id]
     assert not [c for c in new.calls if c[0] == "release_address" and case.dry_run]
 
 
@@ -505,8 +563,7 @@ def test_cleaner_protocol_matches_main(
     new = _run_cleaner(case, monkeypatch, caplog, capsys)
     if case.diverges:
         assert old.error == BUG_011_OLD
-        assert DIVERGED[case.id](new)
-        return
+        old = DIVERGED[case.id]
     assert new.error == old.error
     assert new.stdout == old.stdout
     old_releases = [c for c in old.calls if c[0] == "release_address"]
@@ -591,7 +648,7 @@ def test_bug_011_notags_no_longer_raises(
     new = _run(_new, case, monkeypatch, caplog, capsys)
     assert old.error == BUG_011_OLD
     assert new.error is None
-    assert DIVERGED[case_id](new)
+    assert new == DIVERGED[case_id]
 
 
 @pytest.mark.parametrize(("case_id", "check"), QUIRKS, ids=[q[0] for q in QUIRKS])

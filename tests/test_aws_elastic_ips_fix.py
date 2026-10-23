@@ -60,7 +60,9 @@ def planned(cleaner: ElasticIpCleaner) -> list[str]:
 
 def test_notags_key_present_keeps_address() -> None:
     cleaner = build([address("1.1.1.1", keep="yes")], [], notags={"keep": []})
-    assert planned(cleaner) == []
+    plan = cleaner.plan(context())
+    assert [c.id for c in plan.candidates] == []
+    assert [(s.id, s.reason) for s in plan.skipped] == [("1.1.1.1", "matches exception_tags")]
 
 
 def test_notags_value_must_match() -> None:
@@ -127,3 +129,66 @@ def test_adapter_with_notags_does_not_raise(monkeypatch: pytest.MonkeyPatch) -> 
     ips.delete()
     assert ips.get_deleted == ["2.2.2.2"]
     assert released == ["alloc-2.2.2.2"]
+
+
+@pytest.mark.parametrize(
+    ("filter_tags", "expected"),
+    [
+        (
+            {
+                "yb_task": [
+                    "bug_bash_22_9_2023",
+                    "uitest",
+                    "itest",
+                    "itests",
+                    "itest-system",
+                    "db-cross-functional",
+                    "itest-keep-universe",
+                    "itest-system-keep-universe",
+                    "db-cross-functional-keep-universe",
+                    "dev-itest",
+                    "dev-uitest",
+                    "uitest-keep-universe",
+                    "dev-uitest-keep-universe",
+                    "test",
+                    "testing",
+                    "manual-testing",
+                    "manual_testing",
+                    "Test",
+                    "internal_testing",
+                ],
+                "crc": ["gke"],
+            },
+            ["1.1.1.1", "2.2.2.2"],
+        ),
+        (
+            {
+                "yb_task": [
+                    "stress",
+                    "stress-dev",
+                    "stress-chaos",
+                    "stress-lru-cdc",
+                    "stress-smoke-cdc",
+                    "smoke-core",
+                    "stress-smoke-core",
+                    "stress-sqlancer",
+                    "stress-lru-core",
+                    "stress-scale",
+                ]
+            },
+            ["3.3.3.3"],
+        ),
+    ],
+)
+def test_production_jenkins_filter_tags_selection_unchanged(
+    filter_tags: Mapping[str, list[str]], expected: list[str]
+) -> None:
+    addresses = [
+        address("1.1.1.1", yb_task="itest"),
+        address("2.2.2.2", crc="gke"),
+        address("3.3.3.3", yb_task="stress"),
+        address("4.4.4.4", yb_task="production"),
+    ]
+    cleaner = build(addresses, [], filter_tags=filter_tags)
+    assert planned(cleaner) == expected
+
