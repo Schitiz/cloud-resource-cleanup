@@ -1,4 +1,4 @@
-"""ARCH-003: banned constructs in cloud provider packages."""
+"""ARCH-003: banned constructs in cloud provider packages, crc/core, crc/cli and crc/notify."""
 
 import ast
 from collections.abc import Mapping
@@ -8,6 +8,19 @@ from tests.archtest._common import non_legacy_files, parse_module, relpath, viol
 
 RULE = "ARCH-003"
 CLOUD_PACKAGES = ("crc/aws", "crc/azu", "crc/gcp", "crc/oci")
+_ALL_KINDS = frozenset({"re", "clock", "env", "print", "sys.exit"})
+
+# Banned kinds per package. crc/core is pure: no clock, no console output, no exits (its `re`
+# stays legal, crc/core/policy.py owns the regexes; its `env` ban waits for Wave B because
+# crc/core/age.py reads MAX_AGE at call time). crc/cli is the boundary and may read the
+# environment, print, read the clock and exit; it must not compile regexes. crc/notify gets the
+# configuration injected: no env, exit or `re`; console output and timestamps are legitimate.
+PACKAGE_BANS: Mapping[str, frozenset[str]] = {
+    **dict.fromkeys(CLOUD_PACKAGES, _ALL_KINDS),
+    "crc/core": frozenset({"clock", "print", "sys.exit"}),
+    "crc/cli": frozenset({"re"}),
+    "crc/notify": frozenset({"re", "env", "sys.exit"}),
+}
 
 # Explicit exceptions: repo-relative path -> banned kinds that file may use.
 # Kinds: "re", "clock", "env", "print", "sys.exit". Only the repository owner adds entries.
@@ -30,15 +43,15 @@ _FROM_IMPORT_BANS = {
     ("sys", "exit"): "sys.exit",
 }
 _REMEDIATION = {
-    "re": "Do not import `re` in cloud modules. Compile and match regexes in "
+    "re": "Do not import `re` here. Compile and match regexes in "
     "crc/core/policy.py (pure functions on DTOs) and pass the result in.",
     "clock": "Do not read the wall clock for age decisions. Take `now` as a parameter and "
     "decide in crc/core/age.py or crc/core/policy.py. `time.monotonic` and `time.sleep` "
     "are fine for polling and waits.",
-    "env": "Do not read os.environ or os.getenv in cloud modules. Parse env vars once at the "
+    "env": "Do not read os.environ or os.getenv here. Parse env vars once at the "
     "CLI boundary and inject the value through the constructor.",
     "print": "Do not call print. Use the injected logger.",
-    "sys.exit": "Do not call sys.exit in cloud modules. Raise a specific exception with "
+    "sys.exit": "Do not call sys.exit here. Raise a specific exception with "
     "context and let the CLI boundary decide the exit code.",
 }
 
@@ -95,12 +108,12 @@ def check_bans(
     allowlist: Mapping[str, frozenset[str]] = ARCH003_ALLOWLIST,
 ) -> list[str]:
     problems: list[str] = []
-    for package in CLOUD_PACKAGES:
+    for package, banned in PACKAGE_BANS.items():
         for path in non_legacy_files(root, legacy, package):
             rel = relpath(root, path)
             allowed = allowlist.get(rel, frozenset())
             for line, kind in find_bans(parse_module(path)):
-                if kind not in allowed:
+                if kind in banned and kind not in allowed:
                     problems.append(
                         violation(RULE, f"{rel}:{line} uses banned `{kind}`", _REMEDIATION[kind])
                     )

@@ -282,7 +282,11 @@ def test_bug_126_failed_or_incomplete_operation_is_not_recorded(
     ]
 
 
-@pytest.mark.parametrize("result", [None, object(), {}, {"name": ""}], ids=str)
+@pytest.mark.parametrize(
+    "result",
+    [None, object(), {}, {"name": ""}],
+    ids=["None", "object", "{}", "{'name': ''}"],
+)
 def test_bug_126_delete_without_an_operation_name_is_not_recorded(result: object) -> None:
     client = FakeClient({"z": [disk("a")]}, delete_result=lambda name: result)
     _, applied = run(client)

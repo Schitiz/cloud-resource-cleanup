@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from tests.archtest._common import REPO_ROOT, load_legacy
-from tests.archtest.bans import ARCH003_ALLOWLIST, check_bans
+from tests.archtest.bans import ARCH003_ALLOWLIST, PACKAGE_BANS, check_bans
 
 BAD_SNIPPETS = {
     "re": "import re\n",
@@ -69,7 +69,8 @@ def test_arch003_selftest_covers_every_cloud_package(tmp_path: Path, package: st
 
 def test_arch003_selftest_skips_legacy_and_other_packages(tmp_path: Path) -> None:
     _write(tmp_path, "print('x')\n")
-    _write(tmp_path, "print('x')\n", "crc/core/mod.py")
+    _write(tmp_path, "print('x')\n", "crc/service.py")
+    _write(tmp_path, "print('x')\n", "crc/other/mod.py")
     assert check_bans(tmp_path, frozenset({"crc/aws/new_mod.py"})) == []
 
 
@@ -79,3 +80,51 @@ def test_arch003_selftest_allowlist_suppresses_only_listed_kind(tmp_path: Path) 
     messages = check_bans(tmp_path, frozenset(), allow)
     assert len(messages) == 1
     assert "`print`" in messages[0]
+
+
+CORE_BAD = {
+    "clock": "import time\n\nx = time.time()\n",
+    "print": "print('x')\n",
+    "sys.exit": "import sys\n\nsys.exit(1)\n",
+}
+
+
+@pytest.mark.parametrize("snippet", list(CORE_BAD.values()), ids=list(CORE_BAD))
+def test_arch003_selftest_core_is_pure(tmp_path: Path, snippet: str) -> None:
+    _write(tmp_path, snippet, "crc/core/new_mod.py")
+    messages = check_bans(tmp_path, frozenset())
+    assert len(messages) == 1
+    assert messages[0].startswith("ARCH-003: crc/core/new_mod.py:")
+
+
+def test_arch003_selftest_core_may_use_re(tmp_path: Path) -> None:
+    _write(tmp_path, "import re\n\nX = re.compile('a')\n", "crc/core/new_mod.py")
+    assert check_bans(tmp_path, frozenset()) == []
+
+
+def test_arch003_selftest_core_env_ban_is_deferred_to_wave_b() -> None:
+    assert "env" not in PACKAGE_BANS["crc/core"]
+
+
+@pytest.mark.parametrize("package", ["crc/cli", "crc/notify"])
+def test_arch003_selftest_boundary_packages_ban_re(tmp_path: Path, package: str) -> None:
+    _write(tmp_path, "import re\n", f"{package}/new_mod.py")
+    assert len(check_bans(tmp_path, frozenset())) == 1
+
+
+@pytest.mark.parametrize(
+    "snippet", ["import os\n\nx = os.getenv('A')\n", "import sys\n\nsys.exit(1)\n"]
+)
+def test_arch003_selftest_notify_gets_config_injected(tmp_path: Path, snippet: str) -> None:
+    _write(tmp_path, snippet, "crc/notify/new_mod.py")
+    assert len(check_bans(tmp_path, frozenset())) == 1
+
+
+def test_arch003_selftest_boundary_keeps_its_legitimate_constructs(tmp_path: Path) -> None:
+    source = (
+        "import os\nimport sys\nimport time\n\n"
+        "x = os.environ['A']\nprint(time.time())\nsys.exit(1)\n"
+    )
+    _write(tmp_path, source, "crc/cli/new_mod.py")
+    _write(tmp_path, "import time\n\nprint(time.time())\n", "crc/notify/new_mod.py")
+    assert check_bans(tmp_path, frozenset()) == []

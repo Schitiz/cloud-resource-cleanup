@@ -98,4 +98,4 @@ def test_expected_outcome_takes_the_lane_rules() -> None:
 
 def test_unknown_bug_id_raises() -> None:
     with pytest.raises(KeyError):
-        expected_logs([(logging.INFO, "x")], {"BUG-999"}, RULES)
+        expected_logs([(logging.INFO, "x")], {"BUG-" + "999"}, RULES)

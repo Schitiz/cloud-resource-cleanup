@@ -1,4 +1,4 @@
-"""ARCH-005: `plan` methods must be read-only."""
+"""ARCH-005: `plan` methods must be read-only, also through calls into sibling modules."""
 
 import ast
 from pathlib import Path
@@ -87,6 +87,159 @@ def check_plan_readonly(root: Path, legacy: frozenset[str]) -> list[str]:
                     "this call into `apply()` (or a helper that only `apply()` calls), keep the "
                     "order required by CLEANUP_SAFETY.md, and add a test that `plan()` makes "
                     "no mutating client call.",
+                )
+            )
+    return problems
+
+
+_Func = ast.FunctionDef | ast.AsyncFunctionDef
+_Hit = tuple[Path, int, str, str]
+
+
+class _Module:
+    """A parsed module with its top-level functions and the sibling modules it imports."""
+
+    def __init__(self, path: Path, root: Path) -> None:
+        self.path = path
+        self.root = root
+        self.tree = parse_module(path)
+        self.funcs: dict[str, _Func] = {
+            n.name: n for n in self.tree.body if isinstance(n, _FUNCTIONS)
+        }
+        self.func_imports: dict[str, tuple[Path, str]] = {}
+        self.module_imports: dict[str, Path] = {}
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.ImportFrom):
+                self._from_import(node)
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    target = self._sibling(alias.name.split("."), 0)
+                    if target is not None and alias.asname:
+                        self.module_imports[alias.asname] = target
+
+    def _sibling(self, parts: list[str], level: int) -> Path | None:
+        """The `.py` file of a module in this module's own package directory, if any."""
+        package_dir = self.path.parent
+        if level:
+            base = package_dir
+            for _ in range(level - 1):
+                base = base.parent
+            candidate = base.joinpath(*parts)
+        else:
+            candidate = self.root.joinpath(*parts)
+        if candidate.parent != package_dir:
+            return None
+        for option in (candidate.with_suffix(".py"), candidate / "__init__.py"):
+            if option.is_file() and option != self.path:
+                return option
+        return None
+
+    def _from_import(self, node: ast.ImportFrom) -> None:
+        parts = node.module.split(".") if node.module else []
+        target = self._sibling(parts, node.level) if parts else None
+        for alias in node.names:
+            name = alias.asname or alias.name
+            if target is not None:
+                self.func_imports[name] = (target, alias.name)
+                continue
+            as_module = self._sibling([*parts, alias.name], node.level)
+            if as_module is not None:
+                self.module_imports[name] = as_module
+
+
+def _load(cache: dict[Path, _Module], path: Path, root: Path) -> _Module:
+    if path not in cache:
+        cache[path] = _Module(path, root)
+    return cache[path]
+
+
+def _callee(
+    call: ast.Call, module: _Module, cache: dict[Path, _Module]
+) -> tuple[_Module, _Func] | None:
+    """The sibling-module function a call resolves to, if any."""
+    target = call.func
+    if isinstance(target, ast.Name) and target.id in module.func_imports:
+        path, attr = module.func_imports[target.id]
+        sibling = _load(cache, path, module.root)
+        func = sibling.funcs.get(attr)
+        return (sibling, func) if func is not None else None
+    if (
+        isinstance(target, ast.Attribute)
+        and isinstance(target.value, ast.Name)
+        and target.value.id in module.module_imports
+    ):
+        sibling = _load(cache, module.module_imports[target.value.id], module.root)
+        func = sibling.funcs.get(target.attr)
+        return (sibling, func) if func is not None else None
+    return None
+
+
+def _scan_siblings(
+    func: _Func,
+    module: _Module,
+    cache: dict[Path, _Module],
+    seen: set[tuple[Path, str]],
+) -> list[_Hit]:
+    """Mutating calls in sibling-module functions reachable from `func`."""
+    hits: list[_Hit] = []
+    for call in _calls(func):
+        resolved = _callee(call, module, cache)
+        if resolved is None:
+            continue
+        sibling, callee = resolved
+        key = (sibling.path, callee.name)
+        if key in seen:
+            continue
+        seen.add(key)
+        for line, attr, name in _scan(callee, sibling.funcs, {}, {f"f:{callee.name}"}):
+            hits.append((sibling.path, line, attr, name))
+        hits.extend(_scan_siblings(callee, sibling, cache, seen))
+    return hits
+
+
+def find_plan_mutations_in_siblings(path: Path, root: Path) -> list[_Hit]:
+    """Mutating calls in sibling modules reachable from a `plan` method of `path`.
+
+    Follows `from .x import f`, `from . import x` (`x.f()`), the absolute forms of both that
+    name a module of the same package directory, and `import pkg.x as x`. Calls inside `path`
+    itself are the job of `find_plan_mutations`.
+    """
+    module = _Module(path, root)
+    cache: dict[Path, _Module] = {path: module}
+    hits: list[_Hit] = []
+    for cls in (n for n in ast.walk(module.tree) if isinstance(n, ast.ClassDef)):
+        methods = {n.name: n for n in cls.body if isinstance(n, _FUNCTIONS)}
+        plan = methods.get("plan")
+        if plan is not None:
+            hits.extend(_scan_siblings(plan, module, cache, set()))
+            for call in _calls(plan):
+                target = call.func
+                is_self_call = (
+                    isinstance(target, ast.Attribute)
+                    and isinstance(target.value, ast.Name)
+                    and target.value.id in {"self", "cls"}
+                    and target.attr in methods
+                )
+                if is_self_call:
+                    assert isinstance(target, ast.Attribute)
+                    hits.extend(_scan_siblings(methods[target.attr], module, cache, set()))
+    return sorted(set(hits))
+
+
+def check_plan_readonly_siblings(root: Path, legacy: frozenset[str]) -> list[str]:
+    problems: list[str] = []
+    for path in non_legacy_files(root, legacy, "crc"):
+        for hit_path, line, attr, func in find_plan_mutations_in_siblings(path, root):
+            problems.append(
+                violation(
+                    RULE,
+                    f"{relpath(root, hit_path)}:{line} `.{attr}(...)` in `{func}` is reached from "
+                    f"`plan()` of {relpath(root, path)} through a sibling-module call",
+                    "`plan()` backs --dry_run and must only list, describe and filter, also "
+                    "through helpers imported from sibling modules. Move the mutating call into "
+                    "a function that only `apply()` calls (the helper may be split in a read "
+                    "part and a write part), keep the order required by CLEANUP_SAFETY.md, and "
+                    "add a test that `plan()` makes no mutating client call.",
                 )
             )
     return problems

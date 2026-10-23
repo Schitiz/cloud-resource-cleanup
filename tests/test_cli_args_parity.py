@@ -700,6 +700,15 @@ def test_validator_messages_are_pinned(
         assert result == ("raised", kind, message)
 
 
+def _influx_id(value: Any) -> str:
+    """Test id that is the same in every process: set order and object addresses vary."""
+    if isinstance(value, set):
+        return f"set{sorted(value)!r}"
+    if isinstance(value, _Weird):
+        return "weird-object"
+    return repr(value)
+
+
 INFLUX_VALUES: list[Any] = [
     {"url": "u", "org": "o", "bucket": "b"},
     {"url": "u", "org": "o", "bucket": "b", "resource_suffix": "s"},
@@ -728,7 +737,7 @@ INFLUX_VALUES: list[Any] = [
 ]
 
 
-@pytest.mark.parametrize("value", INFLUX_VALUES, ids=repr)
+@pytest.mark.parametrize("value", INFLUX_VALUES, ids=_influx_id)
 def test_validate_influxdb_inputs_matches_main(oracle: ModuleType, value: Any) -> None:
     old = _outcome(lambda: oracle.validate_influxdb_inputs(value))
     new = _outcome(lambda: cli_validate.validate_influxdb_inputs(value))
@@ -736,7 +745,7 @@ def test_validate_influxdb_inputs_matches_main(oracle: ModuleType, value: Any) -
 
 
 @pytest.mark.parametrize("field", ["url", "org", "bucket", "other", "", "URL", "resource_suffix"])
-@pytest.mark.parametrize("value", INFLUX_VALUES, ids=repr)
+@pytest.mark.parametrize("value", INFLUX_VALUES, ids=_influx_id)
 def test_validate_influxdb_input_matches_main(oracle: ModuleType, field: str, value: Any) -> None:
     old = _outcome(lambda: oracle._validate_influxdb_input(value, field))
     new = _outcome(lambda: cli_validate._validate_influxdb_input(value, field))
