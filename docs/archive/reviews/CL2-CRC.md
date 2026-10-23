@@ -78,3 +78,67 @@ Scope reviewed: `git diff 2bd8e67..HEAD` on branch `cl2/crc` (lane `CL2-CRC`).
 - `python3 -m tests.archtest.test_count check`: `ARCH-008: 44400 tests, floor 44400`
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 2bd8e67..HEAD` on `cl2/crc` (plus this round's one-line guard).
+
+### Round 1 fixes re-checked
+- `DIRECT_ACTIONS` / `NOTIFY_SPECS` now cover every `notify_*`, lookup, groups, `write_influxdb` and
+  `ping_on_slack` case; those `lambda c: c.notify_*` / `c.delete_*` acts only ever run on the oracle
+  `CRC` (the routed side gets the substitute act or `run_routed`). Confirmed.
+- The routed `adapters` entries are rebuilt from `RunContext.options` (`adapter_init_from_context`), so
+  they test the route option tables; they are not derived from the oracle. Confirmed non-vacuous by
+  mutation (below).
+- Correction to round 1 item 2: `reads` (adapter property reads) is **not** compared for
+  `OPERATION_CASES`; `OP_COMPARED` has `adapters` but not `reads` / `attributes`. Both are still compared
+  (`for key in old`) for `scan`, `scan_unsupported`, constructor and `get_msg_*` cases. The routed engine
+  has no property reads, so this is an accepted, documented reduction of compared keys, not of cases.
+
+### Checks
+1. **No legacy imports or calls (grep and runtime).** The three files do not import `resource_ops`, `vm_ops`,
+   `notify`, `adapter_args`, `report_calls` or `tests.helpers_legacy_handlers`. Runtime check with a
+   pytest plugin that replaces every function in those five modules, and every non-dunder `CRC` method of
+   `crc.cli.*` except `get_msg` / `scan_instances_with_tag`, with a raiser: the only hit was
+   `VmOps._get_vm` (384x), all from the 960 `scan` / `scan_unsupported` cases, called inside the kept
+   `CRC.scan_instances_with_tag`. No owned test calls `_get_*` / `delete_*` / `stop_*` / `notify_*` of the
+   current `CRC` directly. Note for the deletion lane: `scan_instances_with_tag` needs `_get_vm` too.
+2. **Comparisons and counts.** The old test compared every recorded key for every case; now operation
+   cases compare `result, adapters, slack, influx, stdout` against `load_legacy_crc()`, with no-route
+   pairs asserting rejection by `dispatch.validate_targets` and main's error; the `azure`/`vpc`
+   divergence is asserted with `BUG-084` / `BUG-017` (both "fixed in" in `BUGS.md`). `BUG-031` / `BUG-033`
+   are open bugs, reproduced from main, not divergences. Run-log lines: the pre-change files never asserted
+   RUN START / REGION / ACTION / SKIPPED / ERRORS / RESULT (`init_run_logging` was patched, the log never
+   reached stdout), so nothing needed freezing. Case count unchanged: 11940 in the two owned files.
+3. **Mutations (local, reverted, not committed).** Azure NIC route passing `name_regex` as
+   `exception_regex`: 96 failures. Slack text "the following" changed to "these" in `crc/core/report.py`:
+   2316 failures. Engine `apply` dropping the first candidate (one delete lost): 1412 failures.
+4. **Files changed:** only `tests/test_cli_crc_parity.py`, `tests/helpers_cl2_crc.py` and this review;
+   `tests/test_cli_bridge_parity.py` unchanged (its imports from `tests.test_cli_crc_parity` still resolve).
+   No production, `tests/legacy/*.txt`, archtest or hash-locked file touched.
+
+### Fixed in this round
+- `tests/test_cli_crc_parity.py` `compare`: the fallback branch that runs `case.act` on the current `CRC`
+  now asserts `case.routed in (None, "scan", "scan_unsupported")`, so a future operation added without a
+  `ROUTED` entry fails instead of silently running a legacy `delete_*` / `stop_*`.
+
+### Findings (non-blocking)
+- `ping_owners_raw` (`tests/helpers_cl2_crc.py:486`) reproduces main's `BUG-033` `len()` pre-loop in test
+  code, and `_unrepresentable_disk_run` / `disk_4`..`disk_6` substitute test-written acts. For the
+  shapes production cannot receive (`{"alice": 3}`, `{"alice": None}`, `("d1",)`, `None`, `"d1"`), the
+  "routed" side's `TypeError` / no-op is therefore produced by test code rather than production; the
+  comparison effectively pins the oracle's behaviour. No production coverage is lost (the typed `Report`
+  cannot carry those shapes), but a later lane could turn them into explicit oracle-only assertions
+  marked `BUG-031` / `BUG-033`.
+- Pairs with `cloud="other"` assert only the oracle error plus `route_for(...) is None`; the routed
+  rejection there is argparse `choices`, not exercised here.
+
+## New bugs
+- None found.
+
+### Gates
+- `make check` (after `pip install -r requirements.txt -r requirements-dev.txt`): ruff, mypy (365 files),
+  lint-imports (5 kept) green; pytest **44400 passed in 51.87s**, `make check` total 59.2s (first run before the guard: 44400 passed in 55.47s, 75.9s). Owned files: 11940 passed in 8.96s.
+- `python3 -m tests.archtest.test_count check`: ARCH-008 at the 44400 floor (count unchanged, no floor raise).
+
+ROUND 2 VERDICT: APPROVE

@@ -180,6 +180,8 @@ def compare(oracle_module: ModuleType, case: Case) -> Recorded:
         return compare_notify(oracle_module, case, case.routed.removeprefix("notify:"))
     spec = ROUTED.get(case.routed or "")
     if spec is None:
+        # Only the CRC context object itself (constructor, get_msg, scan) may run on NewCRC.
+        assert case.routed in (None, "scan", "scan_unsupported"), f"{case.name}: no routed spec"
         new = execute(NewCRC, [sys.modules[NewCRC.scan_instances_with_tag.__module__]], case)
         for key in old:
             assert new[key] == old[key], f"{case.name}: {key} differs"
