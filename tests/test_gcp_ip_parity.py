@@ -1,9 +1,10 @@
-"""Parity: `crc.gcp.ip.IP` against main (`tests/legacy/gcp_ip.txt`).
+"""Parity: the GCP IP Cleaner, run through `crc.core.engine`, against main's `IP`
+(`tests/legacy/gcp_ip.txt`).
 
-Both run against the same fake `google.cloud.compute_v1` clients; SDK calls (in order), results,
-log records, stdout and raised errors must be identical for every case. The registered `Cleaner`
-path (factory with a `RunContext`, `plan()` then `apply()` unless dry run) is compared on
-results, errors, stdout, delete calls and log records.
+Both run against the same fake `google.cloud.compute_v1` clients; SDK mutations, results, log
+records, stdout and raised errors must match for every case (fixed bugs: see `DIVERGING`). The
+one allowed difference: the cleaner lists every region before it deletes, so a listing error in
+a later region stops the run before any delete (fewer deletes, never more).
 """
 
 import datetime
@@ -19,10 +20,13 @@ import pytest
 from google.api_core.exceptions import PermissionDenied, ServiceUnavailable
 from google.auth.exceptions import DefaultCredentialsError
 
+from crc.core import engine
 from crc.core.cleaner import Cleaner, Operation, RunContext
-from crc.core.registry import get
-from crc.gcp.ip import IP, IpCleaner, build_ip_cleaner
+from crc.core.registry import Registry, get
+from crc.core.selection import Selection
+from crc.gcp.ip import ComputeIpClient, IpCleaner, build_ip_cleaner
 from tests.helpers_log_fix import expected_logs
+from tests.helpers_wc_gcp_engine import run_engine
 from tests.log_fix_gcp import RULES
 
 ORACLE = Path(__file__).parent / "legacy" / "gcp_ip.txt"
@@ -262,8 +266,7 @@ def _expected_diverging_logs(
                 logs.append(("root", logging.INFO, f"Deleting IP address: {address}"))
     if case.dry_run:
         msg = (
-            f"List of GCP IPs (Total: {len(fixed.deleted)}) "
-            f"which will be deleted: {fixed.deleted}"
+            f"List of GCP IPs (Total: {len(fixed.deleted)}) which will be deleted: {fixed.deleted}"
         )
         logs.append(("root", logging.WARNING, msg))
     else:
@@ -358,10 +361,6 @@ def _legacy(case: Case) -> Any:
     return _load_oracle().IP(case.dry_run, PROJECT, case.filter_regex, case.exception_regex)
 
 
-def _new(case: Case) -> Any:
-    return IP(case.dry_run, PROJECT, case.filter_regex, case.exception_regex)
-
-
 def _setup(
     case: Case,
     monkeypatch: pytest.MonkeyPatch,
@@ -417,41 +416,6 @@ def debug_logs(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG)
 
 
-@pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
-def test_matches_main(
-    case: Case,
-    debug_logs: None,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
-    assert old.awaited == []
-    assert new.awaited == _expected_awaited(case, new.calls)
-    if case.id in DIVERGING:
-        fixed = DIVERGING[case.id]
-        assert (new.deleted, _deletes(new.calls), new.error) != (
-            old.deleted,
-            _deletes(old.calls),
-            old.error,
-        ), f"{fixed.bug}: oracle no longer shows the bug"
-        assert new.error is None
-        assert new.deleted == fixed.deleted
-        assert new.count == len(fixed.deleted)
-        assert _deletes(new.calls) == fixed.deletes
-        assert new.calls == _expected_diverging_calls(case, fixed)
-        assert new.logs == _expected_diverging_logs(case, fixed)
-        assert new.stdout == old.stdout
-        return
-    assert new.calls == old.calls
-    assert new.error == old.error
-    assert new.deleted == old.deleted
-    assert new.count == old.count
-    assert new.logs == expected_logs(old.logs, BUGS, RULES)
-    assert new.stdout == old.stdout
-
-
 def _run_cleaner(
     case: Case,
     monkeypatch: pytest.MonkeyPatch,
@@ -469,15 +433,17 @@ def _run_cleaner(
         },
         now=NOW,
     )
-    cleaner = get("gcp", "ip")(ctx)
+    registry = Registry()
+    registry.register("gcp", "ip")(build_ip_cleaner)
     error: tuple[str, str] | None = None
     deleted: list[str] = []
     try:
-        plan = cleaner.plan(ctx)
-        if case.dry_run:
-            deleted = [c.id for c in plan.candidates]
-        else:
-            deleted = list(cleaner.apply(plan, ctx).succeeded)
+        (outcome,) = engine.run(Selection((("gcp", "ip"),)), ctx, registry)
+        deleted = (
+            [c.id for c in outcome.plan.candidates]
+            if outcome.result is None
+            else list(outcome.result.succeeded)
+        )
     except Exception as e:
         error = (type(e).__name__, str(e))
     return Outcome(
@@ -496,7 +462,7 @@ def _only(calls: Sequence[tuple[Any, ...]], name: str) -> list[tuple[Any, ...]]:
 
 
 @pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
-def test_cleaner_protocol_matches_main(
+def test_engine_matches_main(
     case: Case,
     debug_logs: None,
     monkeypatch: pytest.MonkeyPatch,
@@ -546,6 +512,25 @@ def test_cleaner_protocol_matches_main(
     if len(case.regions) <= 1:
         assert new.logs == expected[:-1]
         assert new.calls == old.calls
+
+
+@pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
+def test_engine_lists_every_region_before_it_deletes(
+    case: Case,
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    new = _run_cleaner(case, monkeypatch, caplog, capsys)
+    names = [c[0] for c in new.calls]
+    if "addresses.delete" in names:
+        first_delete = names.index("addresses.delete")
+        assert "addresses.list" not in names[first_delete:]
+    if case.dry_run:
+        assert "addresses.delete" not in names
+    if _lists_fail(case):
+        assert _deletes(new.calls) == []
 
 
 def _lists_fail(case: Case) -> bool:
@@ -600,6 +585,12 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
 ]
 
 
+ENGINE_QUIRKS: Mapping[str, Callable[[Outcome], bool]] = {
+    # Allowed change: region 1 is not deleted before the listing of region 2 fails.
+    "addresses-list-permission-denied": lambda o: o.error is not None and o.deleted == [],
+}
+
+
 @pytest.mark.parametrize(("case_id", "check"), QUIRKS, ids=[q[0] for q in QUIRKS])
 def test_quirk_is_preserved(
     case_id: str,
@@ -611,9 +602,9 @@ def test_quirk_is_preserved(
 ) -> None:
     case = _find(case_id)
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
+    new = _run_cleaner(case, monkeypatch, caplog, capsys)
     assert check(old), "oracle no longer shows the quirk"
-    assert check(new)
+    assert ENGINE_QUIRKS.get(case_id, check)(new)
 
 
 FIXED_QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool], Callable[[Outcome], bool]]] = [
@@ -640,9 +631,11 @@ FIXED_QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool], Callable[[Outcome],
     (
         "delete-operation-error",
         lambda o: o.error is None and o.deleted == ["ip-a", "ip-b", "keep-c"] and o.awaited == [],
-        lambda o: o.error is None
-        and o.deleted == ["ip-b", "keep-c"]
-        and o.awaited == [(_EAST, "ip-a"), (_EAST, "ip-b"), (_EAST, "keep-c")],
+        lambda o: (
+            o.error is None
+            and o.deleted == ["ip-b", "keep-c"]
+            and o.awaited == [(_EAST, "ip-a"), (_EAST, "ip-b"), (_EAST, "keep-c")]
+        ),
     ),
 ]
 
@@ -660,27 +653,33 @@ def test_fixed_quirk_diverges_from_main(
 ) -> None:
     case = _find(case_id)
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
+    new = _run_cleaner(case, monkeypatch, caplog, capsys)
     assert case_id in DIVERGING
     assert old_check(old), "oracle no longer shows the bug"
     assert new_check(new)
 
 
-def test_second_delete_call_accumulates_like_main(
+def test_second_run_deletes_again_like_main_second_delete(
     debug_logs: None,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """The oracle accumulates names over two `delete()` calls; each engine run is independent
+    and deletes the same addresses again."""
     case = _find("two-regions")
-    results = []
-    for build in (_legacy, _new):
-        gcp = _setup(case, monkeypatch, caplog, capsys)
-        ips = build(case)
-        ips.delete()
-        ips.delete()
-        results.append((gcp.calls, list(ips.get_deleted), _logs(caplog)))
-    assert (*results[0][:-1], expected_logs(results[0][-1], BUGS, RULES)) == results[1]
+    gcp = _setup(case, monkeypatch, caplog, capsys)
+    ips = _legacy(case)
+    ips.delete()
+    first = _deletes(gcp.calls)
+    ips.delete()
+    assert _deletes(gcp.calls) == first + first
+    assert list(ips.get_deleted) == ["ip-a", "ip-b", "ip-c", "keep-d"] * 2
+    for _ in range(2):
+        new = _run_cleaner(case, monkeypatch, caplog, capsys)
+        assert new.error is None
+        assert new.deleted == ["ip-a", "ip-b", "ip-c", "keep-d"]
+        assert _deletes(new.calls) == first
 
 
 def test_registered_factory_builds_cleaner() -> None:
@@ -699,14 +698,15 @@ def test_default_state_attribute_is_honoured(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     case = _find("status-in-use-skipped")
-    outcomes = []
-    for build in (_legacy, _new):
-        _setup(case, monkeypatch, caplog, capsys)
-        ips = build(case)
-        ips.default_state = "IN_USE"
-        ips.delete()
-        outcomes.append(list(ips.get_deleted))
-    assert outcomes[0] == outcomes[1] == ["a"]
+    _setup(case, monkeypatch, caplog, capsys)
+    ips = _legacy(case)
+    ips.default_state = "IN_USE"
+    ips.delete()
+    _setup(case, monkeypatch, caplog, capsys)
+    cleaner = IpCleaner(ComputeIpClient(), PROJECT, [], [], "IN_USE")
+    outcome = run_engine(cleaner, "ip", now=NOW)
+    assert outcome.result is not None
+    assert list(ips.get_deleted) == list(outcome.result.succeeded) == ["a"]
 
 
 def test_bug_358_address_dump_is_debug_not_info(
@@ -717,11 +717,10 @@ def test_bug_358_address_dump_is_debug_not_info(
 ) -> None:
     case = _find("two-regions")
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
+    new = _run_cleaner(case, monkeypatch, caplog, capsys)
     assert old.logs != new.logs
-    assert new.logs == expected_logs(old.logs, BUGS, RULES)
-    assert [m for _, _, m in new.logs] == [m for _, _, m in old.logs]
-    assert new.calls == old.calls
+    assert Counter(new.logs) == Counter(expected_logs(old.logs, BUGS, RULES)[:-1])
+    assert Counter(m for _, _, m in new.logs) == Counter(m for _, _, m in old.logs[:-1])
     assert new.stdout == old.stdout
     info = [m for _, level, m in new.logs if level == logging.INFO]
     assert not [m for m in info if m.startswith(("{", "namespace("))]

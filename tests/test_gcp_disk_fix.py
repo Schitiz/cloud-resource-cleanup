@@ -13,8 +13,9 @@ import pytest
 
 from crc.core import logger
 from crc.core.cleaner import Operation, RunContext
-from crc.gcp.disk import Disk, DiskCleaner, DiskSettings, DiskView, build_disk_cleaner
+from crc.gcp.disk import DiskCleaner, DiskSettings, DiskView, build_disk_cleaner
 from crc.gcp.spot_vm.settings import DEFAULT_WAIT_SEC
+from tests.helpers_wc_gcp_engine import deleted_ids, run_engine
 
 UTC = datetime.UTC
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=UTC)
@@ -167,14 +168,10 @@ def test_bug_005_notags_skip_is_counted_as_exception_tag(
     assert any("reason=exception_tag count=1" in r.getMessage() for r in run_log.records)
 
 
-def test_bug_005_adapter_and_registry_pass_notags() -> None:
+def test_bug_005_engine_and_registry_pass_notags() -> None:
     client = FakeClient({"z": [disk("a", {"env": "qa"}), disk("b")]})
-    adapter = Disk(
-        False, PROJECT, {}, {}, 1, "", {"days": 1}, {"env": ["qa"]}, [], [], False, "", client,
-        lambda: NOW,
-    )  # fmt: skip
-    adapter.delete()
-    assert adapter.get_deleted == ["b"]
+    outcome = run_engine(DiskCleaner(client, settings(notags={"env": ["qa"]})), "disk", now=NOW)
+    assert deleted_ids(outcome) == ["b"]
     assert ("delete_disk", "z", "a") not in client.calls
     options = {"project_id": PROJECT, "notags": {"env": ["qa"]}, "name_regex": ["b"]}
     built = build_disk_cleaner(RunContext(False, Operation.DELETE, options, NOW))
@@ -220,11 +217,10 @@ def test_bug_006_invalid_name_regex_fails_closed_before_any_call(bad: Any) -> No
     client = FakeClient({"z": [disk("itest-1")]})
     with pytest.raises(ValueError, match="name_regex"):
         DiskCleaner(client, settings(name_regex=bad))
-    adapter = Disk(
-        False, PROJECT, {}, {}, 1, "", {"days": 1}, {}, bad, [], False, "", client, lambda: NOW
-    )
+    options = {"project_id": PROJECT, "detach_age": {"days": 1}, "name_regex": bad}
+    context_ = RunContext(False, Operation.DELETE, options, NOW)
     with pytest.raises(ValueError, match="name_regex"):
-        adapter.delete()
+        build_disk_cleaner(context_)
     assert client.calls == []
 
 
@@ -322,11 +318,11 @@ def test_bug_126_slack_groups_only_confirmed_deletes() -> None:
         {"z": [disk("a", {"owner": "alice"}), disk("b", {"owner": "bob"})]},
         operations={"b": [{"status": "DONE", "error": {"errors": []}}]},
     )
-    adapter = Disk(
-        False, PROJECT, {}, {}, 1, "", {"days": 1}, {}, [], [], True, "owner", client, lambda: NOW
-    )
-    adapter.delete()
-    assert adapter.get_deleted == {"alice": ["a"]}
+    cleaner = DiskCleaner(client, settings(slack_notify_users=True, slack_user_label="owner"))
+    outcome = run_engine(cleaner, "disk", now=NOW)
+    assert outcome.result is not None
+    assert outcome.result.by_owner is not None
+    assert {k: list(v) for k, v in outcome.result.by_owner.items()} == {"alice": ["a"]}
 
 
 # BUG-127: an error on one disk or one zone listing is recorded and the run goes on.
@@ -382,16 +378,13 @@ def test_bug_127_listing_error_while_iterating_keeps_earlier_disks() -> None:
     assert planned == applied == ["a", "b"]
 
 
-def test_bug_127_adapter_deletes_the_other_disks_and_logs_the_summary(
+def test_bug_127_engine_deletes_the_other_disks_and_logs_the_summary(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     caplog.set_level(logging.WARNING)
     client = FakeClient({"z1": PermissionError("denied"), "z2": [disk("b")]})
-    adapter = Disk(
-        False, PROJECT, {}, {}, 1, "", {"days": 1}, {}, [], [], False, "", client, lambda: NOW
-    )
-    adapter.delete()
-    assert adapter.get_deleted == ["b"]
+    outcome = run_engine(DiskCleaner(client, settings()), "disk", now=NOW)
+    assert deleted_ids(outcome) == ["b"]
     messages = [r.getMessage() for r in caplog.records]
     assert "List of GCP disk deleted: ['b']" in messages
     assert client.names()[-1] == "close"
@@ -463,29 +456,27 @@ def test_production_jenkins_flags_selection_unchanged() -> None:
             ]
         }
     )
-    adapter = Disk(
-        False,
-        "yugabyte",
-        filter_tags,
-        exception_tags,
-        None,  # type: ignore[arg-type]
-        "max_retention_age",
-        None,  # type: ignore[arg-type]
-        None,  # type: ignore[arg-type]
-        None,  # type: ignore[arg-type]
-        None,  # type: ignore[arg-type]
-        False,
-        "",
+    cleaner = DiskCleaner(
         client,
-        lambda: NOW,
+        DiskSettings(
+            project_id="yugabyte",
+            filter_labels=filter_tags,
+            exception_labels=exception_tags,
+            exception_regex=None,
+            custom_age_tag_key="max_retention_age",
+            detach_age=None,  # type: ignore[arg-type]
+            notags=None,
+            name_regex=None,
+            slack_notify_users=False,
+            slack_user_label="",
+        ),
     )
-    adapter.delete()
-    assert adapter.get_deleted == ["itest-ok"]
+    assert deleted_ids(run_engine(cleaner, "disk", now=NOW)) == ["itest-ok"]
     assert client.calls == [
         ("list_zones",),
         ("list_disks", "us-west1-a"),
+        ("close",),
         ("delete_disk", "us-west1-a", "itest-ok"),
         ("get_operation", "zone", "us-west1-a", "op-itest-ok"),
         ("close",),
     ]
-

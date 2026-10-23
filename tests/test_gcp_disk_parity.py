@@ -1,10 +1,11 @@
-"""Parity: `crc.gcp.disk.Disk` against main (`tests/legacy/gcp_disk.txt`).
+"""Parity: the GCP disk Cleaner, run through `crc.core.engine`, against main's `Disk`
+(`tests/legacy/gcp_disk.txt`).
 
 Both run against the same fake `googleapiclient.discovery.build` and
-`google.cloud.compute_v1.DisksClient`, with a frozen clock; SDK calls (in order), results,
-count, log records, stdout and raised errors must be identical for every case. The registered
-`Cleaner` path (factory with a `RunContext`, `plan()` then `apply()` unless dry run) is compared
-on results, errors, stdout, delete calls and log records.
+`google.cloud.compute_v1.DisksClient`, with a frozen clock; SDK mutations, results, log records,
+stdout and raised errors must match for every case (fixed bugs: see `DIVERGING`). The one
+allowed difference: the cleaner lists and filters every zone before it deletes, so a listing
+error in a later zone stops the run before any delete (fewer deletes, never more).
 """
 
 import datetime
@@ -21,9 +22,13 @@ import pytest
 from google.api_core.exceptions import PermissionDenied, ServiceUnavailable
 from google.auth.exceptions import DefaultCredentialsError
 
+from crc.core import engine
 from crc.core.cleaner import Cleaner, Operation, RunContext
-from crc.core.registry import get
-from crc.gcp.disk import Disk, DiskCleaner, build_disk_cleaner
+from crc.core.registry import Registry, get
+from crc.core.selection import Selection
+from crc.gcp import disk_client
+from crc.gcp._common import TIME_FORMAT
+from crc.gcp.disk import DiskCleaner, build_disk_cleaner
 from tests.helpers_log_fix import expected_logs
 from tests.log_fix_gcp import RULES
 
@@ -678,10 +683,6 @@ def _legacy(case: Case) -> Any:
     return _load_oracle().Disk(**_args(case))
 
 
-def _new(case: Case) -> Any:
-    return Disk(**_args(case), clock=lambda: NOW)
-
-
 def _setup(
     case: Case,
     monkeypatch: pytest.MonkeyPatch,
@@ -737,27 +738,6 @@ def debug_logs(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG)
 
 
-@pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
-def test_matches_main(
-    case: Case,
-    debug_logs: None,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
-    if case.diverges:
-        _assert_fixed(case, old, new)
-        return
-    assert new.calls == old.calls
-    assert new.error == old.error
-    assert new.deleted == old.deleted
-    assert new.count == old.count
-    assert new.logs == expected_logs(old.logs, BUGS, RULES)
-    assert new.stdout == old.stdout
-
-
 def _cleaner_context(case: Case) -> RunContext:
     return RunContext(
         dry_run=case.dry_run,
@@ -786,16 +766,17 @@ def _run_cleaner(
 ) -> Outcome:
     gcp = _setup(case, monkeypatch, caplog, capsys)
     ctx = _cleaner_context(case)
-    cleaner = get("gcp", "disk")(ctx)
+    registry = Registry()
+    registry.register("gcp", "disk")(build_disk_cleaner)
     error: tuple[str, str] | None = None
     deleted: Any = {} if case.slack else []
     try:
-        plan = cleaner.plan(ctx)
-        if case.dry_run:
-            deleted = _plain(plan.by_owner) if case.slack else [c.id for c in plan.candidates]
+        (outcome,) = engine.run(Selection((("gcp", "disk"),)), ctx, registry)
+        if outcome.result is None:
+            by_owner, ids = outcome.plan.by_owner, [c.id for c in outcome.plan.candidates]
         else:
-            result = cleaner.apply(plan, ctx)
-            deleted = _plain(result.by_owner) if case.slack else list(result.succeeded)
+            by_owner, ids = outcome.result.by_owner, list(outcome.result.succeeded)
+        deleted = _plain(by_owner) if case.slack else ids
     except Exception as e:
         error = (type(e).__name__, str(e))
     count = len(deleted)
@@ -807,7 +788,7 @@ def _only(calls: Sequence[tuple[Any, ...]], name: str) -> list[tuple[Any, ...]]:
 
 
 @pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
-def test_cleaner_protocol_matches_main(
+def test_engine_matches_main(
     case: Case,
     debug_logs: None,
     monkeypatch: pytest.MonkeyPatch,
@@ -839,6 +820,23 @@ def test_cleaner_protocol_matches_main(
     assert new.logs[-1] == expected[-2]
     if _listed_disks(case) <= 1:
         assert new.logs == expected[:-1]
+
+
+@pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
+def test_engine_never_deletes_before_every_zone_is_listed(
+    case: Case,
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    new = _run_cleaner(case, monkeypatch, caplog, capsys)
+    names = [c[0] for c in new.calls]
+    if "disks.delete.execute" in names:
+        assert "disks.list" not in names[names.index("disks.delete.execute") :]
+        assert not case.dry_run
+    if case.fails_in_plan and not case.diverges:
+        assert "disks.delete.execute" not in names
 
 
 def _listed_disks(case: Case) -> int:
@@ -988,6 +986,12 @@ BUG_004_FIXED = frozenset(
 )
 
 
+ENGINE_QUIRKS: Mapping[str, Callable[[Outcome], bool]] = {
+    # Allowed change: the nameless zone entry stops the run before zone 1 is deleted.
+    "zone-without-name-after-first-zone": lambda o: o.error is not None and o.deleted == [],
+}
+
+
 @pytest.mark.parametrize(("case_id", "check"), QUIRKS, ids=[q[0] for q in QUIRKS])
 def test_quirk_is_preserved(
     case_id: str,
@@ -999,7 +1003,7 @@ def test_quirk_is_preserved(
 ) -> None:
     case = _find(case_id)
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
+    new = _run_cleaner(case, monkeypatch, caplog, capsys)
     # BUG-004/BUG-016: the oracle class inherits the live crc.service.Service, so it cannot
     # show the old custom-age-tag behaviour here; tests/test_crc_service_parity.py pins it
     # against the frozen crc_service oracle. Fixed cases assert the new outcome only.
@@ -1010,23 +1014,28 @@ def test_quirk_is_preserved(
         assert new.error is None
         assert new.deleted == DIVERGING[case_id][0]
     else:
-        assert check(new)
+        assert ENGINE_QUIRKS.get(case_id, check)(new)
 
 
-def test_listing_and_deleting_are_interleaved_like_main(
+def test_engine_lists_every_zone_before_it_deletes(
     debug_logs: None,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """main deletes zone by zone while listing; the cleaner lists first, deletes in the same
+    order."""
     case = _find("two-zones")
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
-    names = [c[0] for c in new.calls]
-    assert names.index("disks.delete.execute") < names.index(
-        "disks.list", names.index("disks.list") + 1
+    new = _run_cleaner(case, monkeypatch, caplog, capsys)
+    old_names = [c[0] for c in old.calls]
+    assert old_names.index("disks.delete.execute") < old_names.index(
+        "disks.list", old_names.index("disks.list") + 1
     )
-    assert new.calls == old.calls
+    names = [c[0] for c in new.calls]
+    assert "disks.list" not in names[names.index("disks.delete.execute") :]
+    assert _only(new.calls, "disks.delete.execute") == _only(old.calls, "disks.delete.execute")
+    assert _only(new.calls, "disks.list") == _only(old.calls, "disks.list")
 
 
 def test_second_delete_call_accumulates_like_main(
@@ -1035,15 +1044,21 @@ def test_second_delete_call_accumulates_like_main(
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """The oracle accumulates names over two `delete()` calls; each engine run is independent
+    and deletes the same disks again."""
     case = _find("two-zones")
-    results = []
-    for build in (_legacy, _new):
-        gcp = _setup(case, monkeypatch, caplog, capsys)
-        disks = build(case)
-        disks.delete()
-        disks.delete()
-        results.append((_outcome_calls(gcp), list(disks.get_deleted), _logs(caplog)))
-    assert (*results[0][:-1], expected_logs(results[0][-1], BUGS, RULES)) == results[1]
+    gcp = _setup(case, monkeypatch, caplog, capsys)
+    disks = _legacy(case)
+    disks.delete()
+    first = _only(_outcome_calls(gcp), "disks.delete.execute")
+    disks.delete()
+    assert _only(_outcome_calls(gcp), "disks.delete.execute") == first + first
+    assert list(disks.get_deleted) == ["a1", "a2", "b1"] * 2
+    for _ in range(2):
+        new = _run_cleaner(case, monkeypatch, caplog, capsys)
+        assert new.error is None
+        assert new.deleted == ["a1", "a2", "b1"]
+        assert _only(new.calls, "disks.delete.execute") == first
 
 
 def test_disk_state_argument_is_ignored_like_main(
@@ -1052,21 +1067,25 @@ def test_disk_state_argument_is_ignored_like_main(
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """main's `delete(disk_state)` ignores its argument: the same disks go as with the
+    default state, which is what the cleaner (it has no such option) deletes."""
     case = _find("mixed-deletes-old-unattached")
-    results = []
-    for build in (_legacy, _new):
-        gcp = _setup(case, monkeypatch, caplog, capsys)
-        disks = build(case)
-        disks.delete(["Attached"])
-        results.append((_outcome_calls(gcp), list(disks.get_deleted)))
-    assert results[0] == results[1]
-    assert results[0][1] == ["old-a", "old-b"]
+    gcp = _setup(case, monkeypatch, caplog, capsys)
+    disks = _legacy(case)
+    disks.delete(["Attached"])
+    old_calls, old_deleted = _outcome_calls(gcp), list(disks.get_deleted)
+    new = _run_cleaner(case, monkeypatch, caplog, capsys)
+    for name in ("zones.list.execute", "disks.list", "disks.delete.execute"):
+        assert _only(new.calls, name) == _only(old_calls, name)
+    assert new.deleted == old_deleted == ["old-a", "old-b"]
 
 
-def test_class_attributes_match_main() -> None:
+def test_service_constants_and_default_state_match_main() -> None:
     old = _load_oracle().Disk
-    for name in ("service_name", "service_version", "time_format", "default_disk_state"):
-        assert getattr(Disk, name) == getattr(old, name)
+    assert old.service_name == disk_client._SERVICE_NAME
+    assert old.service_version == disk_client._SERVICE_VERSION
+    assert old.time_format == TIME_FORMAT
+    assert old.default_disk_state == ["Unattached"]
 
 
 def test_registered_factory_builds_cleaner() -> None:
@@ -1093,11 +1112,12 @@ def test_bug_358_label_dump_is_debug_not_info(
 ) -> None:
     case = _find("mixed-deletes-old-unattached")
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
+    new = _run_cleaner(case, monkeypatch, caplog, capsys)
     assert old.logs != new.logs
-    assert new.logs == expected_logs(old.logs, BUGS, RULES)
-    assert [m for _, _, m in new.logs] == [m for _, _, m in old.logs]
-    assert new.calls == old.calls
+    assert Counter(new.logs) == Counter(expected_logs(old.logs, BUGS, RULES)[:-1])
+    assert Counter(m for _, _, m in new.logs) == Counter(m for _, _, m in old.logs[:-1])
+    for name in ("zones.list.execute", "disks.list", "disks.delete.execute"):
+        assert _only(new.calls, name) == _only(old.calls, name)
     assert new.stdout == old.stdout
     info = [m for _, level, m in new.logs if level == logging.INFO]
     assert not [m for m in info if m.startswith(("{", "namespace("))]
@@ -1132,5 +1152,14 @@ def test_bug_126_every_accepted_delete_is_followed_by_one_operation_poll(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
-    assert new.all_calls == _with_wait(case, old.calls)
+    new = _run_cleaner(case, monkeypatch, caplog, capsys)
+    mutations = ("disks.delete", "disks.delete.execute", "zoneOperations", "zoneOperations.get")
+    if new.error is not None:
+        assert case.fails_in_plan
+        assert _only(new.calls, "disks.delete.execute") == []
+        return
+
+    def muts(calls: Sequence[tuple[Any, ...]]) -> list[tuple[Any, ...]]:
+        return [c for c in calls if str(c[0]).startswith(mutations)]
+
+    assert muts(new.all_calls) == muts(_with_wait(case, old.calls))
