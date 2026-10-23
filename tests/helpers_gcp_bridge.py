@@ -30,9 +30,18 @@ def disk(name: str, *, users: Sequence[str] = (), labels: Mapping[str, str] | No
     )
 
 
-def instance(name: str, *, status: str = "RUNNING", created: str = OLD) -> Any:
+def instance(
+    name: str,
+    *,
+    status: str = "RUNNING",
+    created: str = OLD,
+    labels: Mapping[str, str] | None = None,
+) -> Any:
     return types.SimpleNamespace(
-        name=name, status=status, labels={"k": "v"}, creation_timestamp=created
+        name=name,
+        status=status,
+        labels={"k": "v"} if labels is None else dict(labels),
+        creation_timestamp=created,
     )
 
 
@@ -48,6 +57,8 @@ class FakeGcp:
     fail_delete: str | None = None
     fail_list: str | None = None
     fail_zones: bool = False
+    fail_close: bool = False
+    fail_close_after_delete: bool = False
     calls: list[tuple[str, ...]] = field(default_factory=list)
 
     def list_zones(self, project_id: str) -> list[dict[str, str]]:
@@ -101,7 +112,10 @@ class FakeGcp:
         return {"status": "DONE"}
 
     def close(self) -> None:
-        return None
+        if self.fail_close or (
+            self.fail_close_after_delete and any(c[0] == "delete_disk" for c in self.calls)
+        ):
+            raise RuntimeError("close failed")
 
 
 class FakeSlack:

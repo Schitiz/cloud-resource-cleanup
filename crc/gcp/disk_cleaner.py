@@ -44,6 +44,7 @@ class DiskCleaner:
         self._client = client
         self._settings = settings
         self._name_patterns = _name_patterns(settings.name_regex)
+        self.partial_succeeded: list[str] = []
 
     def supports(self, operation: Operation) -> bool:
         return operation is Operation.DELETE
@@ -56,20 +57,23 @@ class DiskCleaner:
         """List every zone and filter. Makes no mutating call."""
         settings = self._settings
         candidates: list[Candidate] = []
+        self.partial_succeeded = []
+        by_owner: dict[str, list[str]] | None = {} if settings.slack_notify_users else None
+        deleted: Deleted = by_owner if by_owner is not None else []
         try:
             for zone_obj in self.zones():
                 zone = zone_obj["name"]
-                candidates.extend(self.plan_zone(zone, lambda: context.now))
+                for candidate in self.plan_zone(zone, lambda: context.now):
+                    candidates.append(candidate)
+                    _record(deleted, settings, candidate.id, candidate.tags)
+                    if context.dry_run:
+                        self.partial_succeeded.append(candidate.id)
+            if context.dry_run:
+                for candidate in candidates:
+                    log_action("delete", candidate, dry_run=True)
+                _log_summary(deleted, dry_run=True)
         finally:
             self._client.close()
-        by_owner: dict[str, list[str]] | None = {} if settings.slack_notify_users else None
-        deleted: Deleted = by_owner if by_owner is not None else []
-        for candidate in candidates:
-            _record(deleted, settings, candidate.id, candidate.tags)
-        if context.dry_run:
-            for candidate in candidates:
-                log_action("delete", candidate, dry_run=True)
-            _log_summary(deleted, dry_run=True)
         return Plan(candidates=tuple(candidates), by_owner=_frozen_groups(by_owner))
 
     def apply(self, plan: Plan, context: RunContext) -> Result:
@@ -78,6 +82,7 @@ class DiskCleaner:
         by_owner: dict[str, list[str]] | None = {} if settings.slack_notify_users else None
         deleted: Deleted = by_owner if by_owner is not None else []
         succeeded: list[str] = []
+        self.partial_succeeded = succeeded
         try:
             succeeded.extend(
                 candidate.id

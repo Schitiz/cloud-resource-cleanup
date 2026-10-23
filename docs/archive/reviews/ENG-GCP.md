@@ -31,3 +31,34 @@ Lane ENG-GCP (branch `eng/gcp`): green partial state. GCP `ip`, `disk` and `vm` 
 - `crc/cli/bridge.py:100` (`_ReportThenRaise._partial`) and `crc/gcp/disk_cleaner.py` `DiskCleaner`: the GCP disk cleaner exposes no `partial_succeeded`, so if `apply()` ever raised mid-run (today `apply_disk` catches every per-disk error, so only a `close()` error can) the report would list nothing where `delete_disks` listed the disks deleted so far (Slack and Influx content only; no extra delete).
 - `crc/cli/bridge.py:84-90` (`_ReportThenRaise.plan`) with `--slack_notify_users` on GCP disk: on a project-level listing error it reports `Plan()` without owner groups, so Slack gets one `Deleted the following 0 gcp Disk(s)` message and Influx a list point (`names='[]'`), where `delete_disks` only called `usergroups_list` (no message) and wrote `names='{}'`. No extra delete; pinned by `test_owner_pings_with_a_project_listing_error_differ_known`. Fix needs the bridge (a `partial_by_owner` hook), so it is left for the owner.
 - `crc/gcp/vm_cleaner.py:218` and `crc/gcp/ip_cleaner.py:79`: `plan()` logs dry-run ACTION lines after all REGION lines (see BUG-400); a dry-run `RESULT` is equal.
+
+## Round 1 (Argon)
+
+Scope reviewed: `git diff 6a98441..HEAD` on branch `eng/gcp` (lane `ENG-GCP`).
+
+### Findings & fixes made in review
+
+1. **Fixed: GCP `DiskCleaner` now exposes `partial_succeeded` for `NotifyMode.REPORT_THEN_RERAISE` and logs dry-run `ACTION` / summary lines before `close()`** (`crc/gcp/disk_cleaner.py`, `crc/gcp/README.md`, `tests/helpers_gcp_bridge.py`, `tests/test_cli_bridge_gcp.py`):
+   - Like AWS `DiskCleaner`, GCP `DiskCleaner` now maintains `self.partial_succeeded: list[str]` in `plan()` (dry-run candidates) and `apply()` (confirmed deletes) and emits dry-run `ACTION` and summary lines inside the `try:` block before `finally: self._client.close()`, matching `Disk.delete()`. When `close()` (or a mid-plan zone entry) raises, `bridge._ReportThenRaise` reports the disks planned or deleted so far to Slack and InfluxDB before re-raising, matching `CRC.delete_disks`.
+   - Added `test_disk_close_error_reports_partial_succeeded_before_reraising` (real and dry run) and expanded `CASES` in `tests/test_cli_bridge_gcp.py` to also exercise `exception_tags`, `notags`, and `custom_age_tag_key` on `disk` and `vm`.
+2. **`spot_instances` left on legacy handler as required**:
+   - Verified that `dispatch._spot_instances` warns and skips `gcp` (and `oci`) under `--cloud all`, which `Route.precheck` cannot express without raising and aborting the run. Leaving `spot_instances` on `HANDLERS["spot_instances"]` and documenting the needed bridge hook under Owner actions follows the lane instructions.
+
+### Checklist verification
+
+1. **CLI result parity for all routed GCP pairs (`ip`, `disk`, `vm` delete and stop)**: selection, mutations and order within each region/zone, `RUN START` / `RESULT` / `ACTION` / `SKIPPED` / `ERRORS` / `FAILED` lines, `Service` / `init_logging` startup, Slack text and recipients (including `link_names=True` and `--slack_notify_users` / `--slack_user_label` owner pings on `disk`), Influx points, console and log lines, exceptions and exit codes, `validate_targets`, `NotifyMode.REPORT_THEN_RERAISE` on `disk`, and `--dry_run` non-mutation match the legacy path; the only behaviour change is plan-all-regions-before-apply, recorded in `BUG-400` (`docs/refactor/BUGS.md`) and one clause in `CLEANUP_SAFETY.md`.
+2. **Parity tests non-vacuous**: `test_cli_main_parity.py` (`BY_CLOUD` via `tests/helpers_cli_routes_gcp.py`), `test_cli_bridge_gcp.py` (101 tests driving real `IpCleaner`, `DiskCleaner`, `VmCleaner` against legacy `CRC` handlers), `test_cli_bridge_parity.py`, `test_cli_crc_parity.py`, `test_cli_args_parity.py`, `test_cli_dispatch_fix.py`, `test_cli_logger.py`, `test_core_selection.py`, and all `test_gcp_*_parity.py` files reach real or recording fake cleaners and assert the oracle facts.
+3. **Hash-locked safety tests**: the 5 locked test files (`tests/test_gcp_spot_vm.py` et al.) and `tests/archtest/safety_lock.json` are untouched and passing; `tests/test_gcp_spot_vm_engine.py` (17 tests) covers every SAF case locked to `tests/test_gcp_spot_vm.py` (`SAF-008`, `SAF-039`, `SAF-041`, `SAF-043`, `SAF-044`, `SAF-045`).
+4. **Protected files**: no oracle (`tests/legacy/*.txt`), archtest (`tests/archtest/*.py`), guardrail (`AGENTS.md`, `ARCHITECTURE.md`, `.cursor/**`, `pyproject.toml`, `Makefile`), or `requirements*.txt` file was edited; `test_count_floor.txt` raised to `43938` via `make raise-test-floor`.
+5. **Limits & README sync**: all touched non-legacy, non-test files are at most 250 lines and functions at most 60 lines (`ARCH-004`); all package READMEs (`crc/cli/README.md`, `crc/cli/routes/README.md`, `crc/gcp/README.md`) are in sync (`ARCH-002`).
+
+### Gates & test count
+
+- `python3 -m ruff check .`: passed
+- `python3 -m mypy`: passed (343 source files)
+- `lint-imports`: passed (5 contracts kept, 0 broken)
+- `python3 -m pytest -q -n auto`: **43938 passed in 54.93s** (`make check` total 66.6s)
+- `python3 -m tests.archtest.test_count check`: `ARCH-008: 43938 tests, floor 43938`
+
+VERDICT: APPROVE
+

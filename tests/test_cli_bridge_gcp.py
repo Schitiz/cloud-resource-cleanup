@@ -41,9 +41,11 @@ def disks() -> FakeGcp:
     return FakeGcp(
         {
             "z1": [
-                disk("d1", labels={"owner": "alice@yugabyte.com"}),
+                disk("d1", labels={"owner": "alice@yugabyte.com", "ttl": "{'hours': 1}"}),
                 disk("d2", users=["vm"]),
-                disk("d3"),
+                disk("d3", labels={"keep": "yes"}),
+                disk("d-notags", labels={"skip": "1"}),
+                disk("d-ttl", labels={"ttl": "{'days': 99999}"}),
             ],
             "z2": [disk("d4", labels={"owner": "alice@yugabyte.com"}), disk("e5")],
         }
@@ -53,29 +55,47 @@ def disks() -> FakeGcp:
 def vms() -> FakeGcp:
     return FakeGcp(
         {
-            "z1": [instance("vm1"), instance("vm2", created="2999-01-01T00:00:00.000000+00:00")],
+            "z1": [
+                instance("vm1", labels={"k": "v", "ttl": "{'hours': 1}"}),
+                instance("vm2", created="2999-01-01T00:00:00.000000+00:00"),
+                instance("vm-exc", labels={"k": "v", "keep": "yes"}),
+                instance("vm-notags", labels={"k": "v", "skip": "1"}),
+            ],
             "z2": [instance("vm3"), instance("vm4", status="TERMINATED")],
         }
     )
 
 
+DISK_GUARDS: dict[str, Any] = {
+    "detach_age": AGE,
+    "exception_tags": {"keep": ["yes"]},
+    "notags": {"skip": ["1"]},
+    "custom_age_tag_key": "ttl",
+}
+VM_GUARDS: dict[str, Any] = {
+    "age": AGE,
+    "filter_tags": TAGS,
+    "exception_tags": {"keep": ["yes"]},
+    "notags": {"skip": ["1"]},
+    "custom_age_tag_key": "ttl",
+}
 CASES: dict[str, tuple[str, dict[str, Any], Callable[[], FakeGcp]]] = {
     "ip": ("ip", {"name_regex": ["a-"], "exception_regex": ["x-"]}, ips),
     "ip-match-all": ("ip", {}, ips),
-    "disk": ("disk", {"name_regex": ["d"], "detach_age": AGE}, disks),
+    "disk": ("disk", {**DISK_GUARDS, "name_regex": ["d"]}, disks),
     "disk-owners": (
         "disk",
-        {"detach_age": AGE, "slack_notify_users": True, "slack_user_label": "owner"},
+        {**DISK_GUARDS, "slack_notify_users": True, "slack_user_label": "owner"},
         disks,
     ),
-    "disk-excluded": ("disk", {"detach_age": AGE, "exception_regex": ["d"]}, disks),
-    "vm-delete": ("vm", {"age": AGE, "filter_tags": TAGS, "operation_type": "delete"}, vms),
+    "disk-excluded": ("disk", {**DISK_GUARDS, "exception_regex": ["d"]}, disks),
+    "vm-delete": ("vm", {**VM_GUARDS, "operation_type": "delete"}, vms),
     "vm-delete-states": (
         "vm",
         {"age": AGE, "operation_type": "delete", "resource_states": ["TERMINATED", "RUNNING"]},
         vms,
     ),
-    "vm-stop": ("vm", {"age": AGE, "filter_tags": TAGS, "operation_type": "stop"}, vms),
+    "vm-stop": ("vm", {**VM_GUARDS, "operation_type": "stop"}, vms),
     "vm-nothing": (
         "vm",
         {"age": AGE, "filter_tags": {"other": ["v"]}, "operation_type": "delete"},
@@ -259,6 +279,24 @@ def test_later_listing_error_deletes_fewer_never_more(
     new_deleted = [c for c in new.gcp_calls if c[0] in deletes]
     assert set(new_deleted) <= set(old_deleted)
     assert len(new_deleted) <= len(old_deleted)
+
+
+@pytest.mark.parametrize("dry_run", [False, True], ids=["real", "dry"])
+def test_disk_close_error_reports_partial_succeeded_before_reraising(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, dry_run: bool
+) -> None:
+    def prepare(client: FakeGcp) -> None:
+        if dry_run:
+            client.fail_close = True
+        else:
+            client.fail_close_after_delete = True
+
+    old, new = run_both(
+        monkeypatch, caplog, "disk", dry_run=dry_run, slack=True, influx=True, prepare=prepare
+    )
+    assert_equal(old, new)
+    assert old.error == "RuntimeError: close failed"
+    assert old.influx[0][3]["names"] == "['d1', 'd4']"
 
 
 def test_route_table_routes_the_kinds_and_leaves_spot_instances_legacy() -> None:
