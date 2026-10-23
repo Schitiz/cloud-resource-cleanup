@@ -73,3 +73,62 @@ Ran `pip install -r requirements.txt -r requirements-dev.txt` followed by `make 
 - `python3 -m tests.archtest.test_count check`: `ARCH-008: 44400 tests, floor 44400`
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 2bd8e67..HEAD` (`de3a2b6` coder, `52265ae` round 1). No code changes made in this round.
+
+### Round 1 fixes re-checked
+
+- `test_ping_on_slack_bad_input_matches_legacy` now pins the exact routed `(type, message)` per bad input
+  next to the unchanged oracle assertions (error, single `usergroups_list` call, empty stdout): correct,
+  stricter than the coder's type-only check.
+- `test_slack_and_user_lookups_match_legacy` prints the lookup return values on both sides, so the
+  returned value is compared, not only mock calls: correct (the old `assert_same` compared only
+  calls/stdout/error, so this is a strengthening).
+- The two engine wiring tests additionally assert `routed_run(...) == old` (bridge-built notifiers)
+  next to the hand-wired `SlackNotifier`/`InfluxNotifier` check: correct.
+
+### Independent checks
+
+1. **No legacy CLI code.** `rg` over `tests/test_notify_parity.py` and `tests/helpers_cl2_notify.py`: no
+   import of `crc.cli.resource_ops`, `vm_ops`, `notify`, `adapter_args`, `report_calls`,
+   `tests.helpers_legacy_handlers`, no load of `crc.py` or `tests/legacy_crc_notify_reference.txt`. The
+   only `notify_*` calls left (`test_notify_parity.py:319`, `:666`, `:731`) run on the oracle instance
+   inside `run(legacy, ...)`. The current `crc.cli.runner.CRC` is only built in
+   `helpers_cl2_notify.context_crc` as the bridge's context object.
+2. **Comparisons and counts.** Old file at `2bd8e67` and new file both collect and pass **995** cases.
+   Every former `assert_same(legacy, current, ...)` is now oracle (`load_legacy_crc`) vs routed
+   (`build_notifiers` + `engine.run` with a stub cleaner, or a bare notifier call), with the same
+   outcome tuple (Slack calls, normalised Influx calls, stdout, error). The three inputs the engine
+   cannot produce (`disk-tuple`, `disk-none`, `vm-without-ids`) and `get_msg(..., None)` are asserted
+   oracle == frozen data (`UNROUTED`), not derived from the routed side; the list `get_msg` cases are
+   compared to `crc.core.report.get_msg`. `test_ping_uses_overridden_lookups` moved from overriding CRC
+   methods to injecting the lookups into `SlackNotifier.ping_owners`: same assertion (`<!subteam^S9>`).
+   No run-log lines (RUN START/REGION/ACTION/SKIPPED/ERRORS/RESULT) were asserted before (checked the
+   old file), so none needed freezing. No `fixed in` BUGS.md row applies to the notify path, so no
+   BUG-tagged divergence is expected; BUG-028/030/034/041/042 assertions are still present.
+3. **Mutations (local, reverted, not committed).**
+   - `crc/notify/slack_owners.py:28`: dropped `link_names=True` on the owner-group channel post ->
+     **117 failed** / 995.
+   - `crc/core/report.py:58`: Azure VM NIC section shows the NIC ids instead of the VM ids (undoes the
+     BUG-028 quirk) -> **12 failed** / 995.
+   Round 1's two mutations (`get_msg` text, Influx `resource` tag) are independent of these. Not vacuous.
+4. **Scope.** Changed files: `tests/test_notify_parity.py`, new `tests/helpers_cl2_notify.py` (lane
+   prefix), `docs/archive/reviews/CL2-NOTIFY.md`. No `crc/**`, other tests, locked tests,
+   `tests/legacy/*.txt` or `tests/archtest/**`.
+6. **Gates.** `pip install -r requirements.txt -r requirements-dev.txt`, then `make check`: ruff clean,
+   mypy clean (365 files), import-linter 5 kept / 0 broken, pytest **44400 passed in 54.42s**
+   (`make check` wall time 74 s), `ARCH-008: 44400 tests, floor 44400`. Test count unchanged; no floor
+   raise needed. `tests/test_notify_parity.py` alone: 995 passed in 2.8 s.
+
+### Nits (not blocking)
+
+- `tests/test_notify_parity.py:634` docstring still says "as `crc.py` issues them"; it now means the
+  oracle (`crc_main.txt`). Cosmetic.
+
+## New bugs (round 2)
+
+None.
+
+ROUND 2 VERDICT: APPROVE
