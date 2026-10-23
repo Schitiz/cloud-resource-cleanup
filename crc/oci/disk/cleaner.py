@@ -53,6 +53,10 @@ _LIST_CONTEXT = "list volumes/boot volumes disk delete"
 _ATTACHMENTS_CONTEXT = "list_volume_attachments"
 _BOOT_ATTACHMENTS_CONTEXT = "list_boot_volume_attachments"
 _KIND_KEY = "kind"
+_UNKNOWN_REASONS = {
+    KIND_DISK: "block volume attachments unknown",
+    KIND_BOOT_DISK: "boot volume attachments unknown",
+}
 
 TagSpec = Mapping[str, Sequence[str]]
 Clock = Callable[[], datetime.datetime]
@@ -94,6 +98,8 @@ def _log_summary(deleted: Sequence[str], *, dry_run: bool) -> None:
 SKIP_KEYS = {
     "state is not AVAILABLE": "state",
     "attached": "attached",
+    "block volume attachments unknown": "attachments_unknown",
+    "boot volume attachments unknown": "attachments_unknown",
     "matches exception_tags or notags": "exception_tag",
     "does not match filter_tags": "filter_mismatch",
     "not older than age": "too_young",
@@ -117,6 +123,7 @@ class DiskCleaner:
         self._api_factory = api_factory
         self._list_regions = list_regions
         self._settings = settings
+        self._unknown_regions: set[str] = set()
 
     def supports(self, operation: Operation) -> bool:
         return operation is Operation.DELETE
@@ -125,6 +132,7 @@ class DiskCleaner:
         """List every region and decide on each volume. Makes no mutating call."""
         candidates: list[Candidate] = []
         skipped: list[Skipped] = []
+        self._unknown_regions = set()
         for region in self._list_regions():
             started = _logger.region_started()
             before = len(candidates)
@@ -177,10 +185,11 @@ class DiskCleaner:
         boot_volumes = api.list_boot_volumes()
         return volumes, boot_volumes
 
-    def attached_volume_ids(self, api: VolumeApi, region: str) -> set[str]:
-        """Ids of block volumes in use. OCI has no "unattached" lifecycle state: a volume stays
-        `AVAILABLE` whether or not it is attached, so attachments are listed separately. A
-        connectivity error is logged and leaves the set as far as it got."""
+    def attached_volume_ids(self, api: VolumeApi, region: str) -> set[str] | None:
+        """Ids of block volumes in use, or `None` when the attachments cannot be listed (a
+        connectivity error). OCI has no "unattached" lifecycle state: a volume stays `AVAILABLE`
+        whether or not it is attached, so attachments are listed separately. `None` means every
+        block volume of the region is kept (fail closed, BUG-096)."""
         attached_ids: set[str] = set()
         try:
             for attachment in api.list_volume_attachments():
@@ -188,31 +197,49 @@ class DiskCleaner:
                     attached_ids.add(attachment.volume_id)
         except CONNECTIVITY_ERRORS as e:
             log_skipped_region(region, _ATTACHMENTS_CONTEXT, e)
+            self._keep_all(region, KIND_DISK, e)
+            return None
         return attached_ids
 
-    def attached_boot_volume_ids(self, api: VolumeApi, region: str) -> set[str]:
-        """Ids of boot volumes in use. Boot volume attachments are scoped per availability
+    def attached_boot_volume_ids(self, api: VolumeApi, region: str) -> set[str] | None:
+        """Ids of boot volumes in use, or `None` when they cannot be known: a connectivity
+        error while listing availability domains or any domain's attachments (BUG-097), or a
+        region without availability domains (BUG-098). `None` means every boot volume of the
+        region is kept (fail closed). Boot volume attachments are scoped per availability
         domain, unlike regular volume attachments."""
         attached_ids: set[str] = set()
         try:
-            for domain in api.list_availability_domains():
+            domains = api.list_availability_domains()
+            if not domains:
+                self._keep_all(region, KIND_BOOT_DISK, ValueError("no availability domains"))
+                return None
+            for domain in domains:
                 for attachment in api.list_boot_volume_attachments(domain):
                     if attachment.lifecycle_state in IN_USE_ATTACHMENT_STATES:
                         attached_ids.add(attachment.boot_volume_id)
         except CONNECTIVITY_ERRORS as e:
             log_skipped_region(region, _BOOT_ATTACHMENTS_CONTEXT, e)
+            self._keep_all(region, KIND_BOOT_DISK, e)
+            return None
         return attached_ids
+
+    def _keep_all(self, region: str, kind: str, error: BaseException) -> None:
+        logging.warning(f"Region {region}: keeping every {kind}: {_UNKNOWN_REASONS[kind]}")
+        if region not in self._unknown_regions:
+            self._unknown_regions.add(region)
+            _logger.region_skipped(region, error)
 
     def decide(
         self,
         volume: SdkVolume,
-        attached_ids: set[str],
+        attached_ids: set[str] | None,
         kind: str,
         region: str,
         now: datetime.datetime,
     ) -> Candidate | Skipped:
-        """State, attachment, tag and age checks common to block and boot volumes."""
-        reason = self._skip_reason(volume, attached_ids, now)
+        """State, attachment, tag and age checks common to block and boot volumes.
+        `attached_ids` is `None` when the attachments are unknown: the volume is kept."""
+        reason = self._skip_reason(volume, attached_ids, kind, now)
         if reason is not None:
             _logger.record_skip(SKIP_KEYS[reason])
             return Skipped(id=volume.id, reason=reason, name=volume.display_name)
@@ -256,7 +283,7 @@ class DiskCleaner:
     def _decide_all(  # noqa: PLR0913, PLR0917 - accumulators of one plan() pass
         self,
         volumes: Sequence[SdkVolume],
-        attached_ids: set[str],
+        attached_ids: set[str] | None,
         kind: str,
         region: str,
         now: datetime.datetime,
@@ -271,12 +298,12 @@ class DiskCleaner:
                 skipped.append(decision)
 
     def _skip_reason(
-        self, volume: SdkVolume, attached_ids: set[str], now: datetime.datetime
+        self, volume: SdkVolume, attached_ids: set[str] | None, kind: str, now: datetime.datetime
     ) -> str | None:
         if volume.lifecycle_state != _AVAILABLE:
             return "state is not AVAILABLE"
-        if volume.id in attached_ids:
-            return "attached"
+        if attached_ids is None or volume.id in attached_ids:
+            return _UNKNOWN_REASONS[kind] if attached_ids is None else "attached"
         settings = self._settings
         tags = policy.normalize_tags(volume.freeform_tags)
         if policy.should_skip_by_tags(tags, settings.exception_tags, settings.notags):
