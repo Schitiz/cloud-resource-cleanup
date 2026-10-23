@@ -82,3 +82,49 @@ Total `make check` runtime: **1m23.4s** (`pytest`: 61.07s). Test count: **44,403
 
 VERDICT: APPROVE
 
+
+## Round 2 (Opus)
+
+Scope: `git diff 2bd8e67..HEAD` on `cl2/oci`. Round 1 made no code changes and found nothing blocking;
+its claims were re-checked independently below. No fixes were needed in this round.
+
+### Findings
+
+- **BLOCKING**: None.
+- Nit (no change): `_expected_other` drops every oracle record that starts with
+  "Retrieved list of OCI regions: ", while its docstring says there is exactly one. Only the oracle
+  side is filtered, so a routed emission of that line would still fail the test; this is not a
+  loosening.
+
+### Checks
+
+1. **Grep**: `tests/test_cli_bridge_oci.py`, `tests/helpers_cl2_oci.py` and `tests/helpers_cl2_oci_runlog.py`
+   do not import `crc.cli.resource_ops`, `vm_ops`, `notify`, `adapter_args`, `report_calls`,
+   `tests.helpers_legacy_handlers` or the `crc.oci.disk/vm/spot_vm` adapters. The only
+   `delete_disks/delete_vm/stop_vm/delete_spot_instances` calls (`Kind.act`) run on
+   `build(oracle_module.CRC, ...)`. The current `crc.cli.runner.CRC` is only built as the
+   context object for `dispatch._run_pair`. No `notify_*` call remains.
+2. **Comparisons**: there are 96 + 8 cases as before, plus 3 new ones (107 in total). Every earlier assertion is still
+   there (result, stdout, `run[0]`/`run[-1]`, per-tag ACTION/SKIPPED/ERRORS/FAILED, sorted run lines,
+   Slack, Influx, mutating calls, all calls, other logs, and the BUG-408 branch). The legacy side is
+   `load_legacy_crc()` with `tests/legacy/oci_{disk,vm,spot_vm}.txt` (asserted).
+   **Independent frozen-data check**: I ran the `2bd8e67` test's own `_run(..., routed=False)` in a
+   separate worktree for all 96 (kind, dry, mode, second) cases and compared its run lines
+   to `FROZEN_RUN_LINES`. All 96 match verbatim (this also confirms that the lines do not depend on the mode).
+   The divergences are marked with their IDs: BUG-408 (asserted against the oracle's r1 mutations), BUG-353/BUG-358 (via
+   `expected_logs` + `tests/log_fix_oci.RULES`) and BUG-255 (fixed in FIX-OCI-SPOT, one
+   exact attachment read per leftover volume).
+3. **Mutation** (local, reverted): in `crc/oci/vm/cleaner.py`, dropping `api.stop_instance` gives
+   9 failed. In `crc/oci/spot_vm/leftovers.py`, dropping `block.delete_volume` gives 12 failed.
+   These are different from round 1's mutations (disk delete, Slack label).
+4. **Boundaries**: only the owned test file, the `tests/helpers_cl2_oci*` helpers, the floor file
+   (via `make raise-test-floor`) and this review file changed. No `crc/**`, `tests/legacy/*.txt` or hash-locked
+   files changed.
+6. **Gates**: `pip install -r requirements.txt -r requirements-dev.txt`, then `make check`: rc=0.
+   ruff clean, mypy clean (366 files), import-linter 5 kept / 0 broken,
+   **44403 passed in 55.09s**, `ARCH-008: 44403 tests, floor 44403`. `make check` took 1m15s of wall time.
+
+## New bugs
+- None found.
+
+ROUND 2 VERDICT: APPROVE
