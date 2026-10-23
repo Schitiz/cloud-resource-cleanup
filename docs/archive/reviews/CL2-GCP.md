@@ -83,3 +83,56 @@ Scope reviewed: `git diff 2bd8e67..HEAD` on branch `cl2/gcp` (lane `CL2-GCP`).
 - `python3 -m tests.archtest.test_count check`: `ARCH-008: 44400 tests, floor 44400`
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 2bd8e67..HEAD` on `cl2/gcp` (coder commit `0d2e3b8` and round 1 commit `2263c1d`).
+
+### Round 1 fixes checked
+
+- `install()` in `tests/helpers_gcp_bridge.py` now patches only the four cleaner modules
+  (`ip_cleaner`, `disk_cleaner`, `vm_cleaner`, `spot_vm.cleaner`). Correct: the legacy side runs on
+  `patch_sdk` alone, so nothing reaches `crc.gcp.*_adapter` any more.
+- The `RUN_LOG` entries that were never checked are now asserted (owner-ping test, later-listing-error test), and so are the
+  `fail_list_last` divergences. The removed `("ip", ..., "fail_list_last")` divergence entry is
+  covered instead by explicit BUG-400 assertions: the frozen lines have ACTION lines, the routed run has none, and both raise the same error. Agreed.
+
+### Independent checks
+
+1. **No legacy CLI code (grep).** `tests/test_cli_bridge_gcp.py`, `tests/helpers_gcp_bridge.py` and
+   `tests/helpers_cl2_gcp_*.py` import none of `crc.cli.resource_ops`, `vm_ops`, `notify`,
+   `adapter_args`, `report_calls`, `tests.helpers_legacy_handlers` or `crc.gcp.*_adapter`. The only
+   `delete_*`/`stop_*` calls are on `main`'s CRC from `load_legacy_crc()` (`run_oracle`) and on the
+   fake SDK client. There are no `notify_*` calls.
+2. **Comparisons kept and frozen data checked against the source.** Same 9 test functions and 126 items as at `2bd8e67`.
+   The assertions that were moved (Slack, Influx, stdout, error, GCP calls: ordered for a dry run, as a sorted list for a real run)
+   all live in `assert_equal`, which now applies them to every scenario. Before, only the plain cases
+   compared GCP calls, so the check is stricter. The later-listing-error cases for disk, vm-delete and spot are now
+   exact equality instead of only "deletes fewer, never more". To check where the frozen data came from, I wrote a
+   throwaway test (not committed) that runs the pre-CL2 legacy handler (`run_legacy_handler`, still
+   present) for all 123 `RUN_LOG` keys with the same `CASES`, `BASE` and `apply_scenario`. All 123 run logs
+   equal `RUN_LOG` exactly, and every frozen field of all 33 `DIVERGENCES` entries equals that legacy
+   run's value, so none of the expected data comes from the routed side. The BUG ids used (BUG-001, -005,
+   -006, -127, -186, -400) are all "fixed in" / "partly fixed in" rows of `docs/refactor/BUGS.md`, and
+   every divergence names its BUG.
+3. **Mutation (local, reverted, not committed).** (a) `disk_cleaner.apply_disk` skips deleting `d4`:
+   11 failures. (b) `spot_vm/disks.py` skips the leftover disk delete: 7 failures. This was invisible
+   before the `FakeGcp.delete_disk` signature fix, and confirms that fix makes the Spot disk deletes count.
+   (c) Slack text in `crc/core/report.py` changed: 30 failures. The tests are not vacuous.
+4. **File scope.** Changed files: only the two owned files, three new `tests/helpers_cl2_gcp_*` files and this
+   review file. No production code, locked tests, `tests/legacy/*.txt` or `tests/archtest/**` touched.
+6. **Gates.** `pip install -r requirements.txt -r requirements-dev.txt`, then `make check`: ruff
+   passed, mypy passed (367 files), lint-imports passed, **44400 passed in 56.93s** (about 76s wall for
+   all of `make check`). `ARCH-008: 44400 tests, floor 44400`. Count unchanged, so no `make raise-test-floor` was needed.
+
+### Findings
+
+- None blocking. Note: in `test_later_listing_error_deletes_fewer_never_more[ip]` the subset
+  assertions are trivially true, because the routed run deletes nothing (BUG-400). The explicit BUG-400
+  assertions round 1 added carry the check there. No change needed.
+
+## New bugs
+
+- None found in round 2.
+
+ROUND 2 VERDICT: APPROVE
