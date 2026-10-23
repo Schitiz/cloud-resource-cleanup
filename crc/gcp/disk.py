@@ -10,18 +10,21 @@ shapes and runs the cleaner disk by disk, in the exact call order of the origina
 
 import datetime
 import logging
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, ClassVar, Protocol, cast
-
-from google.cloud import compute_v1
-from googleapiclient import discovery
+from typing import ClassVar, cast
 
 from crc.core import age as core_age
 from crc.core import logger, policy
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext
 from crc.core.registry import register
 from crc.gcp._scan import ZoneScan, log_action
+from crc.gcp.disk_client import ComputeDiskClient as ComputeDiskClient
+from crc.gcp.disk_client import DiskView as DiskView
+from crc.gcp.disk_client import GcpDiskClient as GcpDiskClient
+from crc.gcp.spot_vm.client import GcpSpotClient
+from crc.gcp.spot_vm.operations import wait_operation
+from crc.gcp.spot_vm.settings import DEFAULT_POLL_INTERVAL_SEC, DEFAULT_WAIT_SEC, SpotSettings
 from crc.service import Service
 
 _SERVICE_NAME = "compute"
@@ -31,85 +34,6 @@ _NOT_TAGGED = "not_tagged"
 
 Clock = Callable[[], datetime.datetime]
 Deleted = list[str] | dict[str, list[str]]
-
-
-class DiskView(Protocol):
-    """The four fields of a GCP disk this cleaner reads."""
-
-    @property
-    def users(self) -> Sequence[str]:
-        """Instances the disk is attached to; empty when unattached."""
-        ...
-
-    @property
-    def name(self) -> str:
-        """Name of the disk."""
-        ...
-
-    @property
-    def labels(self) -> Mapping[str, str]:
-        """Labels of the disk; empty when unlabelled."""
-        ...
-
-    @property
-    def last_detach_timestamp(self) -> str:
-        """RFC 3339 time the disk was last detached; empty when never attached."""
-        ...
-
-
-class GcpDiskClient(Protocol):
-    """The Compute Engine calls this cleaner uses. `close()` ends the session the first
-    `list_zones` or `delete_disk` call opened."""
-
-    def list_zones(self, project_id: str) -> Sequence[Mapping[str, str]]:
-        """The `items` of the zones listing (one page, as dictionaries with a `name`)."""
-        ...
-
-    def list_disks(self, project_id: str, zone: str) -> Iterable[DiskView]:
-        """Disks of one zone."""
-        ...
-
-    def delete_disk(self, project_id: str, zone: str, disk: str) -> object:
-        """Delete one disk of a zone."""
-        ...
-
-    def close(self) -> None:
-        """Close the session; a no-op when none is open."""
-        ...
-
-
-class ComputeDiskClient:
-    """`GcpDiskClient` on google-api-python-client (zones, deletes) and google-cloud-compute
-    (disk listing); as on `main` one discovery service serves a run."""
-
-    def __init__(self) -> None:
-        self._service: Any = None
-        self._disks: compute_v1.DisksClient | None = None
-
-    def _compute(self) -> Any:
-        if self._service is None:
-            self._service = discovery.build(_SERVICE_NAME, _SERVICE_VERSION)
-        return self._service
-
-    def list_zones(self, project_id: str) -> Sequence[Mapping[str, str]]:
-        request = self._compute().zones().list(project=project_id)
-        zones: Sequence[Mapping[str, str]] = request.execute()["items"]
-        self._disks = compute_v1.DisksClient()
-        return zones
-
-    def list_disks(self, project_id: str, zone: str) -> Iterable[DiskView]:
-        if self._disks is None:
-            self._disks = compute_v1.DisksClient()
-        disks: Iterable[DiskView] = self._disks.list(project=project_id, zone=zone)
-        return disks
-
-    def delete_disk(self, project_id: str, zone: str, disk: str) -> object:
-        return self._compute().disks().delete(project=project_id, zone=zone, disk=disk).execute()
-
-    def close(self) -> None:
-        service, self._service = self._service, None
-        if service is not None:
-            service.close()
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +48,23 @@ class DiskSettings:
     detach_age: core_age.AgeSpec | int
     slack_notify_users: bool = False
     slack_user_label: str = ""
+    notags: Mapping[str, Sequence[str]] | None = None
+    name_regex: Sequence[str] | None = None
+    wait_sec: float = DEFAULT_WAIT_SEC
+    poll_sec: float = DEFAULT_POLL_INTERVAL_SEC
+
+
+def _name_patterns(name_regex: Sequence[str] | None) -> tuple[str, ...]:
+    """The `name_regex` patterns; a bad value raises `ValueError` before any call is made."""
+    if name_regex is None:
+        return ()
+    if not isinstance(name_regex, list | tuple) or not all(isinstance(p, str) for p in name_regex):
+        raise ValueError(f"Invalid name_regex {name_regex!r}: expected a list of patterns")
+    if not name_regex:
+        return ()
+    patterns = tuple(name_regex)
+    policy.compile_patterns(patterns, "name_regex")
+    return patterns
 
 
 def _frozen_groups(groups: dict[str, list[str]] | None) -> dict[str, tuple[str, ...]] | None:
@@ -157,9 +98,11 @@ def _log_summary(deleted: Deleted, *, dry_run: bool) -> None:
 
 class DiskCleaner:
     """Deletes unattached disks with a `last_detach_timestamp` that are at least `detach_age`
-    (or the custom age label) old, match `filter_labels` (any key; empty matches all) and are
-    not excluded by `exception_regex` (`re.match` on the name) or `exception_labels`.
-    Applies to every zone of the project."""
+    (or the custom age label) old, match `filter_labels` (any key; empty matches all) and
+    `name_regex` (`re.search` any; empty matches all) and are not excluded by `exception_regex`
+    (`re.match` on the name), `exception_labels` (any key) or `notags` (all keys, as the GCP VM
+    cleaner). Applies to every zone of the project. An error on one disk or one zone listing is
+    recorded and the run goes on."""
 
     cloud = "gcp"
     kind = "disk"
@@ -167,6 +110,7 @@ class DiskCleaner:
     def __init__(self, client: GcpDiskClient, settings: DiskSettings) -> None:
         self._client = client
         self._settings = settings
+        self._name_patterns = _name_patterns(settings.name_regex)
 
     def supports(self, operation: Operation) -> bool:
         return operation is Operation.DELETE
@@ -216,23 +160,45 @@ class DiskCleaner:
         """List one zone lazily and yield the disks to delete, in the order of `main`: attached,
         exception regex and labels, filter labels, detach timestamp, age; then the REGION line."""
         scan = ZoneScan(zone)
-        for disk in self._client.list_disks(self._settings.project_id, zone):
-            scan.scanned += 1
+        try:
+            for disk in self._client.list_disks(self._settings.project_id, zone):
+                scan.scanned += 1
+                candidate = self._evaluate(disk, zone, clock)
+                if candidate is None:
+                    continue
+                scan.selected += 1
+                yield candidate
+        except Exception as e:
+            logging.error(f"Error occurred while listing disks of zone {zone}: {e}")
+            logger.current().fail(zone, f"zone {zone}", e)
+        scan.finish()
+
+    def _evaluate(self, disk: DiskView, zone: str, clock: Clock) -> Candidate | None:
+        """The candidate for a disk to delete; `None` when it is kept, skipped, or an error
+        while evaluating it was recorded (the disk is kept)."""
+        try:
             reason = self._reject(disk, clock)
             if reason is not None:
                 logger.current().skip(reason)
-                continue
-            scan.selected += 1
-            yield Candidate(
+                return None
+            return Candidate(
                 id=disk.name, name=disk.name, region=zone, tags=policy.normalize_tags(disk.labels)
             )
-        scan.finish()
+        except Exception as e:
+            name = str(getattr(disk, "name", ""))
+            logging.error(f"Error occurred while evaluating disk {name}: {e}")
+            logger.current().fail(zone, name, e)
+            return None
 
     def _reject(self, disk: DiskView, clock: Clock) -> str | None:
         if disk.users:
             return "attached"
         if reason := self._exception_reason(disk):
             return reason
+        if self._name_patterns and not policy.name_regex_search_matches(
+            self._name_patterns, disk.name
+        ):
+            return "name_regex_mismatch"
         if not self._has_matching_filter_label(disk):
             return "filter_mismatch"
         if not disk.last_detach_timestamp:
@@ -246,8 +212,10 @@ class DiskCleaner:
         disk is not recorded. Returns whether it was recorded."""
         try:
             if not dry_run:
-                self._client.delete_disk(self._settings.project_id, zone, candidate.id)
+                operation = self._client.delete_disk(self._settings.project_id, zone, candidate.id)
                 logging.info(f"Deleting disk {candidate.id}")
+                if not self._delete_completed(zone, candidate, operation):
+                    return False
             _record(deleted, self._settings, candidate.id, candidate.tags)
         except Exception as e:
             logging.error(f"Error occurred while deleting disk {candidate.id}: {e}")
@@ -256,15 +224,39 @@ class DiskCleaner:
         log_action("delete", candidate, dry_run=dry_run)
         return True
 
+    def _delete_completed(self, zone: str, candidate: Candidate, operation: object) -> bool:
+        """Wait for the zone operation of a disk delete to be DONE without an error, as the GCP
+        spot cleaner does; a missing operation name, an operation error or a timeout is logged
+        and recorded as a failure."""
+        settings = self._settings
+        name = operation.get("name") if isinstance(operation, Mapping) else None
+        spot = SpotSettings(
+            project_id=settings.project_id,
+            filter_labels={},
+            exception_labels={},
+            notags={},
+            age={},
+            custom_age_tag_key=None,
+            wait_sec=settings.wait_sec,
+            poll_sec=settings.poll_sec,
+        )
+        if name and wait_operation(cast(GcpSpotClient, self._client), spot, "zone", zone, name):
+            return True
+        logging.error(f"Disk delete failed or incomplete for {candidate.id}")
+        logger.current().fail(zone, candidate.id, "disk delete failed or incomplete")
+        return False
+
     def _exception_reason(self, disk: DiskView) -> str | None:
         settings = self._settings
         if settings.exception_regex:
             patterns = [f"{p}" for p in settings.exception_regex]
             if policy.exception_regex_match_matches(patterns, disk.name):
                 return "exception_regex"
-        if settings.exception_labels:
+        if settings.exception_labels or settings.notags:
             tags = policy.normalize_tags(disk.labels)
-            if policy.exception_tags_any(tags, settings.exception_labels):
+            if policy.should_skip_by_tags(
+                tags, settings.exception_labels or {}, settings.notags or {}
+            ):
                 return "exception_tag"
         return None
 
@@ -292,8 +284,8 @@ class DiskCleaner:
 @register("gcp", "disk")
 def build_disk_cleaner(context: RunContext) -> Cleaner:
     """Registry factory. Options: `project_id`, `filter_tags` (labels), `exception_tags`
-    (labels), `exception_regex`, `custom_age_tag_key`, `detach_age`, `slack_notify_users`
-    and `slack_user_label`."""
+    (labels), `exception_regex`, `notags`, `name_regex`, `custom_age_tag_key`, `detach_age`,
+    `slack_notify_users` and `slack_user_label`."""
     options = context.options
     project_id = options.get("project_id")
     if not project_id:
@@ -307,13 +299,16 @@ def build_disk_cleaner(context: RunContext) -> Cleaner:
         detach_age=options.get("detach_age") or {},
         slack_notify_users=bool(options.get("slack_notify_users")),
         slack_user_label=options.get("slack_user_label") or "",
+        notags=options.get("notags"),
+        name_regex=options.get("name_regex"),
     )
     return DiskCleaner(ComputeDiskClient(), settings)
 
 
 class Disk(Service):
     """Legacy entry point used by `crc.py`: deletes unattached GCP disks (see `DiskCleaner`);
-    in a dry run it only lists them. `age`, `notags` and `name_regex` are stored, never used.
+    in a dry run it only lists them. `age` is stored, never used; `notags` and `name_regex` are
+    applied.
 
     Attributes: `service_name`, `service_version`, `time_format`, `default_disk_state`,
     `disk_names_to_delete` (a list of names, or with `slack_notify_users` a dict of owner to
@@ -381,6 +376,8 @@ class Disk(Service):
             detach_age=self.detach_age,
             slack_notify_users=self.slack_notify_users,
             slack_user_label=self.slack_user_label,
+            notags=self.notags,
+            name_regex=self.name_regex,
         )
         return DiskCleaner(self._client, settings)
 

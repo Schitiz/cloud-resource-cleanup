@@ -59,7 +59,13 @@ class FakeClient:
         self.calls.append(("delete_disk", project_id, zone, disk))
         if disk == self.fail_on:
             raise RuntimeError("denied")
-        return object()
+        return {"name": f"op-{disk}"}
+
+    def get_operation(
+        self, project_id: str, scope: str, location: str, operation: str
+    ) -> Mapping[str, Any]:
+        self.calls.append(("get_operation", project_id, scope, location, operation))
+        return {"status": "DONE"}
 
     def close(self) -> None:
         self.calls.append(("close",))
@@ -118,7 +124,7 @@ def test_plan_outside_dry_run_logs_no_summary(caplog: pytest.LogCaptureFixture) 
 
 def test_plan_closes_the_client_when_listing_fails() -> None:
     class Broken(FakeClient):
-        def list_disks(self, project_id: str, zone: str) -> Iterable[DiskView]:
+        def list_zones(self, project_id: str) -> Sequence[Mapping[str, str]]:
             raise PermissionError("denied")
 
     client = Broken({"z": []})
@@ -205,8 +211,11 @@ def test_apply_deletes_in_plan_order_and_logs(caplog: pytest.LogCaptureFixture) 
     assert result.succeeded == ("a", "b", "c")
     assert client.calls == [
         ("delete_disk", PROJECT, "z1", "a"),
+        ("get_operation", PROJECT, "zone", "z1", "op-a"),
         ("delete_disk", PROJECT, "z1", "b"),
+        ("get_operation", PROJECT, "zone", "z1", "op-b"),
         ("delete_disk", PROJECT, "z2", "c"),
+        ("get_operation", PROJECT, "zone", "z2", "op-c"),
         ("close",),
     ]
     assert [r.getMessage() for r in caplog.records] == [
@@ -314,5 +323,6 @@ def test_disk_adapter_deletes_through_the_injected_client() -> None:
         ("list_zones", PROJECT),
         ("list_disks", PROJECT, "z"),
         ("delete_disk", PROJECT, "z", "a"),
+        ("get_operation", PROJECT, "zone", "z", "op-a"),
         ("close",),
     ]
