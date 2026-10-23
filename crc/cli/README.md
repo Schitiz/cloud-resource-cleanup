@@ -29,6 +29,8 @@ plain `dict`, as on `main`.
 - `main()`: the CLI entry (module main.py); crc.py re-exports it. It is not re-exported from the package init module, so the name `main` on the package stays the module.
 - `run_scan()`: the read-only scan path of the scan_tag flag; prints, notifies Slack and exits with code 0.
 - `run_dispatch()`: the cloud and resource loops, with the AWS disk breaker.
+- `validate_targets()`: check every (cloud, resource) pair before the first cleaner (BUG-017, BUG-018); raise an error, or return the pairs to skip under cloud all.
+- `is_supported_pair()`: False for a pair whose CRC method raises for that cloud (keypair and kms off AWS, nic off Azure, ip on OCI).
 - `Options`: frozen value of every parsed flag; `read_options()` builds it from the argument dict.
 - `Tokens`: frozen value of the two environment tokens; `read_tokens()` builds it.
 - `Targets`: frozen value of the expanded clouds and resources; `resolve_targets()` builds it.
@@ -64,7 +66,8 @@ plain `dict`, as on `main`.
   call time. `tests/test_cli_crc_parity.py` runs the oracle CRC and this one on the same fakes.
 - `main()` keeps the order of `main` on the main branch: parse flags, read the two tokens, `SLACK_BOT_TOKEN` then `INFLUXDB_TOKEN` errors, stop-only-for-vm, all-needs-all, slack user label, KMS description and user, the list and dict type checks, the Slack client, the InfluxDB field check and client, `MAX_AGE` set, then the scan path (exit) or the loops, then `MAX_AGE` reset. Errors keep their type (`OSError`, which `EnvironmentError` is an alias of) and message.
 - `scan.py` never deletes: it forces `dry_run`, builds `CRC` per cloud and only calls `scan_instances_with_tag`; it always ends in `sys.exit(0)`.
-- The AWS EBS breaker lives in `dispatch._disk`: any `aws` + `disk` pair that is not `--cloud aws --resource disk` raises before a disk call. `CRC`, `Snapshot`, `WebClient`, `InfluxDBClient` and `notify_cleanup` are looked up in `context`, `dispatch`, `clients` and `scan` at call time; `tests/test_cli_main_parity.py` runs the oracle `main()` and this one on recording fakes.
+- The AWS EBS breaker lives in `dispatch._disk` and, since FIX-CLI-ALL (BUG-018), also in `dispatch.validate_targets`: any `aws` + `disk` pair that is not `--cloud aws --resource disk` (so `--cloud all --resource disk|all`) raises `ValueError` before any cleaner of any cloud runs; it does not run.
+- BUG-017 (fixed in FIX-CLI-ALL): `run_dispatch` checks every (cloud, resource) pair before the first cleaner. A pair whose `CRC` method raises for that cloud (`keypair` and `kms` off AWS, `nic` off Azure, `ip` on OCI) raises the same `ValueError` message up front for an explicit cloud. Under `--cloud all` it also raises up front when a supported pair would run after it (`--cloud all --resource nic`: `main` stopped on aws, so Azure NICs are never deleted); otherwise it is skipped with a WARNING plus a `RUN START` / `SKIPPED reason=unsupported_cloud_resource` / `RESULT` log triple. `CRC`, `Snapshot`, `WebClient`, `InfluxDBClient` and `notify_cleanup` are looked up in `context`, `dispatch`, `clients` and `scan` at call time; `tests/test_cli_main_parity.py` runs the oracle `main()` and this one on recording fakes.
 - Known quirks (kept): `docs/refactor/BUGS.md` rows `BUG-009`, `BUG-028` to `BUG-044`, `BUG-084`, `BUG-333` to `BUG-350`.
 
 ## Extension Rules

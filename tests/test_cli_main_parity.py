@@ -537,6 +537,91 @@ TABLES: dict[str, list[Case]] = {
 ALL_CASES = [case for table in TABLES.values() for case in table]
 
 
+UNSUPPORTED_PAIR_CALLS: dict[str, tuple[tuple[str, ...], str]] = {
+    "crc.delete_keypairs": (("aws",), "Keypair operation is only supported on AWS."),
+    "crc.delete_nic": (("azure",), "NICs operation is only supported on Azure."),
+    "crc.delete_kms": (("aws",), "KMS operation is only supported on AWS."),
+    "crc.delete_ip": (
+        ("aws", "azure", "gcp"),
+        "Invalid cloud provided: {cloud}. Supported clouds are ['aws', 'azure', 'gcp', 'oci']",
+    ),
+}
+SKIP_WARNING = "{resource} is not supported on {cloud}; skipped under --cloud all"
+RESOURCE_OF_CALL = {
+    "crc.delete_keypairs": "keypair",
+    "crc.delete_nic": "nic",
+    "crc.delete_kms": "kms",
+    "crc.delete_ip": "ip",
+}
+
+
+def before_first_cleaner(events: Events) -> Events:
+    index = next((i for i, event in enumerate(events) if event[0] == "CRC"), len(events))
+    return events[:index]
+
+
+def diverging_outcome(case: Case, expected: Outcome) -> tuple[str, Outcome] | None:
+    """The (bug id, new outcome) of a case that triggers BUG-017 or BUG-018, else None.
+
+    The trigger is read from what the oracle did, never from the new code: a pair the oracle
+    handed to a CRC method that raises for that cloud, or the EBS breaker error under
+    `--cloud all`. The new outcome is the oracle outcome with exactly the documented change.
+    """
+    cloud_all = list(case.argv[:2]) == ["--cloud", "all"]
+    if expected.result[0] == "error" and expected.result[2] == dispatch_breaker_message():
+        assert cloud_all
+        events = before_first_cleaner(expected.events)
+        return "BUG-018", without_reset(expected, events, expected.result)
+    bad = [
+        event
+        for event in expected.events
+        if event[0] in UNSUPPORTED_PAIR_CALLS
+        and event[1] not in UNSUPPORTED_PAIR_CALLS[event[0]][0]
+    ]
+    if not bad:
+        return None
+    calls = [event for event in expected.events if event[0] in UNSUPPORTED_PAIR_CALLS]
+    stops_main = calls.index(bad[0]) < len(calls) - len(bad)
+    if not cloud_all or stops_main:
+        assert cloud_all or len(bad) == 1
+        message = UNSUPPORTED_PAIR_CALLS[bad[0][0]][1].format(cloud=bad[0][1])
+        return "BUG-017", without_reset(
+            expected, before_first_cleaner(expected.events), ("error", ValueError, message)
+        )
+    bad_clouds = {e[1] for e in bad}
+    events = [
+        event
+        for event in expected.events
+        if event not in bad and not (event[0] == "CRC" and event[1][0] in bad_clouds)
+    ]
+    warnings = [
+        (logging.WARNING, SKIP_WARNING.format(resource=RESOURCE_OF_CALL[e[0]], cloud=e[1]))
+        for e in bad
+    ]
+    return "BUG-017", Outcome(
+        events,
+        expected.stdout,
+        expected.stderr,
+        expected.max_age,
+        [*expected.warnings, *warnings],
+        expected.result,
+    )
+
+
+def without_reset(expected: Outcome, events: Events, result: tuple[Any, ...]) -> Outcome:
+    """An error before the loops skips the normal-run MAX_AGE reset, as every error does."""
+    reset = "MAX_AGE reset.\n"
+    stdout, max_age = expected.stdout, expected.max_age
+    if stdout.endswith(reset):
+        stdout = stdout[: -len(reset)]
+        max_age = stdout.rsplit("Set MAX_AGE: ", 1)[1].strip()
+    return Outcome(events, stdout, expected.stderr, max_age, expected.warnings, result)
+
+
+def dispatch_breaker_message() -> str:
+    return cli_dispatch.AWS_DISK_OPT_IN_MESSAGE
+
+
 def test_table_is_large_and_has_unique_names() -> None:
     assert len(ALL_CASES) >= MIN_CASES
     names = [case.name for case in ALL_CASES]
@@ -547,12 +632,32 @@ def test_table_is_large_and_has_unique_names() -> None:
 def test_main_matches_oracle(case: Case, monkeypatch: pytest.MonkeyPatch) -> None:
     expected = run_oracle(case, monkeypatch)
     actual = run_new(case, monkeypatch)
+    diverged = diverging_outcome(case, expected)
+    if diverged is not None:
+        _bug, expected = diverged
     assert actual.result == expected.result
     assert actual.events == expected.events
     assert actual.stdout == expected.stdout
     assert actual.stderr == expected.stderr
     assert actual.warnings == expected.warnings
     assert actual.max_age == expected.max_age
+
+
+def test_diverging_cases_exist_and_differ_from_the_oracle(monkeypatch: pytest.MonkeyPatch) -> None:
+    bugs: dict[str, int] = {}
+    for case in TABLES["product"]:
+        expected = run_oracle(case, monkeypatch)
+        diverged = diverging_outcome(case, expected)
+        if diverged is None:
+            continue
+        bugs[diverged[0]] = bugs.get(diverged[0], 0) + 1
+        actual = run_new(case, monkeypatch)
+        assert (actual.events, actual.result, actual.warnings) != (
+            expected.events,
+            expected.result,
+            expected.warnings,
+        )
+    assert set(bugs) == {"BUG-017", "BUG-018"}
 
 
 def test_table_reaches_every_outcome_and_every_call() -> None:
@@ -705,4 +810,3 @@ def test_bug_360_main_logs_run_start_and_result_around_each_cleaner_pass(
             "done=0 failed=0 skipped=0 regions=0 regions_skipped=0 duration_s=0",
         ),
     ]
-

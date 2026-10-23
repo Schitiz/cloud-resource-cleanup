@@ -5,6 +5,7 @@ from collections.abc import Callable
 from typing import Any
 
 from crc.aws.snapshot import Snapshot
+from crc.cli.constants import CLOUDS
 from crc.cli.context import RunContext, make_crc
 from crc.cli.inputs import Options, Targets
 from crc.core import logger
@@ -183,11 +184,79 @@ def _run_handler(
         logger.finish()
 
 
+UNSUPPORTED_PAIR_MESSAGES: dict[str, str] = {
+    "keypair": "Keypair operation is only supported on AWS.",
+    "nic": "NICs operation is only supported on Azure.",
+    "kms": "KMS operation is only supported on AWS.",
+}
+SUPPORTED_CLOUDS: dict[str, tuple[str, ...]] = {
+    "keypair": ("aws",),
+    "nic": ("azure",),
+    "kms": ("aws",),
+    "ip": ("aws", "azure", "gcp"),
+}
+
+
+def is_supported_pair(cloud: Any, resource: Any) -> bool:
+    """False for a (cloud, resource) pair whose `CRC` method raises for that cloud."""
+    allowed = SUPPORTED_CLOUDS.get(resource)
+    return allowed is None or cloud in allowed
+
+
+def _unsupported_message(cloud: Any, resource: Any) -> str:
+    if resource == "ip":
+        return f"Invalid cloud provided: {cloud}. Supported clouds are {CLOUDS}"
+    return UNSUPPORTED_PAIR_MESSAGES[resource]
+
+
+def validate_targets(targets: Targets) -> list[tuple[Any, Any]]:
+    """Check every pair of the run before any cleaner runs; return the pairs to skip.
+
+    BUG-018: `--cloud all` with disk or all can never complete (the AWS EBS breaker raises on the
+    aws pair), so it raises here, before a cleaner of any cloud ran. BUG-017: an unsupported
+    pair of an explicit cloud raises here. Under `--cloud all` the unsupported pairs are returned
+    to be skipped only when no supported pair comes after the first one: `main` stopped at that
+    pair, so running a later pair (azure for `--cloud all --resource nic`) would delete more.
+    """
+    handled = [r for r in targets.resources if r in HANDLERS]
+    if "disk" in handled and targets.cloud_arg == "all" and not targets.aws_disk_opt_in:
+        raise ValueError(AWS_DISK_OPT_IN_MESSAGE)
+    pairs = [(cloud, resource) for cloud in targets.clouds for resource in handled]
+    first = next((i for i, pair in enumerate(pairs) if not is_supported_pair(*pair)), None)
+    if first is None:
+        return []
+    rest = pairs[first:]
+    if targets.cloud_arg != "all" or any(is_supported_pair(*pair) for pair in rest):
+        raise ValueError(_unsupported_message(*pairs[first]))
+    return rest
+
+
+def _skip_pair(cloud: Any, resource: Any, options: Options) -> None:
+    """Log an unsupported pair under `--cloud all` as one skipped run; nothing is called."""
+    _LOG.warning("%s is not supported on %s; skipped under --cloud all", resource, cloud)
+    logger.begin(
+        str(cloud),
+        str(resource),
+        str(options.operation_type or "delete"),
+        bool(options.dry_run),
+        _run_options(options),
+    )
+    logger.current().skip("unsupported_cloud_resource")
+    logger.finish()
+
+
 def run_dispatch(context: RunContext, options: Options, targets: Targets) -> None:
     """Run every selected resource on every selected cloud, in the order of `main`."""
+    skipped = validate_targets(targets)
     for cloud in targets.clouds:
-        crc = make_crc(context, cloud)
+        crc: Any = None
         for resource in targets.resources:
             handler = HANDLERS.get(resource)
-            if handler is not None:
-                _run_handler(handler, crc, cloud, resource, options, targets)
+            if handler is None:
+                continue
+            if (cloud, resource) in skipped:
+                _skip_pair(cloud, resource, options)
+                continue
+            if crc is None:
+                crc = make_crc(context, cloud)
+            _run_handler(handler, crc, cloud, resource, options, targets)
