@@ -24,7 +24,7 @@ from crc.aws.spot_instance_requests.model import (
 from crc.aws.spot_instance_requests.preview import preview_request, preview_sweep
 from crc.aws.spot_instance_requests.regions import guarded_cleanup, guarded_sweep, list_matches
 from crc.aws.spot_instance_requests.requests import build_filter
-from crc.aws.spot_instance_requests.runtime import SpotRuntime, settings_from_options
+from crc.aws.spot_instance_requests.runtime import Clock, SpotRuntime, settings_from_options
 from crc.aws.spot_instance_requests.summary import log_summary
 from crc.core import logger
 from crc.core.cleaner import (
@@ -39,6 +39,7 @@ from crc.core.registry import register
 from crc.core.report import DISK
 
 __all__ = [
+    "Clock",
     "SpotRequestCleaner",
     "SpotRuntime",
     "build_spot_request_cleaner",

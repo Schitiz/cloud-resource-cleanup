@@ -16,7 +16,7 @@ from typing import Any
 
 from crc.aws.connectivity import CONNECTIVITY_ERRORS
 from crc.aws.vm.client import VmClient
-from crc.aws.vm.judge import InstanceJudge
+from crc.aws.vm.judge import Decision, InstanceJudge
 from crc.aws.vm.reporting import (
     ACTED,
     dry_run_names,
@@ -56,6 +56,7 @@ __all__ = [
     "DEFAULT_STATE",
     "SERVICE_NAME",
     "ClientFactory",
+    "Decision",
     "Filters",
     "RegionLister",
     "VmCleaner",

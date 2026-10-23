@@ -31,3 +31,21 @@ Wave W2 lane W2-AWS-B: structure-only split of the four large AWS files, no beha
 
 - `crc/aws/vm/judge.py:111`: the "instance doesn't have Name Tag" error line interpolates `name`, which is always `None`/empty at that point, so the log reads "None instance doesn't have Name Tag" (same text as before the split; the ERROR is also recorded at line 66 with the instance id).
 - `crc/aws/vm/judge.py:75`: `should_skip` logs the WARNING "Tags and notags not present" once per instance when neither exception tags nor notags are configured (noisy, unchanged).
+
+## Round 1 (Argon)
+
+### Findings
+
+1. **No behaviour change**: Compared `git diff --color-moved=zebra cea0a8a..HEAD -- crc/` hunk by hunk across all four split targets (`crc/aws/spot_instance_requests/cleaner.py`, `crc/aws/spot_instance_requests/volumes.py`, `crc/aws/vm/cleaner.py`, `crc/aws/vpc/cleaner.py`). Every condition, default, order of SDK calls, exception handler and log message is unchanged. The only code changes are pure renamings (`_error_code` -> `error_code`, `_ACTED` -> `ACTED`, `_summarise` -> `summarise`, `_SERVICE_NAME` / `_DEFAULT_REGION` / `_SKIP_CONTEXT` / `_PROTECTED` / `_boto3_*` / `_all_regions` / `_skip_region` / `_log_summary` -> public package-internal names in `crc/aws/vpc/runtime.py`), delegation (`VmCleaner.filter_instances` and `VmCleaner.should_skip` delegating to `InstanceJudge`), and extracting `_volume_tags` in `crc/aws/spot_instance_requests/volume_tags.py` (shared by `describe_volume_tag_list` and `volume_tag_keys` with identical `describe_volumes` call and exception handling).
+2. **Import paths and mock/monkeypatch targets**: Verified all imports and string patch targets across `crc/`, `crc.py`, and `tests/`. Added minor re-exports so all public symbols from the pre-split modules remain importable from their original module paths as well (`Clock` in `crc/aws/spot_instance_requests/cleaner.py`, `error_code` in `crc/aws/spot_instance_requests/volumes.py` matching its README entry, `Decision` in `crc/aws/vm/cleaner.py`, and `__all__` including `VpcRuntime` in `crc/aws/vpc/cleaner.py`).
+3. **Tests and guardrails untouched**: No test files, `tests/legacy/*.txt` oracles, `tests/archtest/**`, or out-of-scope files were modified; no flat `crc/aws/*.py` or `crc/aws/_common.py` was created or edited.
+4. **Line counts and seams**: Every file in `crc/aws/spot_instance_requests/`, `crc/aws/vm/`, and `crc/aws/vpc/` is at or below 250 lines (`wc -l` max is `crc/aws/vpc/cleaner.py` at 245 lines; the other three split originals are 197, 44, and 206 lines, and all new modules range from 32 to 144 lines). Splits follow clean responsibility seams (`runtime.py`, `regions.py`, `summary.py`, `volume_tags.py`, `lookups.py`, `sweep.py`, `settings.py`, `reporting.py`, `judge.py`, `adapter.py`).
+5. **READMEs**: `crc/aws/spot_instance_requests/README.md`, `crc/aws/vm/README.md`, and `crc/aws/vpc/README.md` are concise and pass ARCH-002 Public API checks.
+6. **Gates and test count**:
+   - `ruff check .`: passed
+   - `mypy`: passed (strict, 262 source files)
+   - `lint-imports`: 5 contracts kept, 0 broken
+   - `pytest -q`: `43010 passed in 163.63s` (matches base commit count of 43010; includes ARCH-001..005 and SAF-LOCK)
+   - `make check` total runtime: `2m49s`
+
+VERDICT: APPROVE

@@ -18,6 +18,7 @@ from crc.aws.spot_instance_requests.sweep import (
 from crc.aws.spot_instance_requests.volume_tags import (
     ERRORS,
     describe_volume_tag_list,
+    error_code,
     filter_deletable_leftover_volumes,
     prefixed_scope_keys_on_volume,
     volume_ok_to_delete,
@@ -29,6 +30,7 @@ __all__ = [
     "LiveLookup",
     "describe_tagged_leftover_volumes",
     "describe_volume_tag_list",
+    "error_code",
     "filter_deletable_leftover_volumes",
     "inspect_instance",
     "instance_state_and_dot_false_volumes",

@@ -22,6 +22,7 @@ from crc.aws.vpc.runtime import (
     RegionLister,
     ResourceFactory,
     TagSpec,
+    VpcRuntime,
     all_regions,
     boto3_client,
     boto3_resource,
@@ -32,6 +33,16 @@ from crc.aws.vpc.teardown import has_instances, tear_down
 from crc.core import logger, policy
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext, Skipped
 from crc.core.registry import register
+
+__all__ = [
+    "ClientFactory",
+    "RegionLister",
+    "ResourceFactory",
+    "TagSpec",
+    "VpcCleaner",
+    "VpcRuntime",
+    "build_vpc_cleaner",
+]
 
 
 class VpcCleaner:
