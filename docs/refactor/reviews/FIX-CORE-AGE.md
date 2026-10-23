@@ -85,3 +85,58 @@ avoid merge conflicts.
 
 VERDICT: APPROVE
 
+
+## Round 2 (Opus)
+
+- **Round 1 check.** Round 1 (Argon) had no findings and made no fixes, so there was nothing to re-check. All points below were checked again independently.
+- **(1) Bugs fixed.** `get_retention_age` (`crc/core/age.py:249-284`) now shares `_checked_retention_age` with
+  `validated_retention_age`. A present tag that is empty, whitespace-only, `None`, not a string, unparseable,
+  not an int/dict, uses an unsupported key, is not finite, is zero or is negative returns a fresh copy of `KEEP_AGE`. The run log counts
+  `skip("bad_age_tag")` and the cause is logged at DEBUG. `is_old` returns False for the marker before `MAX_AGE` is
+  applied (`age.py:216-218`). I traced all 9 callers (aws disk/kms/vm, azure disk/vm, gcp disk/vm, oci disk/vm). Each one passes the value
+  through `policy.effective_age` into `is_old`, except AWS disk, which uses `normalize_age`, then `aws_disk_creation_floor` and
+  `is_older_than_floor`. There a 1,000,000-day timedelta is compared against `now - created`, so it never overflows and is never
+  reached, and the disk is kept. Absent tag or no key: `None`, so `--age` / `--detach_age` apply as before. A valid tag returns the same
+  literal and logs the same lines in the same order. I confirmed the new tests fail on 182466d: with `KEEP_AGE` defined
+  locally, `tests/test_core_age_fix.py` gives 38 failed and 9 passed (the 9 that pass are the cases whose outcome is unchanged), and both new files fail at import because `KEEP_AGE` does not exist there.
+- **(2) Direction and parity.** The change only keeps more. A bad tag was either judged by `--age`, deleted on a zero, negative or `0` tag
+  (`is_old(0)` matched everything), or failed the run (`OverflowError`, `TypeError`); it is now kept. No new SDK call
+  and no exit-code change on other inputs. `tests/legacy/` is untouched. In `tests/test_crc_service_parity.py`, the diverging cases are the
+  explicit index set `BUG_004_CASES`; each one asserts that it differs from the oracle and returns `KEEP_AGE` with DEBUG-only logs, and every
+  other case still asserts equality with the oracle. The module parity files skip the oracle assertion only for the cases named in
+  `BUG_004_FIXED`, which is justified because those oracles inherit the live `Service`. Nothing is loosened globally.
+- **(3) Production commands.** All 31 commands keep their flags. The selection is unchanged except for resources whose `max_retention_age` tag
+  is present but bad; those are kept, even under `--max_age '{"days": 21}'`. The spot commands (`spot_instance_requests`,
+  azure `spot_instances`) use `validated_retention_age`, whose result and WARNING logs are unchanged.
+- **(4) Fail closed.** The fix keeps the resource instead of raising. The age gate runs inside `plan()` before any delete or stop call.
+- **(5) Protected files.** `git diff 182466d..HEAD` touches none of `CLEANUP_SAFETY.md`, PLAN/STATUS/BUGS, `tests/archtest/**`,
+  `tests/legacy/**`, the 5 locked tests, AGENTS.md, ARCHITECTURE.md or `.cursor/**`.
+- **(6) READMEs.** `crc/core/README.md` (Public API and Safety Invariants) and `crc/README.md` are updated, and ARCH-002 passes.
+- **(7) Unfixed bugs.** None.
+
+### Findings
+
+No BLOCKING findings.
+
+- NIT (out of rung scope, for the driver or the module FIX rungs): these module READMEs still say the custom age tag
+  "fails open (BUG-004)": `crc/gcp/README.md:55-56`, `crc/azu/README.md:56`, `crc/azu/vm/README.md:39`,
+  `crc/aws/vm/README.md:40`, `crc/oci/disk/README.md:32`, `crc/oci/vm/README.md:38`. Proposed text: "custom age tag
+  fails closed: a present but bad tag keeps the resource (`get_retention_age` returns `KEEP_AGE`, BUG-004/BUG-016)".
+  Round 1's coder note already lists most of these.
+- NIT (log text, bug-covered inputs only): `KEEP_AGE` is truthy, so for a bad tag every caller now logs
+  `Updating age for <resource>` at INFO (for example `crc/gcp/vm.py:273`, `crc/aws/disk/volumes.py:170`), although the resource is
+  kept. Before the fix, an empty or unparseable tag gave `None` and no such line. This is harmless but misleading. It will go away when the
+  callers move to `validated_retention_age` in their own rungs, which is the same follow-up as the double-count bug above.
+- NIT (equality marker): `is_old` detects the marker with `age == KEEP_AGE`, so a *valid* tag, or an `--age`, of exactly
+  `{'days': 1000000}` now ignores a shorter `MAX_AGE` (kept; before, it was shortened to `--max_age`). This only keeps more and
+  no real tag uses that value, so I left it.
+- NIT: in `crc/aws/kms.py:245`, `get_retention_age` runs before the key state and description checks, so `bad_age_tag` is
+  counted for keys that would have been ignored anyway (only the SKIPPED count changes, on bug-covered inputs). This is the same family
+  as the double-count bug above.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` passed, then `make check` passed: ruff, mypy and lint-imports (5 contracts kept, 0 broken),
+and pytest **42491 passed** (182466d: 42444).
+
+ROUND 2 VERDICT: APPROVE
