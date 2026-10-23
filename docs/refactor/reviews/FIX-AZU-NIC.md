@@ -51,3 +51,61 @@ attached NICs is now `reason=in_use` (was `reason=attached`), log text only.
   added by the refactor). Not removed here because `crc/core/` is outside this rung.
 - `docs/refactor/BUGS.md` `BUG-118` (non-string `exception_regex` entry raising `TypeError` only when evaluated)
   is now a `ValueError` before any SDK call as a side effect of `BUG-113`; the `None`-name `TypeError` is kept.
+
+## Round 1 (Argon)
+
+Scope reviewed: `git diff 182466d..HEAD` (`crc/azu/nic.py`, `crc/azu/README.md`,
+`docs/refactor/reviews/FIX-AZU-NIC.md`, `tests/helpers_azure_nic.py`, `tests/test_azure_logger.py`,
+`tests/test_azure_nic.py`, `tests/test_azure_nic_fix.py`, `tests/test_azure_nic_parity.py`).
+
+### Checks
+
+1. **Fixed bugs (`BUG-111`, `BUG-122`, `BUG-113`, `BUG-114`)**:
+   - `BUG-111` & `BUG-122` (`crc/azu/nic.py:45,187-190`): `NicOperations.list(resource_group_name)` and `AzureNicCleaner.list_nics()` list only `self._resource_group` (`Base.resource_group`, falling back to `AZURE_RESOURCE_GROUP` when `resource_group` is falsy) instead of subscription-wide `list_all()`. Covered by `test_only_the_configured_group_is_listed_and_acted_on_BUG_111_BUG_122`, `test_group_comes_from_env_when_not_given_BUG_111`, and `test_list_is_scoped_to_the_configured_group_BUG_111` (all fail on `182466d`, pass now).
+   - `BUG-113` (`crc/azu/nic.py:68-93,130-140,240-244`): `name_regex` and `exception_regex` entries are validated and compiled with `policy.compile_patterns` before any SDK call (`ValueError` on invalid regex, bare string, non-string entry, or empty-string `exception_regex` entry), empty-string `name_regex` entries are ignored (never matching all NICs), and matching uses `re.search` via `policy.name_regex_search_matches` / `policy.exception_regex_search_matches` (plus literal substring fallback via `policy.nic_name_excluded` for `exception_regex` so no NIC kept on `main` is deleted). Covered by `test_name_regex_is_a_regular_expression_BUG_113`, `test_exception_regex_is_a_regular_expression_BUG_113`, `test_invalid_patterns_raise_value_error_before_any_sdk_call_BUG_113`, `test_adapter_invalid_pattern_raises_before_any_sdk_call_BUG_113`, and `test_empty_string_entry_is_ignored_BUG_113`.
+   - `BUG-114` (`crc/azu/nic.py:231-236`): `decide()` skips with reason `"in_use"` (`_logger.skip("in_use")`) when `nic.virtual_machine`, `getattr(nic, "private_endpoint", None)`, or `getattr(nic, "private_link_service", None)` is truthy. Covered by `test_nic_in_use_by_private_endpoint_or_link_service_is_kept_BUG_114`, `test_vm_attached_nic_is_in_use_and_missing_attributes_default_to_free_BUG_114`, `test_adapter_keeps_nic_in_use_BUG_114`, and parity case `in-use-private-endpoint-or-link-service`.
+2. **Direction rule & parity (`tests/test_azure_nic_parity.py`, `tests/legacy/azu_nic.txt`)**:
+   - Frozen oracle `tests/legacy/azu_nic.txt` is untouched (`git diff 182466d..HEAD -- tests/legacy/` is empty).
+   - Every unmarked parity case asserts equality of `calls` (with `list_all` mapped to `list(group)` for `BUG-111`), `error`, `deleted`, `count`, `logs`, `count_logs`, and `stdout`.
+   - Every diverging case in `DIVERGING` is tagged with `BUG-113` or `BUG-114`, asserts `old_shows(old)`, asserts the full new outcome (`calls`, `deleted`, `count`, `logs`, `stdout`, `error`), and asserts `(new.calls, new.error, new.deleted) != (old.calls, old.error, old.deleted)`.
+3. **Production command**:
+   - `python3 crc.py --cloud azure --resource_group "$RESOURCE_GROUP" --resource nic --name_regex '["yb-itest", "yb-itests", "ui-auto"]' --slack_channel yba-crc-cleanup-notifications` runs with identical CLI flags and selects the same NICs (`test_production_values_select_the_same_nics_BUG_113`), scoping `list()` to `$RESOURCE_GROUP`.
+4. **Fail-closed before SDK mutation**:
+   - `prepare()` runs at the start of `plan()`, `apply()`, and `NIC.delete()` before `self._client_factory()` is called, so invalid patterns raise `ValueError` with `azure.calls == []`.
+5. **Protected files**:
+   - No hash-locked safety test, `tests/archtest/safety_lock.json`, `docs/refactor/PLAN.md`, `docs/refactor/STATUS.md`, `docs/refactor/BUGS.md`, or `CLEANUP_SAFETY.md` is edited in `182466d..HEAD`.
+6. **README (`ARCH-002`)**:
+   - `crc/azu/README.md` `## Purpose`, `## Public API`, and `## Safety Invariants` match `crc/azu/nic.py` (`ARCH-002` passes).
+7. **Owner decisions**:
+   - The fail-closed handling of empty-string `exception_regex` entries, literal-substring fallback in `exception_regex`, bare-string / non-string `ValueError`, and direct `nic.virtual_machine` attribute read are documented under `## Owner decision` above.
+
+### BLOCKING (fixed in Round 1)
+
+1. **Out-of-scope formatting edits in `a9dfcf2`**:
+   - Commit `a9dfcf2` swept in 25 unrelated formatting changes (`ARCHITECTURE.md`, `crc/aws/**`, `crc/cli/inputs.py`, `crc/core/**`, `crc/notify/**`, and 12 non-Azure test files). Restored all 25 out-of-scope files to `182466d` so `git diff 182466d..HEAD` touches only the 8 `FIX-AZU-NIC` files.
+2. **Stale `NicOperations` and `nic.py` descriptions in `crc/azu/README.md` (`crc/azu/README.md:14,35`)**:
+   - Updated `## Purpose` (`nic.py` bullet) from "not attached to a VM ... plain substring name filters" to "not in use ... regex name filters" and `## Public API` (`NicOperations` bullet) from `list_all and begin_delete` to `list and begin_delete`.
+3. **Unnecessary `Any` in pattern types and `exception_regex` skipped when `name_regex` is empty (`crc/azu/nic.py:70,127-140,240-244`)**:
+   - Narrowed `_compile` return type and `self._include` / `self._exclude` from `tuple[Any, ...]` to `tuple[str, ...]`, delegating matching in `decide()` to `policy.name_regex_search_matches`, `policy.exception_regex_search_matches`, and `policy.nic_name_excluded` so `Any` stays at SDK boundaries (`SKILL.md` 2.2, 3.1).
+   - Compiled `self._include` and `self._exclude` in `prepare()` before checking `bool(self._include)` so an invalid `exception_regex` raises `ValueError` even when `name_regex` is empty (`test_invalid_patterns_raise_value_error_before_any_sdk_call_BUG_113`).
+4. **Parity coverage for `BUG-114` and full outcome assertions in `DIVERGING` (`tests/test_azure_nic_parity.py`)**:
+   - Added `in-use-private-endpoint-or-link-service` (`BUG-114`) to `CASES` and `DIVERGING`, strengthened `DIVERGING` predicates (`_deleted_outcome`, `_value_error`) to assert `calls`, `deleted`, `count`, `logs`, `stdout`, and `error`, and added `test_buggy_quirk_is_fixed` parametrized over `DIVERGING` (`BEHAVIOUR_FIX.md` section 3).
+
+### NIT
+
+None. No issues in do-not-edit files (`AGENTS.md`, `ARCHITECTURE.md`, `CLEANUP_SAFETY.md`, `docs/refactor/PLAN.md`, `.cursor/**`, `tests/archtest/**`).
+
+### Gates & test count
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`:
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed! |
+| `mypy` (`crc`, `tests`) | Success: no issues found in 229 source files |
+| `lint-imports` | Contracts: 5 kept, 0 broken |
+| `pytest -q` | 42474 passed in 146.62s |
+
+Test count: 42444 passed at `182466d`, 42474 passed now (+30).
+
+VERDICT: APPROVE

@@ -506,3 +506,4 @@ def test_unattached_run_logs_nothing_extra(caplog: pytest.LogCaptureFixture) -> 
     _keypairs(kp_t.Aws({"us-west-2": _pairs()}), dry_run=True).delete()
     text = "\n".join(r.getMessage() for r in caplog.records)
     assert not any(word in text for word in ("REGION ", "ACTION ", "RESULT ", "SKIPPED "))
+

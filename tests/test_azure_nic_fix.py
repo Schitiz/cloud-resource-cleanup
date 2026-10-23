@@ -96,6 +96,7 @@ def test_exception_literal_substring_still_excludes_BUG_113() -> None:
     [
         (["nic("], ()),
         (["nic"], ["[a-"]),
+        ([], ["[a-"]),
         (["nic", "*bad"], ()),
         (["nic"], [""]),
         ("nic", ()),

@@ -11,7 +11,7 @@ Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.
 - `_base.py`: `Base`: Azure credential from the `AZURE_CREDENTIALS_*` variables, and lazily built compute and network clients for a resource group (rung PL-AZ)
 - `disk.py`: `AzureDiskCleaner` (registered as `azure`/`disk`) and the adapter `Disk`: deletes unattached managed disks (`begin_delete`); any-key tag filter, age gate
 - `ip.py`: `AzureIpCleaner` (registered as `azure`/`ip`) and the adapter `IP`: deletes IPs without an IP configuration (`begin_delete`); any-key tag filter
-- `nic.py`: `AzureNicCleaner` (registered as `azure`/`nic`) and the adapter `NIC`: deletes NICs not attached to a VM (`begin_delete(...).result()`, three attempts); plain substring name filters
+- `nic.py`: `AzureNicCleaner` (registered as `azure`/`nic`) and the adapter `NIC`: deletes NICs not in use (`begin_delete(...).result()`, three attempts); regex name filters
 - `spot_vm/`: `AzureSpotVmCleaner` (registered as `azure`/`spot_instances`) and the adapter `SpotVM`: deletes stopped or deallocated Spot VMs and their leftover disks and NICs (subpackage with its own README, rung AZ-5)
 - `vm/`: subpackage (own README): `VmCleaner` (registered as `azure`/`vm`) and the adapter `VM`: deletes (via `vm_delete_helpers`) or stops (`begin_power_off`) VMs by status; `from crc.azu.vm import VM` still works
 - `vm_delete_helpers.py`: `begin_delete_vm_and_wait`, `delete_vm_primary_nic`: delete helpers, no filtering (rung PL-AZ)
@@ -32,7 +32,7 @@ copyright comment and declares no export list.
 - `build_ip_cleaner()`: registry factory behind @register("azure", "ip"); reads resource_group, filter_tags, exception_tags and notags from RunContext.options and builds the client from `Base`.
 - `IP`: adapter crc.py calls (delete(), get_deleted, count, deleted_ips, base); runs the cleaner IP by IP in the order of main.
 - `DeletePoller`: Protocol of the handle begin_delete returns (result()).
-- `NicOperations`: Protocol of the two network_interfaces calls used, list_all and begin_delete (positional arguments); tests pass fakes.
+- `NicOperations`: Protocol of the two network_interfaces calls used, list and begin_delete (positional arguments); tests pass fakes.
 - `NicNetworkClient`: Protocol of the network client part used (the network_interfaces operations).
 - `AzureNicCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus list_nics, decide and attempt_delete used by the adapter); the client factory is injected through the constructor.
 - `build_nic_cleaner()`: registry factory behind @register("azure", "nic"); reads resource_group, name_regex and exception_regex from RunContext.options and builds the client from `Base`.

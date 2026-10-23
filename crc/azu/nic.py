@@ -67,7 +67,7 @@ ClientFactory = Callable[[], NicNetworkClient]
 
 def _compile(
     entries: Sequence[str] | str | None, label: str, *, allow_empty: bool
-) -> tuple[Any, ...]:
+) -> tuple[str, ...]:
     """Compile `name_regex` / `exception_regex` entries (BUG-113); `ValueError` on a bad one.
 
     An empty list or string gives no patterns. An empty-string entry is dropped when
@@ -89,7 +89,8 @@ def _compile(
             usable.append(entry)
         elif not allow_empty:
             raise ValueError(f"Invalid {label} entry '': an empty pattern would match every NIC")
-    return policy.compile_patterns(usable, label)
+    policy.compile_patterns(usable, label)
+    return tuple(usable)
 
 
 def _log_none_to_delete() -> None:
@@ -124,8 +125,8 @@ class AzureNicCleaner:
         self._resource_group = resource_group
         self._name_regex = name_regex
         self._exception_regex = exception_regex
-        self._include: tuple[Any, ...] | None = None
-        self._exclude: tuple[Any, ...] = ()
+        self._include: tuple[str, ...] | None = None
+        self._exclude: tuple[str, ...] = ()
 
     def prepare(self) -> bool:
         """Compile the patterns before any SDK call (`ValueError` if invalid).
@@ -133,8 +134,6 @@ class AzureNicCleaner:
         False when no usable `name_regex` entry is left: nothing can be selected, so the caller
         logs "No Azure NICs to delete." and does not list.
         """
-        if not self._name_regex:
-            return False
         if self._include is None:
             self._include = _compile(self._name_regex, "name_regex", allow_empty=True)
             self._exclude = _compile(self._exception_regex, "exception_regex", allow_empty=False)
@@ -238,8 +237,12 @@ class AzureNicCleaner:
         name = nic.name
         if not isinstance(name, str):
             raise TypeError(f"argument of type '{type(name).__name__}' is not iterable")
-        included = any(p.search(name) for p in self._include or ())
-        excluded = any(p.search(name) or p.pattern in name for p in self._exclude)
+        included = bool(self._include) and policy.name_regex_search_matches(
+            self._include or (), name
+        )
+        excluded = policy.exception_regex_search_matches(
+            self._exclude, name
+        ) or policy.nic_name_excluded(self._exclude, name)
         if not included:
             return self._kept("no name_regex match")
         if excluded:

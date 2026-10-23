@@ -297,7 +297,9 @@ def run_sweep(
 
     An error on one volume is logged and does not abort the rest.
     """
-    for volume in describe_tagged_leftover_volumes(client, statuses=["available"], region=region):
+    for volume in describe_tagged_leftover_volumes(
+        client, statuses=["available"], region=region
+    ):
         volume_id = volume.get("VolumeId")
         if not volume_id:
             continue

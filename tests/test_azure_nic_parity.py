@@ -84,6 +84,18 @@ CASES = [
     Case("exception-regex-syntax-is-literal", [nic("nic-a")], exception_regex=["nic.*"]),
     Case("exception-string-iterates-characters", [nic("nic-a"), nic("nic-b")], exception_regex="b"),
     Case("attached-skipped", [nic("nic-a", VM), nic("nic-b")]),
+    Case(
+        "in-use-private-endpoint-or-link-service",
+        [
+            types.SimpleNamespace(
+                name="nic-pe", virtual_machine=None, private_endpoint={"id": "pe"}
+            ),
+            types.SimpleNamespace(
+                name="nic-pls", virtual_machine=None, private_link_service={"id": "pls"}
+            ),
+            nic("nic-free"),
+        ],
+    ),
     Case("attached-and-dry-run", [nic("nic-a", VM), nic("nic-b")], dry_run=True),
     Case("attached-truthy-string", [nic("nic-a", "vm")]),
     Case("virtual-machine-falsy-values", [nic("nic-a", ""), nic("nic-b", {}), nic("nic-c", 0)]),
@@ -223,7 +235,32 @@ def _value_error(o: "Outcome") -> bool:
         o.error is not None
         and o.error[0] == "ValueError"
         and o.deleted == []
-        and _only(o.calls, "list", "list_all", "begin_delete", "result") == []
+        and o.count == 0
+        and o.calls == []
+        and o.logs == []
+        and o.stdout == ""
+    )
+
+
+def _deleted_outcome(names: Sequence[str], group: str = "rg-test") -> Callable[["Outcome"], bool]:
+    items = list(names)
+    expected_sdk = [
+        ("list", group),
+        ("list", group),
+        *[call for n in items for call in (("begin_delete", group, n), ("result", n))],
+    ]
+    expected_logs = [
+        *(f"Deleted NIC: {n}" for n in items),
+        f"Number of Azure NICs deleted: {len(items)}",
+        f"List of Azure NICs deleted: {items}",
+    ]
+    return lambda o: (
+        o.error is None
+        and o.deleted == items
+        and o.count == len(items)
+        and o.stdout == ""
+        and _only(o.calls, "list", "list_all", "begin_delete", "result") == expected_sdk
+        and [r[2] for r in o.logs] == expected_logs
     )
 
 
@@ -231,46 +268,58 @@ DIVERGING: dict[str, tuple[str, Callable[["Outcome"], bool], Callable[["Outcome"
     "filter-regex-syntax-is-literal": (
         "BUG-113",
         lambda o: o.deleted == ["nic.*"],
-        lambda o: o.deleted == ["nic-1", "nic.*"],
+        _deleted_outcome(["nic-1", "nic.*"]),
     ),
     "filter-anchor-is-literal": (
         "BUG-113",
         lambda o: o.deleted == ["^nic"],
-        lambda o: o.deleted == ["nic-1"],
+        _deleted_outcome(["nic-1"]),
     ),
     "filter-empty-pattern-matches-all": (
         "BUG-113",
         lambda o: o.deleted == ["a", "b"],
-        lambda o: o.deleted == [] and o.error is None and o.calls == [],
+        lambda o: (
+            o.deleted == []
+            and o.count == 0
+            and o.error is None
+            and o.calls == []
+            and o.stdout == ""
+            and [r[2] for r in o.logs] == ["No Azure NICs to delete."]
+        ),
     ),
     "filter-string-iterates-characters": (
         "BUG-113",
         lambda o: o.deleted == ["abc", "xyz"],
-        lambda o: _value_error(o),
+        _value_error,
     ),
     "exception-empty-pattern-excludes-all": (
         "BUG-113",
         lambda o: o.deleted == [],
-        lambda o: _value_error(o),
+        _value_error,
     ),
     "exception-regex-syntax-is-literal": (
         "BUG-113",
         lambda o: o.deleted == ["nic-a"],
-        lambda o: o.deleted == [] and o.error is None,
+        _deleted_outcome([]),
     ),
     "exception-string-iterates-characters": (
         "BUG-113",
         lambda o: o.deleted == ["nic-a"],
-        lambda o: _value_error(o),
+        _value_error,
     ),
     "attached-with-exception-bad-not-evaluated": (
         "BUG-113",
         lambda o: o.error is None,
-        lambda o: _value_error(o),
+        _value_error,
     ),
     "exception-non-string-evaluated-when-not-included": ("BUG-113", _tn, _value_error),
     "exception-non-string-evaluated-when-included": ("BUG-113", _tn, _value_error),
     "name-regex-non-string-entry": ("BUG-113", _tn, _value_error),
+    "in-use-private-endpoint-or-link-service": (
+        "BUG-114",
+        lambda o: o.deleted == ["nic-pe", "nic-pls", "nic-free"],
+        _deleted_outcome(["nic-free"]),
+    ),
 }
 
 
@@ -411,6 +460,7 @@ def test_cleaner_protocol_matches_main(
     new = _run_cleaner(case, monkeypatch, caplog, capsys)
     if case.id in DIVERGING:
         assert DIVERGING[case.id][2](new)
+        assert (new.calls, new.error, new.deleted) != (old.calls, old.error, old.deleted)
         return
     assert new.error == old.error
     assert new.stdout == old.stdout
@@ -495,6 +545,27 @@ def test_quirk_is_preserved(
     new = _run(_new, case, monkeypatch, caplog, capsys)
     assert check(old), "oracle no longer shows the quirk"
     assert check(new)
+
+
+@pytest.mark.parametrize(
+    "case_id",
+    list(DIVERGING),
+    ids=[f"{cid}-{bug}" for cid, (bug, _, _) in DIVERGING.items()],
+)
+def test_buggy_quirk_is_fixed(
+    case_id: str,
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    bug_id, old_shows, new_shows = DIVERGING[case_id]
+    assert bug_id in {"BUG-113", "BUG-114"}
+    case = _find(case_id)
+    old = _run(_legacy, case, monkeypatch, caplog, capsys)
+    new = _run(_new, case, monkeypatch, caplog, capsys)
+    assert old_shows(old), f"oracle no longer shows {bug_id}"
+    assert new_shows(new)
 
 
 def test_list_is_requested_twice_and_the_first_is_dropped(

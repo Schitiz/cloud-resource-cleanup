@@ -67,7 +67,9 @@ class InfluxNotifier:
         """Write `resources` (a list or dict) as one point of measurement `cloud`."""
         self._emit(cloud, resource_name, lambda: (str(resources), len(resources)))
 
-    def _emit(self, cloud: str, resource_name: str, fields: Callable[[], tuple[str, int]]) -> None:
+    def _emit(
+        self, cloud: str, resource_name: str, fields: Callable[[], tuple[str, int]]
+    ) -> None:
         try:
             write_api = self.client.write_api(write_options=SYNCHRONOUS)
 

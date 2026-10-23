@@ -38,9 +38,8 @@ crc/aws|azu|gcp|oci/      one module per resource, registered by decorator
 class Cleaner(Protocol):
     cloud: str
     kind: str
-
     def supports(self, operation: Operation) -> bool: ...
-    def plan(self, context: RunContext) -> Plan: ...  # discovery and policy, read-only
+    def plan(self, context: RunContext) -> Plan: ...   # discovery and policy, read-only
     def apply(self, plan: Plan, context: RunContext) -> Result: ...  # all mutating cloud calls
 ```
 
