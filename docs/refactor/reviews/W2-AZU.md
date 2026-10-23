@@ -83,3 +83,30 @@ Runtime of `make check`: 3m38s (pytest 197.33s).
 Test count: 43010 passed vs 43010 at base `cea0a8a` (+0, unchanged).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff cea0a8a..HEAD`. Round 1 (Argon) findings re-checked: its README nit (`ip.py`/`nic.py`/`disk.py` prose in `crc/azu/README.md`) is fixed; its import-path, patch-target and line-count claims hold.
+
+### Independent checks
+
+1. **No behaviour change.** Concatenated the new `client.py + cleaner.py + adapter.py + __init__.py` of ip, nic and disk and diffed them against the base `ip.py`, `nic.py`, `disk.py`. The only non-import differences are the three `_common.py` substitutions: `_kept` -> `kept` (same `_logger.skip` + `(None, reason)`), the dry-run `acted("would_delete", ...)` loop -> `log_would_delete`, and `_log_summary` -> `log_delete_summary(noun, ..., number_word=)`. The log text is identical for IPs, Disks ("number ...") and NICs ("Number ..."); the `if not dry_run` / `if dry_run` branch swap in the IP variant gives the same output. `spot_vm/cleaner.py` -> `config.py` and `vm/cleaner.py` -> `settings.py` / `helpers.py` / `selection.py` are verbatim moves (`--color-moved`); `_old_enough`, `_skip_reason` and `_is_old` became module functions that take the settings as their first argument, with the same condition order, log text and exception handling. SDK call order is unchanged (including the double `network_interfaces.list` of BUG-111).
+2. **Imports and patch targets.** `crc.py`, `crc/cli/{resource_ops,vm_ops}.py` and every `tests/` import from `crc.azu.{ip,nic,disk,spot_vm,vm}` resolve. String targets in tests: `crc.azu._base.*`, `crc.azu.vm_delete_helpers.time.sleep`, `crc.azu.spot_vm.{Base,begin_delete_vm_and_wait,delete_vm_primary_nic}`; all are in modules this lane did not change, so they still patch the code that runs. The three `datetime` overrides in `tests/test_azure_{disk,vm,spot_instances}_parity.py` write only into the exec'd legacy oracle module, so the split does not affect them. No test touches the private names that moved (`_old_enough`, `_kept`, `_power_state`, ...), and there are no star imports, so the new `__all__` lists in `spot_vm/cleaner.py` and `vm/cleaner.py` drop nothing that is used.
+3. **Tests untouched.** `git diff --name-only cea0a8a..HEAD` outside `crc/azu/` is only this review file: no test, `tests/legacy/*.txt`, `tests/archtest/**` or other no-touch file changed.
+4. **Size and seams.** Every owned file is 248 lines or fewer (largest: `spot_vm/cleaner.py`, 248). The split follows real seams: SDK Protocols in `client.py`, Cleaner in `cleaner.py`, legacy adapter in `adapter.py` (one-move deletion), and settings/selection/helpers for vm. The `_common.py` helpers are each used 3 to 6 times.
+5. **READMEs.** ARCH-002 passes; the new subpackage READMEs are 31 to 35 lines.
+
+### Findings
+
+- BLOCKING: none.
+- NIT (fixed): `crc/azu/spot_vm/config.py:3`: the module docstring said "Settings and summary logging" but the module also holds `old_enough`; it now says "Settings, age check and summary logging" (docstring only).
+- NIT (not fixed, owner action): the type aliases `TagSpec` (`ip/client.py`, `disk/client.py`, `spot_vm/config.py`, `vm/settings.py`) and `Clock` (`disk/client.py`, `vm/settings.py`), and the `DeletePoller` Protocol (`nic/client.py`, `disk/client.py`, `vm_delete_helpers.py`), are still declared more than once inside `crc/azu`. They are declarations, not logic, so they are left where they are; they can move to `crc/azu/_common.py` (or `crc/core`) together with the cross-cloud candidates listed above.
+- The "New bugs" line references (`nic/cleaner.py:146`, `disk/adapter.py:30`, `spot_vm/config.py:35`) are correct.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`: ruff All checks passed; mypy strict Success (265 source files); lint-imports 5 kept, 0 broken; pytest (ARCH-001..005, SAF-LOCK, full suite) 43010 passed in 162.10s.
+
+Runtime of `make check`: 2m59s. Test count: 43010 collected at `cea0a8a` and 43010 at HEAD (+0).
+
+ROUND 2 VERDICT: APPROVE

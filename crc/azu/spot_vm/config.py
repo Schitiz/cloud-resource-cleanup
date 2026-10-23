@@ -1,6 +1,6 @@
 # Copyright (c) Yugabyte, Inc.
 
-"""Settings and summary logging of the Azure Spot VM cleaner."""
+"""Settings, age check and summary logging of the Azure Spot VM cleaner."""
 
 import datetime
 import logging
