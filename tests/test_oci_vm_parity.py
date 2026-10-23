@@ -25,6 +25,7 @@ from tests.helpers_log_fix import expected_logs
 from tests.log_fix_oci import RULES
 
 BUGS = {"BUG-358"}
+EVALUATION_ERROR = "Error occurred while evaluating instance "
 ORACLE = Path(__file__).parent / "legacy" / "oci_vm.txt"
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)
 NOW_UTC = NOW.astimezone(datetime.UTC)
@@ -561,6 +562,38 @@ def debug_logs(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG)
 
 
+# case id -> (instances acted on, instances whose evaluation failed); BUG-162: an unexpected
+# error while evaluating one instance is logged and recorded, the instance is kept, the loop
+# goes on, and the run no longer fails. The oracle (main) stops the run with the error.
+DIVERGES = {
+    "max-age-not-a-dict": ([], ["a"]),
+    "naive-created-time": ([], ["a"]),
+    "missing-created-time": ([], ["a"]),
+    "unexpected-error-in-later-instance-after-action": (["a", "c"], ["b"]),
+    "unexpected-error-in-later-region": (["a"], ["b"]),
+}
+
+
+def _assert_bug_162_outcome(case: Case, operation: str, old: Outcome, new: Outcome) -> None:
+    """The oracle shows the old failure; the new run acts on the healthy instances, keeps the
+    ones that failed to evaluate and reports each of them once."""
+    acted, failed = DIVERGES[case.id]
+    assert old.error is not None, "oracle no longer shows BUG-162"
+    assert new.error is None
+    assert new.acted == acted
+    assert new.count == len(acted)
+    mutations = [c for c in new.calls if _is_mutation(c)]
+    assert [c[2] for c in mutations] == acted
+    assert {c[0] for c in mutations} <= {
+        "instance_action" if operation == "stop" else "terminate_instance"
+    }
+    evaluation_errors = [log for log in new.logs if log[2].startswith(EVALUATION_ERROR)]
+    assert [
+        log[2].split(": ")[0].removeprefix(EVALUATION_ERROR) for log in evaluation_errors
+    ] == failed
+    assert {log[1] for log in evaluation_errors} == ({logging.ERROR} if failed else set())
+
+
 PARAMS = [(case, op) for case in CASES for op in OPERATIONS]
 PARAM_IDS = [f"{case.id}-{op}" for case, op in PARAMS]
 
@@ -576,6 +609,9 @@ def test_adapter_matches_main(
 ) -> None:
     old = _run(_legacy, case, operation, monkeypatch, caplog, capsys)
     new = _run(_new, case, operation, monkeypatch, caplog, capsys)
+    if case.id in DIVERGES:
+        _assert_bug_162_outcome(case, operation, old, new)
+        return
     assert new.calls == old.calls
     assert new.error == old.error
     assert new.acted == old.acted
@@ -647,6 +683,9 @@ def test_cleaner_protocol_matches_main(
 ) -> None:
     old = _run(_legacy, case, operation, monkeypatch, caplog, capsys)
     new = _run_cleaner(case, operation, monkeypatch, caplog, capsys)
+    if case.id in DIVERGES:
+        _assert_bug_162_outcome(case, operation, old, new)
+        return
     assert new.error == old.error
     assert new.stdout == old.stdout
     if old.error is not None:
@@ -726,7 +765,6 @@ QUIRKS: Sequence[tuple[str, str, Callable[[Outcome], bool]]] = [
     ("age-unknown-keys-keep-all", "delete", lambda o: o.acted == []),
     ("max-age-shortens", "delete", lambda o: o.acted == ["a"]),
     ("max-age-empty-dict", "delete", lambda o: o.acted == []),
-    ("max-age-not-a-dict", "delete", lambda o: o.error is not None),
     ("custom-age-tag-unparseable-falls-back-to-age", "delete", lambda o: o.acted == ["a"]),
     ("custom-age-tag-empty-falls-back-to-age", "delete", lambda o: o.acted == ["a"]),
     ("custom-age-tag-zero-days-falls-back-to-age", "delete", lambda o: o.acted == ["a"]),
@@ -739,22 +777,6 @@ QUIRKS: Sequence[tuple[str, str, Callable[[Outcome], bool]]] = [
     ("state-not-running", "delete", lambda o: o.acted == ["e"]),
     ("state-match-is-case-sensitive", "delete", lambda o: o.acted == []),
     ("custom-states-empty", "delete", lambda o: o.acted == []),
-    ("naive-created-time", "delete", lambda o: o.error is not None and o.error[0] == "TypeError"),
-    (
-        "missing-created-time",
-        "delete",
-        lambda o: o.error is not None and o.error[0] == "AttributeError",
-    ),
-    (
-        "unexpected-error-in-later-instance-after-action",
-        "delete",
-        lambda o: o.error is not None and ("terminate_instance", "r1", "a") in o.calls,
-    ),
-    (
-        "unexpected-error-in-later-instance-after-action",
-        "stop",
-        lambda o: o.error is not None and ("instance_action", "r1", "a", "STOP") in o.calls,
-    ),
     ("duplicate-display-names", "delete", lambda o: o.acted == ["same", "same", "same"]),
     ("display-name-none", "stop", lambda o: o.acted == [None]),
     (
@@ -787,9 +809,11 @@ def test_vm_diverges_from_oracle(
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """BUG-358: new logs differ from the oracle by a level only."""
+    """BUG-358: new logs differ from the oracle by a level only (BUG-162 cases excluded)."""
     changed = 0
     for case, operation in PARAMS:
+        if case.id in DIVERGES:
+            continue
         old = _run(_legacy, case, operation, monkeypatch, caplog, capsys)
         new = _run(_new, case, operation, monkeypatch, caplog, capsys)
         if old.logs == new.logs:
@@ -799,3 +823,43 @@ def test_vm_diverges_from_oracle(
         assert new.calls == old.calls
         assert {log[1] for log in new.logs if log not in old.logs} == {logging.DEBUG}
     assert changed > 0
+
+
+OLD_BUG_162_QUIRKS: Sequence[tuple[str, str, Callable[[Outcome], bool]]] = [
+    ("max-age-not-a-dict", "delete", lambda o: o.error is not None),
+    ("naive-created-time", "delete", lambda o: o.error is not None and o.error[0] == "TypeError"),
+    (
+        "missing-created-time",
+        "delete",
+        lambda o: o.error is not None and o.error[0] == "AttributeError",
+    ),
+    (
+        "unexpected-error-in-later-instance-after-action",
+        "delete",
+        lambda o: o.error is not None and ("terminate_instance", "r1", "a") in o.calls,
+    ),
+    (
+        "unexpected-error-in-later-instance-after-action",
+        "stop",
+        lambda o: o.error is not None and ("instance_action", "r1", "a", "STOP") in o.calls,
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "quirk", OLD_BUG_162_QUIRKS, ids=[f"{q[0]}-{q[1]}" for q in OLD_BUG_162_QUIRKS]
+)
+def test_bug_162_oracle_fails_and_new_code_carries_on(
+    quirk: tuple[str, str, Callable[[Outcome], bool]],
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """BUG-162: the oracle still shows the run failure, the new code keeps the instance."""
+    case_id, operation, check = quirk
+    case = next(c for c in CASES if c.id == case_id)
+    old = _run(_legacy, case, operation, monkeypatch, caplog, capsys)
+    new = _run(_new, case, operation, monkeypatch, caplog, capsys)
+    assert check(old), "oracle no longer shows the quirk"
+    assert new.error is None

@@ -37,10 +37,12 @@ DEFAULT_INSTANCE_STATES = ("RUNNING",)
 TagSpec = Mapping[str, Sequence[str]]
 SKIP_KEYS = {
     "state is not allowed": "state",
+    "OKE or instance pool member": "managed",
     "matches exception_tags or notags": "exception_tag",
     "does not match filter_tags": "filter_mismatch",
     "not older than age": "too_young",
 }
+EVALUATION_FAILED = "evaluation failed"
 Clock = Callable[[], datetime.datetime]
 
 
@@ -168,8 +170,15 @@ class VmCleaner:
 
     def decide(self, instance: SdkInstance, region: str, clock: Clock) -> Candidate | Skipped:
         """State, tag and age checks, in the order of main. `clock` is only read by the age
-        check, as `datetime.now()` is on main."""
-        reason = self._skip_reason(instance, clock)
+        check, as `datetime.now()` is on main. An unexpected error while evaluating one instance
+        (BUG-162: missing or naive creation time, malformed MAX_AGE) is logged and recorded as a
+        failure and the instance is kept; the caller carries on with the next one."""
+        try:
+            reason = self._skip_reason(instance, clock)
+        except Exception as e:
+            logging.error(f"Error occurred while evaluating instance {instance.display_name}: {e}")
+            _logger.record_failure(region, instance.id, e)
+            return Skipped(id=instance.id, reason=EVALUATION_FAILED, name=instance.display_name)
         if reason is not None:
             _logger.record_skip(SKIP_KEYS[reason])
             return Skipped(id=instance.id, reason=reason, name=instance.display_name)
@@ -223,6 +232,12 @@ class VmCleaner:
         settings = self._settings
         if not policy.state_in(instance.lifecycle_state, settings.instance_states):
             return "state is not allowed"
+        if policy.oci_is_managed_or_oke_node(
+            instance.freeform_tags,
+            getattr(instance, "defined_tags", None),
+            getattr(instance, "metadata", None) or {},
+        ):
+            return "OKE or instance pool member"
         tags = policy.normalize_tags(instance.freeform_tags)
         if policy.should_skip_by_tags(tags, settings.exception_tags, settings.notags):
             return "matches exception_tags or notags"
