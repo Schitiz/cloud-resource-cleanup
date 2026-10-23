@@ -194,7 +194,10 @@ SUPPORTED_CLOUDS: dict[str, tuple[str, ...]] = {
     "nic": ("azure",),
     "kms": ("aws",),
     "ip": ("aws", "azure", "gcp"),
+    "snapshot": ("aws",),
+    "vpc": ("aws",),
 }
+AWS_ONLY_RESOURCES = ("snapshot", "vpc")
 
 
 def is_supported_pair(cloud: Any, resource: Any) -> bool:
@@ -204,6 +207,8 @@ def is_supported_pair(cloud: Any, resource: Any) -> bool:
 
 
 def _unsupported_message(cloud: Any, resource: Any) -> str:
+    if resource in AWS_ONLY_RESOURCES:
+        return f"--resource {resource} is AWS-only; use --cloud aws (got --cloud {cloud})"
     if resource == "ip":
         return f"Invalid cloud provided: {cloud}. Supported clouds are {CLOUDS}"
     return UNSUPPORTED_PAIR_MESSAGES[resource]

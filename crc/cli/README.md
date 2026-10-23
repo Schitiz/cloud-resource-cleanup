@@ -22,20 +22,21 @@ plain `dict`, as on `main`.
 - `clients.py`: the Slack `WebClient` and `InfluxDBClient` construction (the InfluxDB field check runs right before it) and the `MAX_AGE` environment write with its print, and its reset.
 - `context.py`: `RunContext` (the settings every `CRC` of a run shares) and `make_crc`, the one place that builds `CRC(...)` for `main`.
 - `scan.py`: `run_scan`, the read-only `--scan_tag` path; it wraps each cloud pass in `crc.core.logger.begin()` / `finish()` (`operation=scan`), prints, notifies Slack and always exits with code 0.
-- `dispatch.py`: `run_dispatch`, the cloud and resource loops: one small handler per resource wrapped in `crc.core.logger.begin()` / `finish()` (`try`/`finally`), the AWS disk opt-in circuit breaker, the spot warnings and the `Snapshot` branch.
+- `dispatch.py`: `run_dispatch`, the cloud and resource loops: one small handler per resource wrapped in `crc.core.logger.begin()` / `finish()` (`try`/`finally`), the AWS disk opt-in circuit breaker, the pair validation (`validate_targets`, including the AWS-only `snapshot` and `vpc`), the spot warnings and the `Snapshot` branch.
 
 ## Public API
 
 - `main()`: the CLI entry (module main.py); crc.py re-exports it. It is not re-exported from the package init module, so the name `main` on the package stays the module.
 - `run_scan()`: the read-only scan path of the scan_tag flag; prints, notifies Slack and exits with code 0.
 - `run_dispatch()`: the cloud and resource loops, with the AWS disk breaker.
-- `validate_targets()`: check every (cloud, resource) pair before the first cleaner (BUG-017, BUG-018); raise an error, or return the pairs to skip under cloud all.
-- `is_supported_pair()`: False for a pair whose CRC method raises for that cloud (keypair and kms off AWS, nic off Azure, ip on OCI).
+- `validate_targets()`: check every (cloud, resource) pair before the first cleaner (BUG-017, BUG-018, BUG-009, BUG-084); raise an error, or return the pairs to skip under cloud all.
+- `is_supported_pair()`: False for a pair whose CRC method raises for that cloud (keypair and kms off AWS, nic off Azure, ip on OCI) or that is AWS-only (snapshot and vpc off AWS).
 - `Options`: frozen value of every parsed flag; `read_options()` builds it from the argument dict.
 - `Tokens`: frozen value of the two environment tokens; `read_tokens()` builds it.
 - `Targets`: frozen value of the expanded clouds and resources; `resolve_targets()` builds it.
 - `check_tokens()`: raise OSError when a Slack channel or InfluxDB is set without its token.
 - `check_flag_combinations()`: raise ValueError on stop for non-vm, all without all, user label, KMS flags.
+- `check_scan_tag()`: raise ValueError for an empty or blank scan_tag flag (BUG-344).
 - `validate_values()`: the list and dict type checks of the flag values.
 - `build_slack_client()`, `build_influxdb_client()`: construct the clients (InfluxDB field check first), or return None.
 - `set_max_age()`, `reset_max_age()`: write and remove the MAX_AGE environment variable, with the prints.
@@ -67,8 +68,9 @@ plain `dict`, as on `main`.
 - `main()` keeps the order of `main` on the main branch: parse flags, read the two tokens, `SLACK_BOT_TOKEN` then `INFLUXDB_TOKEN` errors, stop-only-for-vm, all-needs-all, slack user label, KMS description and user, the list and dict type checks, the Slack client, the InfluxDB field check and client, `MAX_AGE` set, then the scan path (exit) or the loops, then `MAX_AGE` reset. Errors keep their type (`OSError`, which `EnvironmentError` is an alias of) and message.
 - `scan.py` never deletes: it forces `dry_run`, builds `CRC` per cloud and only calls `scan_instances_with_tag`; it always ends in `sys.exit(0)`.
 - The AWS EBS breaker lives in `dispatch._disk` and, since FIX-CLI-ALL (BUG-018), also in `dispatch.validate_targets`: any `aws` + `disk` pair that is not `--cloud aws --resource disk` (so `--cloud all --resource disk|all`) raises `ValueError` before any cleaner of any cloud runs; it does not run.
-- BUG-017 (fixed in FIX-CLI-ALL): `run_dispatch` checks every (cloud, resource) pair before the first cleaner. A pair whose `CRC` method raises for that cloud (`keypair` and `kms` off AWS, `nic` off Azure, `ip` on OCI) raises the same `ValueError` message up front for an explicit cloud. Under `--cloud all` it also raises up front when a supported pair would run after it (`--cloud all --resource nic`: `main` stopped on aws, so Azure NICs are never deleted); otherwise it is skipped with a WARNING plus a `RUN START` / `SKIPPED reason=unsupported_cloud_resource` / `RESULT` log triple. `CRC`, `Snapshot`, `WebClient`, `InfluxDBClient` and `notify_cleanup` are looked up in `context`, `dispatch`, `clients` and `scan` at call time; `tests/test_cli_main_parity.py` runs the oracle `main()` and this one on recording fakes.
-- Known quirks (kept): `docs/refactor/BUGS.md` rows `BUG-009`, `BUG-028` to `BUG-044`, `BUG-084`, `BUG-333` to `BUG-350`.
+- One pair rule (FIX-CLI-ALL BUG-017 merged with FIX-CLI-ROUTE BUG-009/BUG-084, as FIX-CLI-MERGE): `dispatch.SUPPORTED_CLOUDS` lists the clouds each resource runs on, and `dispatch.validate_targets` checks every (cloud, resource) pair before the first cleaner. `main()` calls it before `MAX_AGE` is set (not on the read-only `--scan_tag` path) and `run_dispatch` calls it again. The pairs are `keypair` and `kms` (AWS), `nic` (Azure), `ip` (not OCI) and `snapshot` and `vpc` (AWS only). An unsupported pair of an explicit cloud raises `ValueError` up front (the `CRC` message; `--resource <r> is AWS-only; use --cloud aws (got --cloud <c>)` for `snapshot` and `vpc`), so nothing runs and `MAX_AGE` is untouched. Under `--cloud all` it also raises up front when a supported pair would run after it (`--cloud all --resource nic`: `main` stopped on aws, so Azure NICs are never deleted); otherwise it is skipped with a WARNING (`<r> is not supported on <cloud>; skipped under --cloud all`) plus a `RUN START` / `SKIPPED reason=unsupported_cloud_resource` / `RESULT` log triple. So `--cloud all --resource snapshot|vpc` runs once, for AWS. `CRC`, `Snapshot`, `WebClient`, `InfluxDBClient` and `notify_cleanup` are looked up in `context`, `dispatch`, `clients` and `scan` at call time; `tests/test_cli_main_parity.py` runs the oracle `main()` and this one on recording fakes.
+- An empty or blank `--scan_tag` raises `ValueError` from `inputs.check_scan_tag` before `MAX_AGE` is set and before any cleaner runs (BUG-344, fixed in FIX-CLI-ROUTE); it used to be falsy, skip the read-only scan and run the destructive cleanup.
+- Known quirks (kept): `docs/refactor/BUGS.md` rows `BUG-028` to `BUG-044`, `BUG-333` to `BUG-350` except `BUG-344`. `BUG-009` and `BUG-084` keep only the hard-coded `age_days=90` and the missing Slack and Influx notification of `snapshot`.
 
 ## Extension Rules
 
