@@ -20,7 +20,7 @@ Modules, split by responsibility:
 - `regions_of()`: builds the region lister from get_all_regions of Base.
 - `DiskRuntime`: frozen dataclass with the injected API factory, region lister and clock (now) of `Disk`; unset parts come from Base.
 - `DiskSettings`: frozen dataclass with the filters and thresholds of one run (filter tags, exception tags, notags, age, custom age tag key).
-- `DiskCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus list_region, attached_volume_ids, attached_boot_volume_ids, decide and remove used by the adapter).
+- `DiskCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus list_region, attached_volume_ids, attached_boot_volume_ids (both return None when the attachments are unknown), decide and remove used by the adapter).
 - `build_disk_cleaner()`: registry factory behind @register("oci", "disk"); reads filter_tags, exception_tags, notags, age and custom_age_tag_key from RunContext.options.
 - `Disk`: adapter crc.py calls (delete(), get_deleted, count, disk_names_to_delete); subclasses Service and Base; decides and deletes volume by volume in the order of main.
 
@@ -30,7 +30,8 @@ Modules, split by responsibility:
 - `plan()` only lists and decides (ARCH-005); `apply()` is the only caller of `delete_volume` / `delete_boot_volume` and never calls them in a dry run.
 - Only `AVAILABLE` volumes that are not `ATTACHED` / `ATTACHING` are candidates; block and boot volumes are both covered.
 - An empty age matches every volume (SAF-006) and `MAX_AGE` can shorten the age (SAF-010); the age of a volume with a custom age tag fails open to `--age` (SAF-009, `BUG-004`).
-- A failed delete is logged and skipped, never raised, as on main. A connectivity error while listing attachments is swallowed as on main (`BUG-096`, `BUG-097`), and a region with no availability domains has no boot volume attachments (`BUG-098`): attached volumes can then be deleted; do not fix outside a behaviour-fix rung.
+- A failed delete is logged and skipped, never raised, as on main.
+- Fail closed per region (FIX-OCI-DISK, `BUG-096`, `BUG-097`, `BUG-098`): `attached_volume_ids()` and `attached_boot_volume_ids()` return `None` when the attachments are unknown, and `decide()` then keeps every block volume (or boot volume) of that region (skip reasons `block volume attachments unknown` / `boot volume attachments unknown`, run-log skip `attachments_unknown`). Unknown means: a connectivity or auth error (`CONNECTIVITY_ERRORS`) while listing volume attachments, while listing availability domains or while listing the attachments of any one availability domain (a partial set is discarded), or a region with no availability domains. The region is recorded once as `region_skipped` and a WARNING `Region <r>: keeping every disk|boot disk: ...` is logged. The other volume kind of the region and other regions are decided as before; an unexpected (non-connectivity) error still propagates.
 - Filtering per module: `docs/refactor/FILTER_VARIANTS.md` section 5 (freeform tags, any key). Parity oracle: `tests/legacy/oci_disk.txt`, a frozen copy of `main`, never edited. Known quirks: `docs/refactor/BUGS.md` rows `BUG-004`, `BUG-096` to `BUG-110`, `BUG-353`, `BUG-354`.
 - Do not call real cloud APIs in tests; mock every SDK client.
 

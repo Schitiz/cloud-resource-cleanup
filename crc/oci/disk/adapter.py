@@ -118,7 +118,7 @@ class Disk(Service, Base):
         cleaner: DiskCleaner,
         api: VolumeApi,
         volumes: Sequence[SdkVolume],
-        attached_ids: set[str],
+        attached_ids: set[str] | None,
         kind: str,
         region: str,
     ) -> int:

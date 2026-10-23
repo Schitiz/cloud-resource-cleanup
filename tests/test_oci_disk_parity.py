@@ -24,6 +24,14 @@ from tests.helpers_log_fix import expected_logs
 from tests.log_fix_oci import RULES
 
 BUGS = {"BUG-353", "BUG-358"}
+DIVERGES = {
+    "attachment-listing-connection-error-deletes-attached": ("BUG-096", ["a"]),
+    "attachment-listing-auth-error-deletes-attached": ("BUG-096", ["a"]),
+    "boot-attachment-listing-error-deletes-attached": ("BUG-097", ["a"]),
+    "availability-domains-error-deletes-attached": ("BUG-097", ["a"]),
+    "boot-attachment-second-domain-error-keeps-first": ("BUG-097", ["b"]),
+    "no-availability-domains": ("BUG-098", ["a"]),
+}
 ORACLE = Path(__file__).parent / "legacy" / "oci_disk.txt"
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)
 NOW_UTC = NOW.astimezone(datetime.UTC)
@@ -618,7 +626,10 @@ def debug_logs(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG)
 
 
-@pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
+PARITY_CASES = [c for c in CASES if c.id not in DIVERGES]
+
+
+@pytest.mark.parametrize("case", PARITY_CASES, ids=[c.id for c in PARITY_CASES])
 def test_matches_main(
     case: Case,
     debug_logs: None,
@@ -684,7 +695,7 @@ def _is_summary_log(log: tuple[str, int, str]) -> bool:
     )
 
 
-@pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
+@pytest.mark.parametrize("case", PARITY_CASES, ids=[c.id for c in PARITY_CASES])
 def test_cleaner_protocol_matches_main(
     case: Case,
     debug_logs: None,
@@ -717,15 +728,6 @@ def test_cleaner_protocol_matches_main(
 
 
 QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
-    (
-        "attachment-listing-connection-error-deletes-attached",
-        lambda o: o.deleted == ["a"],
-    ),
-    ("attachment-listing-auth-error-deletes-attached", lambda o: o.deleted == ["a"]),
-    ("boot-attachment-listing-error-deletes-attached", lambda o: o.deleted == ["a"]),
-    ("availability-domains-error-deletes-attached", lambda o: o.deleted == ["a"]),
-    ("boot-attachment-second-domain-error-keeps-first", lambda o: o.deleted == ["b"]),
-    ("no-availability-domains", lambda o: o.deleted == ["a"]),
     ("detaching-volume-is-deleted", lambda o: o.deleted == ["a", "b"]),
     ("attaching-volume-kept", lambda o: o.deleted == []),
     ("delete-error-swallowed-and-logged", lambda o: o.error is None and o.deleted == ["a", "c"]),
@@ -784,7 +786,7 @@ def test_disk_diverges_from_oracle(
 ) -> None:
     """BUG-353 and BUG-358: new logs differ from the oracle by a level only."""
     changed = 0
-    for case in CASES:
+    for case in PARITY_CASES:
         old = _run(_legacy, case, monkeypatch, caplog, capsys)
         new = _run(_new, case, monkeypatch, caplog, capsys)
         if old.logs == new.logs:
@@ -794,3 +796,38 @@ def test_disk_diverges_from_oracle(
         assert new.calls == old.calls
         assert {log[1] for log in new.logs if log not in old.logs} == {logging.DEBUG}
     assert changed > 0
+
+
+def _reads(calls: list[tuple[Any, ...]]) -> list[tuple[Any, ...]]:
+    return [c for c in calls if not _is_delete(c)]
+
+
+@pytest.mark.parametrize("case_id", list(DIVERGES), ids=list(DIVERGES))
+def test_unknown_attachments_keep_the_volumes(
+    case_id: str,
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """BUG-096, BUG-097, BUG-098: main deletes volumes whose attachments it could not list;
+    now every volume of that kind in the region is kept, with the same read calls."""
+    bug, oracle_deleted = DIVERGES[case_id]
+    assert bug in {"BUG-096", "BUG-097", "BUG-098"}
+    case = next(c for c in CASES if c.id == case_id)
+    old = _run(_legacy, case, monkeypatch, caplog, capsys)
+    new = _run(_new, case, monkeypatch, caplog, capsys)
+    planned = _run_cleaner(case, monkeypatch, caplog, capsys)
+    assert old.deleted == oracle_deleted, "oracle no longer shows the bug"
+    assert new.error is None
+    assert new.deleted == []
+    assert new.count == 0
+    assert [c for c in new.calls if _is_delete(c)] == []
+    assert _reads(new.calls) == _reads(old.calls)
+    assert planned.error is None
+    assert planned.deleted == []
+    assert [c for c in planned.calls if _is_delete(c)] == []
+    assert any(
+        log[1] == logging.WARNING and log[2].startswith("Region r1: keeping every ")
+        for log in new.logs
+    )
