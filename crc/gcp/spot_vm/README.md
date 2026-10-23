@@ -34,11 +34,11 @@ The package init re-exports the main names below, so the old import path of the 
 - `has_matching_filter_label()`: filter_labels, all keys; empty matches all.
 - `is_old_instance()`: custom age label (fail closed) or else age, through crc.core.age.
 - `is_selected()`: every instance filter in the order of main.
-- `reject_reason()`: the same filters, returning the skip reason (state, not_spot, managed_or_gke, exception_tag, filter_mismatch or too_young) of an instance to keep, or None when it is selected; `is_selected()` is true when it returns None.
+- `reject_reason()`: the same filters, returning the skip reason (state, not_spot, managed_or_gke, exception_tag, filter_mismatch, too_young or unlabelled) of an instance to keep, or None when it is selected; `is_selected()` is true when it returns None.
 - `disk_ref_from_source()`: parse a zonal, regional or name-only disk source.
 - `non_autodelete_disks()`: references of the instance disks with autoDelete false.
 - `disk_label()`: the project/location/name recorded for a disk.
-- `disk_ok_to_delete()`: read the disk and keep it when its labels protect it.
+- `disk_ok_to_delete()`: read the disk and keep it when its labels or custom age label protect it.
 - `remove_leftover_disk()`: delete one disk and wait for the operation (nothing in a dry run).
 - `wait_operation()`: poll until DONE, an error, or the wait time.
 
