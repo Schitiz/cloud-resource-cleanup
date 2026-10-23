@@ -88,3 +88,73 @@ Test count: 43010 passed vs 43010 at base `cea0a8a` (unchanged).
 
 VERDICT: APPROVE
 
+## Round 2 (Opus)
+
+Round 1 had no BLOCKING finding and made no fixes; its one NIT (249 lines in `disk/cleaner.py`)
+holds. Every check below was redone independently against `git diff cea0a8a..HEAD`.
+
+### Checks
+
+1. **No behaviour change.** Each removed hunk was compared with its new home: `disk/settings.py`,
+   `vm/settings.py`, `spot_vm/report.py` and `spot_vm/terminate.py` are verbatim moves (same
+   conditions, defaults, log text and `%`/f-string style). The rewrites that are not pure moves
+   are also equivalent:
+   - `DiskCleaner.list_region`: `return api.list_volumes(), api.list_boot_volumes()` keeps the
+     call order (tuple elements evaluate left to right).
+   - `attached_volume_ids` / `attached_boot_volume_ids`: the set comprehension and
+     `update(...)` over `in_use(...)` run inside the same `try`, so a mid-iteration
+     `CONNECTIVITY_ERRORS` is still caught and the region still fails closed.
+   - `sort_decisions` gets a generator, so `decide()` and the append still interleave one
+     volume at a time, block volumes before boot volumes, as `_decide_all` did.
+   - `group_by_region` keeps first-seen region order (`dict.setdefault`), as the inline loops did.
+   - `SpotVmCleaner`: `with_checked_volumes` / `terminate_instance` / `owner_of` /
+     `record_dry_run` take the same `self._settings` / `self._pager` the methods read before.
+2. **Import paths and patch targets.** I imported the 3 cleaner modules, the 3 packages and
+   `crc.oci` at base and HEAD and compared their attributes. No public name is missing. The only
+   names gone are stdlib/typing imports and the private constants `_AVAILABLE`,
+   `_ATTACHMENTS_CONTEXT`, `_BOOT_ATTACHMENTS_CONTEXT`, `_KIND_KEY`, `_UNKNOWN_REASONS`
+   (`disk/cleaner.py`) and `_log_for` (`vm/cleaner.py`). A search of the base tree
+   (`crc/`, `tests/`, `crc.py`) shows nothing outside their own module used them. Every string
+   patch target in `tests/test_oci*.py` (`crc.oci._logger.*`, `crc.oci.spot_vm.oci.pagination...`,
+   `crc.oci.spot_vm.Base.__init__`, `crc.service.init_logging`) and the module-object patch
+   `leftovers_module.time` still reach the live code. `terminate.py` calls
+   `leftovers.wait_terminated` through the module, so the patched `time` still applies. The
+   `patch.object(s, "_wait_instance_terminated")` targets are on the untouched `SpotVM` adapter.
+3. **Tests and forbidden files.** `git diff cea0a8a..HEAD -- tests` is empty. Every changed path
+   is under `crc/oci/` or is this review file.
+4. **Sizes and seams.** The largest owned files are `disk/cleaner.py` 249, `vm/cleaner.py` 231
+   and `spot_vm/cleaner.py` 209 (all `crc/oci/**/*.py` are at or under 250). Each new module
+   covers one concern (settings/vocabulary, decisions, reporting, termination), and the shared
+   helpers each replace 2+ real copies.
+5. **READMEs.** The module lists and Public API bullets of `crc/oci`, `disk`, `spot_vm` and `vm`
+   match the new modules and are short. ARCH-002 passes.
+
+### Findings
+
+- **BLOCKING**: none.
+- **NIT (left)**: `disk/decide.py:45` `is_old` and `vm/cleaner.py:200` `_is_old` are the same
+  logic, differing only in the log noun ("volume" or "instance") and in taking `now` or calling
+  `clock()`. A shared helper in `crc/oci/_common.py` would need the noun as a parameter. I left it
+  as it is because it already existed at base and is not needed for the 250-line target.
+- **NIT (left)**: `TagSpec` / `Clock` are now defined in both `disk/settings.py:32-33` and
+  `vm/settings.py:15,24` (and in `spot_vm/decide.py:33-34`). They could live once in
+  `crc/oci/_common.py`. This is the same duplication as at base.
+- **NIT (left)**: the new `__all__` in `disk/cleaner.py` and `vm/cleaner.py` narrows
+  `from ... import *`. Nothing in the repo star-imports these modules.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt`, then `make check`:
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed! |
+| `mypy` | Success: no issues found in 257 source files |
+| `lint-imports` | Contracts: 5 kept, 0 broken (149 files, 860 dependencies) |
+| `pytest -q` | 43010 passed in 164.21s |
+
+`make check` runtime: 3m1.7s (real). Test count: 43010 at HEAD vs 43010 collected at base
+`cea0a8a`.
+
+ROUND 2 VERDICT: APPROVE
+
