@@ -30,7 +30,7 @@ Modules, one per responsibility:
 - `note_region()`: reports a listed and filtered region to the current logger (REGION line: scanned, selected, seconds).
 - `note_dry_run()`: reports one would_delete or would_stop ACTION per instance a dry run lists.
 - `log_summary()`: the closing warnings of a VM run (no instances, number and list deleted or stopped, or the dry-run list).
-- `dry_run_names()`: what a VM dry run records, names for delete but instance ids for stop (as on main).
+- `dry_run_names()`: what a VM dry run records, names for delete but instance ids for stop.
 - `VmClient`: Protocol of the four EC2 calls used, describe_instances, describe_network_interfaces, terminate_instances and stop_instances; tests pass fakes.
 - `VmPaginator`: Protocol of the describe_instances paginator (paginate) used by the tag scan.
 - `VmScanClient`: Protocol of the EC2 client surface of the tag scan (get_paginator, exceptions).
@@ -53,7 +53,7 @@ Modules, one per responsibility:
 ## Extension Rules
 
 1. Behaviour changes need a `BUG-NNN` row in `docs/refactor/BUGS.md` and a test that fails without them.
-2. Keep filtering in `crc.core.policy` and age in `crc.core.age`; no `re`, clock reads or environment reads here (ARCH-003): `now` comes from `RunContext` (or the adapter clock).
+2. Keep filtering in `crc.core.policy` and age in `crc.core.age`; no `re`, clock reads or environment reads here (ARCH-003): `now` comes from `RunContext` (or the `VM` clock).
 3. Keep every mutating call in `apply_region()`; `plan()` and what it calls stay read-only (ARCH-005).
 4. Changes need `tests/test_aws_vm_parity.py` (oracle `tests/legacy/aws_vm.txt`, a frozen copy of `main`, never edit it) and `tests/test_aws_vm.py` to stay green.
 5. Every file stays at most 250 lines; split by responsibility and re-export every public name in `__init__.py` (and `__all__`).
