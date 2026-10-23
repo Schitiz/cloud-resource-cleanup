@@ -408,10 +408,13 @@ Related: `docs/refactor/FILTER_VARIANTS.md` (how each module filters, section 7 
 | BUG-377 | OCI Spot leftover volumes: the attachment list is read before terminate (a volume another instance attaches in between is only caught by the new ownership read), and that read covers only the run's compartment | `crc/oci/spot_vm.py` leftover volume handling | yes | deletes what it should keep | low | FIX-OCI-SPOT | open |
 | BUG-378 | OCI VM `_is_old` does not give a naive `time_created` a timezone (the Spot cleaner treats it as local time), so since BUG-162 such an instance is kept with a recorded failure | refactor only: `crc/oci/vm/cleaner.py` `_is_old` | no | keeps what it should delete | low | FIX-OCI-VM | open |
 | BUG-379 | The OCI OKE guard is a case-insensitive substring match on tags and metadata, so any entry containing `oke` (for example the value `joker`) keeps a VM (fail closed) | `crc/oci/spot_vm.py` OKE check; refactor `crc/core/policy.py` `_looks_oke` | yes | keeps what it should delete | low | FIX-OCI-VM | open |
+| BUG-380 | Azure Spot VM summary logs "No Azure Spot VMs (stopped/deallocated) to delete." and then still logs the empty "List of ..." lines | `crc/azu/spot_vm.py:404`; refactor `crc/azu/spot_vm/config.py` `log_summary` | yes | cosmetic | low | W2-AZU | open |
+| BUG-381 | The Slack owner lookup builds the e-mail as `<tag value>@yugabyte.com`: the domain is hard coded, so owners outside that domain are never pinged and fall back to the user groups | `crc.py:255`; refactor `crc/notify/slack_owners.py` | yes | cosmetic | low | W2-CLI | open |
+| BUG-382 | An empty `--resource_states` list (`[]`) is treated like no flag: `_delete_vm` calls `vm.delete()` with the cleaner's default states instead of matching nothing | `crc.py:108-111`; refactor `crc/cli/vm_ops.py` `_delete_vm` | yes | deletes what it should keep | low | W2-CLI | open |
 
 ## Counts
 
-379 rows: critical 5, high 27, medium 64, low 283. 57 fixed and 5 partly fixed (the LOG rungs and wave FIX-1); the others are open. BUG-366 to BUG-379 were found by the FIX-1 reviews.
+382 rows: critical 5, high 27, medium 64, low 286. 57 fixed and 5 partly fixed (the LOG rungs and wave FIX-1); the others are open. BUG-366 to BUG-379 were found by the FIX-1 reviews, BUG-380 to BUG-382 by the W2 reviews.
 
 ## Notes
 

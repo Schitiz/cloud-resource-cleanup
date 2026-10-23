@@ -94,7 +94,7 @@ never widen them.
 Enforced by `tests/archtest` (rule IDs in `tests/archtest/README.md`): ARCH-001 ratchet
 only shrinks (baseline in `legacy_baseline.txt`), ARCH-002 package README sections and
 symbol sync, ARCH-003 no `re`, wall clock, env reads, `print` or `sys.exit` in cloud
-packages, ARCH-004 files of at most 400 lines, ARCH-005 read-only `plan()`, and SAF-LOCK
+packages, ARCH-004 files of at most 250 lines and functions of at most 60, ARCH-005 read-only `plan()`, and SAF-LOCK
 (`SAF-NNN` tags in `CLEANUP_SAFETY.md` tied to hashed tests in `safety_lock.json`).
 
 ## Add a resource cleaner
