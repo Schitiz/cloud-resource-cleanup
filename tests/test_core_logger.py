@@ -246,10 +246,6 @@ def test_region_with_nothing_selected_is_debug_and_still_counted(
     assert "regions=3 regions_skipped=0" in caplog.messages[-1]
 
 
-def _handled_root() -> logging.Logger:
-    return logging.getLogger()
-
-
 def test_logging_ready_without_current_run_is_a_noop(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG)
     logger.logging_ready()
@@ -257,7 +253,7 @@ def test_logging_ready_without_current_run_is_a_noop(caplog: pytest.LogCaptureFi
 
 
 def test_logging_ready_emits_held_header_once() -> None:
-    root = _handled_root()
+    root = logging.getLogger()
     saved = root.handlers[:]
     messages: list[str] = []
 

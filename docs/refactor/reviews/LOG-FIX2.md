@@ -70,3 +70,77 @@ None. No issues in do-not-edit files (`AGENTS.md`, `ARCHITECTURE.md`, `CLEANUP_S
 
 VERDICT: APPROVE
 
+
+## Round 2 (Opus)
+
+Scope reviewed: `git diff 8073087..HEAD` on `logging/fix-header` (coder commit `4f01bc6`, Round 1
+commit `df754cb`).
+
+### Round 1 fixes and findings
+
+- Round 1 moved BUG-364 and BUG-365 from directly after BUG-363 (`docs/refactor/BUGS.md:63`, risk
+  group `high`) to the end of the `low` group (after BUG-362, now lines 395-396). Confirmed
+  correct: `BUGS.md` Rules (line 18) put a new row at the end of its risk group. The row text and
+  column layout match the task exactly; status `fixed in LOG-FIX2`; Counts line says 365 rows, low
+  271.
+- Round 1 added BUG-364/365 to the `## Bugs` table of `docs/refactor/LOGGING.md`. That's fine.
+- Round 1 reported no BLOCKING or NIT findings. I agree, apart from the test nit below.
+
+### Independent checks
+
+1. **Only log text changed.** `crc/core/logger.py` adds `_one_line`, `RunLog.release_header` and
+   `logging_ready()` (lines 50, 98, 203). `crc/utils.py:47` calls `run_log.logging_ready()`
+   after the handlers are added and the noisy loggers are set. No cleaner, selection, SDK call,
+   Slack, InfluxDB, CLI flag or exit-code code is touched. `_error_text` is used only by the
+   FAILED line, so the per-resource error lines and every other line are unchanged.
+   `logging_ready()` is a no-op without a current run, after the header was emitted (it is
+   idempotent) and for an unattached run (`_emit_header` checks `attached`). The fallbacks stay:
+   `_log` releases a held header once the root logger has handlers, and `finish()` forces it out.
+   No module-level `logging.*` call was added to `crc/core`. `crc.core` imports nothing new;
+   `crc.utils -> crc.core.logger` is allowed by every import-linter contract.
+2. **Formats.** RUN START, REGION, ACTION, SKIPPED, ERRORS and RESULT are unchanged. FAILED keeps
+   `FAILED cloud=<c> resource=<r> region=<region|-> id=<id> error=<ExceptionType>: <message>` at
+   ERROR; the only change is that the message is collapsed to one line (split with
+   `str.splitlines`, each part stripped, empty parts dropped, joined with ` | `).
+3. **Parity.** `git diff 8073087..HEAD -- tests/legacy` is empty. `tests/helpers_log_fix.py` and
+   every `expected_logs` call are unchanged, so there is no loosening. With
+   `run_log.logging_ready()` removed from `crc/utils.py`, the extended CLI test
+   `tests/test_cli_logging_init.py::test_cli_path_with_init_logging_in_cleaner_adds_no_stray_handler`
+   fails at line 106 (RUN START came after `cleaner own line`); with the fix it passes. It also
+   asserts that RUN START is printed exactly once and before RESULT, both on the console and in
+   the file. The unit tests cover: no current run, a held header with two calls, an already
+   emitted header, an unattached run, a multi-line message giving one FAILED line, and a
+   single-line message left unchanged.
+4. **Safety lock.** `git diff 8073087..HEAD -- tests/archtest` is empty; `safety_lock.json` and
+   the five locked tests are untouched. No owner action is needed.
+5. **Docs.** `crc/core/README.md` Public API lists `release_header` and `logging_ready()`
+   (ARCH-002). `docs/refactor/LOGGING.md`, `PLAN.md` (LOG-FIX2 row, owner-approved 2026-10-23,
+   BUG-364 and BUG-365) and `STATUS.md` are updated as the task asks.
+
+### Fixed in review
+
+- `tests/test_core_logger.py:249` (NIT): removed the `_handled_root()` helper, which only returned
+  `logging.getLogger()`, and called `logging.getLogger()` inline. The test behaviour is unchanged.
+- `docs/refactor/STATUS.md:58`: the LOG-FIX2 state now reads
+  `Round 1 (Argon) APPROVE, Round 2 (Opus) APPROVE`.
+
+### BLOCKING
+
+None.
+
+### NIT
+
+None in do-not-edit files (`AGENTS.md`, `ARCHITECTURE.md`, `CLEANUP_SAFETY.md`,
+`docs/refactor/PLAN.md`, `.cursor/**`, `tests/archtest/**`).
+
+### Gates & test count
+
+`pip install -r requirements.txt -r requirements-dev.txt`, then `make check`:
+
+- `ruff check .`: passed
+- `mypy` (strict): passed, 228 source files
+- import-linter: passed, 5 contracts kept
+- `pytest -q`: 42444 passed (42438 at `8073087`, +6). Rerun of the touched tests and `tests/archtest`
+  after the review edit: 120 passed
+
+ROUND 2 VERDICT: APPROVE
