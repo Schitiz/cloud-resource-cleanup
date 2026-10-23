@@ -499,21 +499,32 @@ def _groups(
 
 
 def _assert_matches(case: Case, old: Outcome, new: Outcome) -> None:
+    assert old.count_logs == [
+        ("root", logging.INFO, f"count of items in disks_names_to_delete: {old.count}")
+    ]
     if case.diverges:
-        _assert_cleaner_diverges(case, old, new)
+        _assert_diverges(case, old, new)
         return
     assert new.error == old.error
+    assert (new.error is not None) == (case.error_phase is not None)
     assert new.stdout == old.stdout
     assert _only(new.calls, "client")[:1] == _only(old.calls, "client")[:1]
     assert _only(new.calls, "list_by_resource_group") == _only(
         _fix_172(case, old.calls), "list_by_resource_group"
     )
     assert _only(new.calls, "list") == []
+    old_yields = _only(old.calls, "yield")
+    assert _only(new.calls, "yield")[: len(old_yields)] == old_yields
+    if old.error is None:
+        assert _only(new.calls, "yield") == old_yields
     if case.error_phase == "plan":
         assert _only(new.calls, "begin_delete") == []
+        assert new.waited == []
         assert _groups(new.logs)[1:] == ([], [])
         return
     assert _only(new.calls, "begin_delete") == _only(old.calls, "begin_delete")
+    assert old.waited == []
+    assert new.waited == ([] if case.dry_run else new.deleted)
     if case.error_phase == "apply":
         assert _groups(new.logs)[1:] == _groups(expected_logs(old.logs, BUGS, RULES))[1:]
         return
@@ -623,21 +634,6 @@ def _assert_diverges(case: Case, old: Outcome, new: Outcome) -> None:
         new.calls, case, [d.name for d in case.disks if not isinstance(d, Exception)]
     )
     assert new.stdout == old.stdout
-
-
-def _assert_cleaner_diverges(case: Case, old: Outcome, new: Outcome) -> None:
-    fixed = DIVERGING[case.id]
-    assert (old.error, old.deleted) != (new.error, new.deleted)
-    assert new.error is None
-    assert new.deleted == fixed.deleted
-    assert new.waited == fixed.waited
-    assert _errors(new.logs) == fixed.errors
-    assert [r[2] for r in new.logs if "Azure Disks" in r[2]] == [
-        f"number of Azure Disks deleted: {len(fixed.deleted)}",
-        f"List of Azure Disks deleted: {fixed.deleted}",
-    ]
-    assert _only(new.calls, "list") == []
-    assert _only(new.calls, "list_by_resource_group") == [("list_by_resource_group", _group(case))]
 
 
 QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [

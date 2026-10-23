@@ -64,4 +64,3 @@ class DiskComputeClient(Protocol):
 
 
 ClientFactory = Callable[[], DiskComputeClient]
-Clock = Callable[[], datetime.datetime]

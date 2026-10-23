@@ -267,18 +267,6 @@ DIVERGING: dict[str, Diverges] = {
 }
 
 
-def _expected_calls(case: Case, deleted: Sequence[str]) -> list[tuple[Any, ...]]:
-    group = case.resource_group or "env-rg"
-    wanted = set(deleted)
-    calls: list[tuple[Any, ...]] = [("client", "sub-1"), ("list", group)]
-    for item in case.ips:
-        name = getattr(item, "name", None)
-        calls.append(("yield", name))
-        if not case.dry_run and name in wanted:
-            calls.append(("begin_delete", group, name))
-    return calls
-
-
 def _expected_logs(case: Case, deleted: Sequence[str]) -> list[tuple[str, int, str]]:
     items = list(deleted)
     if case.dry_run:

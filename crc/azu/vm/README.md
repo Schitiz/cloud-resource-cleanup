@@ -29,7 +29,7 @@ Modules (split by responsibility):
 - `DEFAULT_INSTANCE_STATES`: the default allowed state, running.
 - `VmSettings`: frozen filters and thresholds of one run.
 - `Tally`: the VM, stopped VM and NIC names recorded so far.
-- `log_summary()`: the closing log lines of main for an operation.
+- `log_summary()`: the closing log lines for an operation.
 - `tally_of()`: the `Tally` of a plan's names for an operation (delete adds the NIC names).
 - `power_state()`: the lower-cased code after the PowerState prefix of the first such status, or None.
 - `log_processing_error()`: logs a swallowed per-VM error.

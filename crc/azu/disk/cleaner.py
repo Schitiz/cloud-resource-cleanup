@@ -37,7 +37,7 @@ DEFAULT_DISK_STATES: tuple[str, ...] = ("Unattached",)
 
 @dataclass(frozen=True, slots=True)
 class DiskSettings:
-    """Filters and age gate of one run, as `crc.py` passes them."""
+    """Filters and age gate of one run."""
 
     filter_tags: TagSpec | None = None
     exception_tags: TagSpec | None = None

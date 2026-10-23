@@ -416,6 +416,9 @@ def test_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run_engine(case, monkeypatch, caplog, capsys)
+    assert old.count_logs == [
+        ("root", logging.INFO, f"Count of items in nics_names_to_delete: {old.count}")
+    ]
     if case.id in DIVERGING:
         _, old_shows, new_shows = DIVERGING[case.id]
         assert old_shows(old), "oracle no longer shows the bug"
