@@ -1,0 +1,39 @@
+## Coding summary
+
+Lane ENG-1 (branch `eng/aws`): every remaining AWS kind runs through `crc.core.engine`. Green partial state: the AWS pairs are routed, the adapter classes and most `CRC` methods are not yet deleted (see "Left to do").
+
+**Bridge features (generic, the Azure, GCP and OCI lanes only add route entries)** in `crc/cli/routes/__init__.py` and `crc/cli/bridge.py`:
+- `Route.precheck`: the AWS disk opt-in gate now lives in the AWS disk route (`routes/aws.py`, `_disk_opt_in`), run between RUN START and the cleaner. `AWS_DISK_OPT_IN_MESSAGE` moved to `crc/cli/pairs.py` (still re-exported by `dispatch`).
+- `Route.notify` is now a `NotifyMode`: `NONE` (vpc, snapshot, BUG-084 and BUG-009), `REPORT` (default), `REPORT_THEN_RERAISE` (disk). The last wraps the registered cleaner in `bridge._ReportThenRaise`: an error from `plan()` or `apply()` is kept, the notifiers run on what the cleaner exposes as `partial_succeeded` (an empty report when it exposes nothing), then `run_routed` raises the same error, as `delete_disks` did (Slack then Influx, then re-raise). `DiskCleaner` exposes `partial_succeeded` (the ids deleted so far in `apply()`, the ids listed so far in a dry-run `plan()`).
+- `Route.extra_notifiers(crc)`: notifiers appended after Slack and Influx. For Azure VM: the report already carries the NIC section (`Section.slack_ids`), so Azure may need no extra notifier; the hook exists for anything the report does not carry. Not wired (Azure lane).
+- `Route.after(crc, options, outcomes)`: runs after the notifiers. Used for the console line of `snapshot` (dry-run count line, or `crc.get_msg("Snapshot", "Deleted", ids)`).
+- VM operations: delete and stop both go through the one `aws` / `vm` route (the operation comes from `--operation_type`); `--resource_states` becomes `instance_state` for delete only (the legacy handler passed no states for stop). `spot_instance_requests` is an ordinary route; `spot_instances` (azure, gcp, oci) is untouched.
+
+**Routed AWS kinds**: `ip`, `kms`, `snapshot`, `vpc`, `vm` (delete and stop), `disk`, `spot_instance_requests` (plus `keypair` from ENG-0). Options builders are in `crc/cli/routes/aws.py`.
+
+**Adapters deleted or shimmed**: none deleted. The kind adapters (`ElasticIPs`, `Kms`, `Snapshot`, `VPC`, `VM`) were already thin shims over their Cleaner and stay (the oracle `tests/legacy/crc_main.txt` imports them, `scan_instances_with_tag` still uses `crc.aws.vm.VM`, and their module parity tests are many thousands of cases that assert the oracle through the adapter). `Disk` and `SpotInstanceRequests` stay as they are (hash-locked tests); the 5 locked test files and `tests/archtest/safety_lock.json` are untouched and pass. Deleted in `crc/cli/dispatch.py`: the `_kms`, `_vpc` and `_snapshot` handlers and `HANDLERS` entries (no other cloud supports those kinds), the AWS disk gate in `_disk`, the AWS call in `_spot_instance_requests` (it now only warns for non-AWS clouds), and the `Snapshot` import.
+
+**How the CLI parity tests reach the cleaners**: `tests/helpers_cli_routes.FakeCleaners` (patches `bridge.build_registry`, `bridge.init_run_logging` and `bridge.build_notifiers`) now also takes per pair `plans` and `results`. `tests/test_cli_main_parity.py` `ROUTED_CALLS` maps each routed kind to its oracle `CRC` method, the `RunContext.options` keys in oracle argument order (and `stop_vm` for a stop run); `strip_unused_args` removes from the oracle events only the arguments the legacy AWS adapters never read (ip regexes, disk Slack owner flags). The fake cleaner records `crc.<method> aws [args]` from `context.options`, and the fake snapshot cleaner records the `Snapshot` and `Snapshot.delete` events and plans 3 candidates and applies `snap-1`, so the oracle's `crc.get_msg` and dry-run count line are compared too. `test_cli_logger.py`, `test_cli_route_fix.py` (and so `test_cli_merge_fix.py`), `test_cli_dispatch_fix.py`, `test_core_selection.py` use the same seam. New `tests/test_cli_bridge_aws.py` runs the oracle `CRC` method (ip, kms, vpc, vm delete and stop, spot_instance_requests, disk) and `bridge.run_routed` on the same fake Slack and Influx clients across dry run x Slack mode x Influx mode x full/empty data and error cases; Slack calls, Influx calls, stdout and error are equal (disk reports before re-raising, the others send nothing on error), and the options and operation the cleaner receives are asserted. The CLI parity tests' CRC-method oracle cases (`test_cli_crc_parity.py`) are unchanged: the `CRC` methods are still there.
+
+**Cleaner-based copies of locked tests**: `tests/test_aws_disk_engine.py` (18 tests: SAF-003, 007, 011, 012, 013, 015, 017, 018, 019, 020, 025, all the locked disk cases) and `tests/test_aws_spot_instance_requests_engine.py` (18 tests: SAF-007, 008, 011, 026, 027, 028, 029, 035). The azure, gcp and oci SpotVM copies are not written (those adapters are not touched in this lane).
+
+**BUGS.md / CLEANUP_SAFETY.md**: new row BUG-391 (low group end, fixed in ENG-1, same plan-before-apply change for the other AWS kinds), counts line updated, and one clause appended to the ENG-0 bullet in CLEANUP_SAFETY.md.
+
+**Test count**: before 43078 (floor at the start of the lane), after 43785 (`make check`: ruff, mypy strict, lint-imports, ARCH-001..009 and SAF-LOCK green); the floor is raised to 43785 with `make raise-test-floor`.
+
+**Owner actions**
+- Review, swap in and relock the two `*_engine.py` copies; write the azure, gcp and oci SpotVM copies in their lanes.
+- Docs lane: `crc/core/README.md` and `docs/refactor/STATUS.md` still describe the CLI as running adapters.
+- Decide whether `CRC.delete_kms`, `delete_vpc`, `delete_spot_instance_requests`, the AWS branches of `_get_ip`, `_make_disk` and the AWS adapters are removed in the cleanup lane at the end (see below).
+
+## Left to do (not done in this lane, time)
+
+- Delete the routed AWS adapters (`ElasticIPs`, `Kms`, `Snapshot`, `VPC`, `VM` delete path) and the dead `CRC` methods and imports (`delete_kms`, `delete_vpc`, `delete_spot_instance_requests`, the AWS branches of `_get_ip`, `_make_disk`; `delete_ip`, `delete_vm`, `stop_vm`, `delete_disks` stay for the other clouds). Each deletion needs: a `provide_legacy_*` stand-in for the name the frozen oracle imports (see `tests.helpers_cli_routes.provide_legacy_keypairs`), the module parity tests (`test_aws_{ip,kms,snapshot,vpc,vm}_parity.py` and the `*_fix` tests) retargeted to the Cleaner, and the `test_cli_crc_parity.py` operations of the deleted methods dropped. Watch ARCH-008: dropping those cases lowers the test count, so retarget rather than delete.
+- The azure, gcp and oci SpotVM Cleaner copies of the locked tests.
+- The SAF-030 to SAF-033 locked spot request cases (tag, leftover volume and terminate-error cases) are not copied into `test_aws_spot_instance_requests_engine.py`.
+
+## New bugs
+
+- `crc/cli/bridge.py` `_ReportThenRaise.plan`: for disk, an error while listing a later region now reports the volumes of the earlier regions only in a dry run (they are the ones the cleaner listed); in a real run it reports nothing deleted (nothing was deleted), where `delete_disks` reported the earlier regions it had already deleted. Covered by BUG-391 (fewer deletes), the notification content differs.
+- `crc/cli/routes/aws.py:_snapshot_message`: the dry-run line counts `len(plan.candidates)`, which equals the old `delete_count` only because the plan lists the same ids the adapter listed; no behaviour difference found.
+- `crc/cli/notify.py`: `notify_deleted_vm_via_slack`, `notify_stopped_vm_via_slack`, `notify_deleted_ip_via_slack`, `notify_deleted_kms_via_slack`, `notify_deleted_spot_request_via_slack`, `notify_deleted_disk_via_slack` are dead in production for AWS (still used by Azure, GCP and OCI paths for vm, ip and disk, and by `test_cli_crc_parity.py`); the kms and spot request ones are dead for every cloud.

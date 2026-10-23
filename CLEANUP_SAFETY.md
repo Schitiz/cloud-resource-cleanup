@@ -53,7 +53,8 @@ reused. `tests/archtest/safety_lock.json` maps IDs to the tests that lock them.
   failures are logged and skipped.
 - Engine path (ENG-0, BUG-388): a cleaner's `plan()` lists every region before `apply()` mutates,
   so a listing error in a later region now stops the pair before any mutation (fewer deletes,
-  never more) where the old adapter loop deleted region by region.
+  never more) where the old adapter loop deleted region by region; ENG-1 routes the other AWS
+  kinds the same way (BUG-391).
 
 ---
 

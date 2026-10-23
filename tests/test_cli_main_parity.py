@@ -293,7 +293,6 @@ def run_oracle(case: Case, monkeypatch: pytest.MonkeyPatch) -> Outcome:
 def run_new(case: Case, monkeypatch: pytest.MonkeyPatch) -> Outcome:
     fakes = Fakes(case)
     monkeypatch.setattr(cli_context, "CRC", fakes.CRC)
-    monkeypatch.setattr(cli_dispatch, "Snapshot", fakes.Snapshot)
     monkeypatch.setattr(cli_clients, "WebClient", fakes.WebClient)
     monkeypatch.setattr(cli_clients, "InfluxDBClient", fakes.InfluxDBClient)
     monkeypatch.setattr(cli_scan, "notify_cleanup", fakes.notify_cleanup)

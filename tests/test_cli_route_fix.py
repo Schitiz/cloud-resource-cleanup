@@ -9,7 +9,6 @@ import pytest
 
 from crc.cli import clients as cli_clients
 from crc.cli import context as cli_context
-from crc.cli import dispatch as cli_dispatch
 from crc.cli import scan as cli_scan
 from crc.cli.main import main
 from tests.helpers_cli_routes import FakeCleaners
@@ -71,7 +70,6 @@ class Recorder:
 def recorder(monkeypatch: pytest.MonkeyPatch) -> Recorder:
     rec = Recorder()
     monkeypatch.setattr(cli_context, "CRC", rec.crc_class())
-    monkeypatch.setattr(cli_dispatch, "Snapshot", rec.snapshot_class())
     monkeypatch.setattr(cli_clients, "WebClient", lambda **_: object())
     monkeypatch.setattr(cli_scan, "notify_cleanup", lambda *a, **k: None)
     monkeypatch.delenv("MAX_AGE", raising=False)
