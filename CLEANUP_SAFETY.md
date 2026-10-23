@@ -23,8 +23,8 @@ reused. `tests/archtest/safety_lock.json` maps IDs to the tests that lock them.
 ## CLI validation
 
 - Before any cleaner runs, `validate_targets` (`crc/cli/dispatch.py`) checks every
-  (cloud, resource) pair. `main()` calls it before the read-only scan and the
-  dispatch, and `run_dispatch` calls it again.
+  (cloud, resource) pair. `main()` calls it (when `--scan_tag` is not set) before
+  `set_max_age` and dispatch, and `run_dispatch` calls it again.
 - `--cloud all --resource disk|all` raises.
 - An unsupported pair of an explicit cloud raises `ValueError`: `keypair` and
   `kms` off AWS, `nic` off Azure, `ip` on OCI, `snapshot` and `vpc` off AWS.
