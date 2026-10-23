@@ -48,7 +48,21 @@ class FakeClient:
         self.calls.append(("list_instances", compartment_id))
         return types.SimpleNamespace(data=self.instances)
 
-    def list_volume_attachments(self, compartment_id: str, instance_id: str) -> Any:
+    def list_volume_attachments(
+        self, compartment_id: str, instance_id: str = "", volume_id: str = ""
+    ) -> Any:
+        if volume_id:
+            self.calls.append(("list_volume_attachments", volume_id))
+            owners = [
+                owner for owner, volumes in self.attachments.items() if volume_id in volumes
+            ]
+            data = [
+                types.SimpleNamespace(
+                    volume_id=volume_id, lifecycle_state="ATTACHED", instance_id=owner
+                )
+                for owner in owners
+            ]
+            return types.SimpleNamespace(data=data)
         self.calls.append(("list_volume_attachments", instance_id))
         data = [
             types.SimpleNamespace(volume_id=v, lifecycle_state="ATTACHED")
@@ -66,7 +80,9 @@ class FakeClient:
     def get_volume(self, volume_id: str) -> Any:
         self.calls.append(("get_volume", volume_id))
         tags = self.volume_tags.get(volume_id, {})
-        return types.SimpleNamespace(data=types.SimpleNamespace(freeform_tags=tags))
+        return types.SimpleNamespace(
+            data=types.SimpleNamespace(freeform_tags=tags, time_created=NOW)
+        )
 
     def delete_volume(self, volume_id: str) -> None:
         self.calls.append(("delete_volume", volume_id))
@@ -115,7 +131,7 @@ def test_plan_skips_young_untagged_and_unmatched() -> None:
 def test_plan_keeps_instance_when_attachment_listing_fails() -> None:
     client = FakeClient([inst("a")])
 
-    def failing(compartment_id: str, instance_id: str) -> Any:
+    def failing(compartment_id: str, instance_id: str = "", volume_id: str = "") -> Any:
         raise RuntimeError("down")
 
     client.list_volume_attachments = failing  # type: ignore[method-assign]
@@ -148,6 +164,7 @@ def test_apply_terminates_waits_then_deletes_checked_volumes() -> None:
         ("terminate_instance", "a", "False"),
         ("get_instance", "a"),
         ("get_volume", "v1"),
+        ("list_volume_attachments", "v1"),
         ("delete_volume", "v1"),
         ("get_volume", "v2"),
     ]

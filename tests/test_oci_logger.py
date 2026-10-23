@@ -324,7 +324,17 @@ class SpotClient:
     def list_instances(self, compartment_id: str) -> Any:
         return types.SimpleNamespace(data=self.instances)
 
-    def list_volume_attachments(self, compartment_id: str, instance_id: str) -> Any:
+    def list_volume_attachments(
+        self, compartment_id: str, instance_id: str = "", volume_id: str = ""
+    ) -> Any:
+        if volume_id:
+            owner = volume_id.removeprefix("v-")
+            data = [
+                types.SimpleNamespace(
+                    volume_id=volume_id, lifecycle_state="ATTACHED", instance_id=owner
+                )
+            ]
+            return types.SimpleNamespace(data=data)
         if self.fail_attachments:
             raise RuntimeError("no attachments")
         data = [types.SimpleNamespace(volume_id=f"v-{instance_id}", lifecycle_state="ATTACHED")]
@@ -338,7 +348,9 @@ class SpotClient:
 
     def get_volume(self, volume_id: str) -> Any:
         tags = self.volume_tags.get(volume_id, {})
-        return types.SimpleNamespace(data=types.SimpleNamespace(freeform_tags=tags))
+        return types.SimpleNamespace(
+            data=types.SimpleNamespace(freeform_tags=tags, time_created=NOW)
+        )
 
     def delete_volume(self, volume_id: str) -> None:
         return None
