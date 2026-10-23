@@ -86,3 +86,68 @@ None (no BLOCKING or NIT issues).
 
 VERDICT: APPROVE
 
+
+## Round 2 (Opus)
+
+Scope `git diff 182466d..HEAD`. I re-checked round 1's findings and its gates, then ran each check myself.
+
+### Findings
+
+- NIT (fixed in this round): `crc/gcp/vm.py` `VmCleaner._wait_operation()` logged
+  `Waiting for GCP zone operation <zone>/<op> (status=...)` at INFO on every poll. That is a
+  per-resource diagnostic: the wave contract and `docs/refactor/LOGGING.md` rule 1 put those at
+  DEBUG. In production a delete or stop is almost never `DONE` on the first poll, so each
+  acted-on instance added several INFO console lines. The coding summary's claim "no extra log
+  lines on success" was only true because the fakes answer `DONE` on the first poll. The line
+  is now `logging.debug` with the same text, so it still goes to `logs/crc.log`, and
+  `tests/test_gcp_vm_fix.py::test_the_poll_line_is_debug` pins the level. Selection, SDK calls
+  and the run-log lines are unchanged.
+- Observation for the owner (not blocking): each real delete or stop now waits for its zone
+  operation, in sequence, for up to 180 s (`VmSettings.wait_sec`), the same as the Spot
+  cleaner. A production run that acts on many instances will take noticeably longer than
+  before, so the Jenkins job timeout must leave room for that. Dry runs (commands 2 and 6) make
+  no polls.
+- Observation (not blocking): all 18 tests in `tests/test_gcp_vm_fix.py` fail at 182466d, but
+  only because `VmSettings` has no `wait_sec` there (TypeError). The behavioural regression
+  against the frozen oracle comes from `tests/test_gcp_vm_parity.py`:
+  `_assert_fixed` checks that every BUG-185 / BUG-186 case differs from main and has exactly
+  the new calls, results, counts and extra logs. The BUG-185 mark is derived (any case with a
+  successful action gets the poll calls inserted), not listed per case. It asserts exact calls
+  and unchanged logs and results, so it does not loosen anything globally.
+
+### Checks
+
+1. BUG-185: delete and stop are recorded and the ACTION line logged only after the zone
+   operation is `DONE` without `error`. A response with no operation name, a poll error, an
+   operation error or a timeout is logged, recorded with `fail()` and not recorded as done.
+   BUG-186: an error while evaluating one instance is recorded with `fail()` and the instance
+   is kept. A per-zone listing or iteration error is recorded (`fail()` + `region_skipped()`)
+   and the zone is skipped. Both are covered by the fix and parity tests.
+2. Direction rule: the delete/stop call set and order equal main for every parity case. The
+   only additions are `zoneOperations().get()` reads after successful actions. Results are
+   equal or fewer, never more. `tests/legacy/` is untouched, and non-diverging cases still
+   assert full equality.
+3. Production commands: all six keep their flags and selection. BUG-183 (age), and so the
+   no-`--age` `--notags` command, is unchanged as the notes require.
+4. Fail-closed: a missing `project_id` raises before any client call, and `zones().list()`
+   errors still raise before any mutation. Evaluation errors keep the instance.
+5. Protected files: `git diff 182466d..HEAD` touches no locked safety test,
+   `tests/archtest/safety_lock.json`, `tests/legacy/`, PLAN.md, STATUS.md, BUGS.md or
+   CLEANUP_SAFETY.md.
+6. README (ARCH-002): Safety Invariants, the module list (`vm_client.py`) and the Public API
+   (`GcpVmClient.get_zone_operation`, `VmSettings.wait_sec` / `poll_sec`) are updated.
+7. Owner decisions: the project-level zone listing still raises, and the exit code is 0 when
+   failures were recorded. Both are documented above, and I agree with both readings.
+
+### Gates
+
+- `pip install -r requirements.txt -r requirements-dev.txt`: ok
+- `ruff check .`: pass; `ruff format --check` on the changed files: pass
+- `mypy`: pass (`Success: no issues found in 230 source files`)
+- `lint-imports`: pass (all contracts kept)
+- `pytest tests/archtest tests/test_gcp*.py` on the final code: `1329 passed`
+- `make check` (started on round 1's HEAD, before the DEBUG change): exit 0, `42462 passed in
+  136.14s`. On the final code, 42463 tests are collected (plus the new DEBUG test), and every
+  GCP and archtest module passes (above).
+
+ROUND 2 VERDICT: APPROVE
