@@ -1,12 +1,15 @@
 """FIX-AWS-VPC: BUG-012, BUG-083, BUG-087 and BUG-088 of `crc.aws.vpc` (no cloud calls)."""
 
 import datetime
+import logging
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import pytest
 from botocore.exceptions import ClientError
 
 from crc.aws.vpc import VPC, VpcCleaner, VpcRuntime
+from crc.core import logger
 from crc.core.cleaner import Operation, RunContext
 from tests.test_aws_vpc_parity import (
     ENV,
@@ -17,6 +20,7 @@ from tests.test_aws_vpc_parity import (
     FakeAws,
     FakeClient,
     FakeResource,
+    FakeVpc,
     Sub,
     V,
     full,
@@ -140,9 +144,53 @@ def test_cleaner_plan_skips_default_vpc() -> None:
 def test_protection_uses_the_vpc_tags_not_the_resource(
     tags: Any, exception_tags: Any, notags: Any, deleted: bool
 ) -> None:
+    class RealLikeResource(FakeResource):
+        def __init__(self, aws_obj: FakeAws, region: str) -> None:
+            super().__init__(aws_obj, region)
+
+            def _filter(*, Filters: Sequence[Mapping[str, Any]]) -> list[FakeVpc]:
+                aws_obj.calls.append(("vpcs.filter", region, str(list(Filters))))
+                return [FakeVpc(aws_obj, region, v) for v in aws_obj.case.regions[region]]
+
+            self.vpcs.filter = _filter  # type: ignore[method-assign]
+
     aws = FakeAws(Case("x", {W2: [full("vpc-1", tags)]}))
-    _run(aws, [], exception_tags=exception_tags, notags=notags)
+    runtime = VpcRuntime(
+        client_factory=lambda region: FakeClient(aws, region),
+        resource_factory=lambda region: RealLikeResource(aws, region),
+        list_regions=lambda: list(aws.case.regions),
+    )
+    VPC(False, FILTER, exception_tags, notags, runtime).delete()
     assert (("delete_vpc", W2, "vpc-1") in aws.calls) is deleted
+
+
+@pytest.mark.usefixtures("quiet")
+def test_default_vpc_and_has_instances_log_skips_and_debug_reason(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    aws = FakeAws(
+        Case(
+            "x",
+            {
+                W2: [
+                    V("vpc-d", is_default=True),
+                    V("vpc-1", subnets=[Sub("s-1", ["i-1"])]),
+                ]
+            },
+        )
+    )
+    logger.begin("aws", "vpc", "delete", False, {})
+    try:
+        _run(aws, [])
+    finally:
+        logger.finish()
+    messages = [r.getMessage() for r in caplog.records if r.levelno >= logging.INFO]
+    assert "SKIPPED cloud=aws resource=vpc reason=default_vpc count=1" in messages
+    assert "SKIPPED cloud=aws resource=vpc reason=has_instances count=1" in messages
+    assert (logging.DEBUG, "Keeping VPC vpc-1: instances in its subnets") in [
+        (r.levelno, r.getMessage()) for r in caplog.records
+    ]
 
 
 @pytest.mark.usefixtures("quiet")

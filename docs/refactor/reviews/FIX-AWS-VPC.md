@@ -32,3 +32,23 @@ Owner actions: none (CLEANUP_SAFETY.md does not mention VPCs).
 
 - `crc/aws/vpc/cleaner.py` `VPC.delete()` / `VpcCleaner.apply()` (exists on main yes): teardown errors other than connectivity errors abort the whole run and skip every later VPC and region (no per-VPC isolation), unchanged.
 - `crc/aws/vpc/teardown.py` (exists on main yes): teardown steps run before `delete_vpc` and are not undone when `delete_vpc` ends up failing, so a kept VPC can be left without gateways, route tables and subnets.
+
+## Round 1 (Argon)
+
+### Findings
+
+1. **Test strengthening (`tests/test_aws_vpc_parity.py`)**: replaced `_scan_free(new.calls) == _scan_free(old.calls)` (which dropped `subnet.instances.all` and the first `subnets.all` from `new.calls`) with `new.calls == _expected_calls(case, old.calls)` so `new.calls` is compared unstripped and the exact pre-`DhcpOptions` instance scan reads are asserted on both `VPC.delete()` and `VpcCleaner`. Also asserted `not check(old)` in `test_diverges_from_main_by_design` and added `delete-vpc-dependency-violation-exhausted-not-listed` to `DIVERGING` (`BUG-087`).
+2. **Test strengthening (`tests/test_aws_vpc_fix.py`)**: updated `test_protection_uses_the_vpc_tags_not_the_resource` to use non-iterable `FakeVpc` objects even when `tags` are present (matching real `boto3` `Vpc` resources so all 4 cases fail on `182466d`), and added `test_default_vpc_and_has_instances_log_skips_and_debug_reason` to pin `skip("default_vpc")`, `skip("has_instances")`, and the `DEBUG` diagnostic line.
+
+### Checklist & Gates
+
+- (1) Fixed bugs verified (`BUG-012`, `BUG-083` default-VPC & empty-filter parts, `BUG-087`, `BUG-088`), with tests in `tests/test_aws_vpc_fix.py` and `DIVERGING` in `tests/test_aws_vpc_parity.py` that fail on `182466d` and pass on `HEAD`.
+- (2) Direction rule satisfied: every change keeps more or fails closed (`ValueError` before any SDK call on empty `filter_tags`, default VPCs kept, VPCs with instances kept without terminating instances or running teardown, failed `delete_vpc` kept and omitted from deleted list). Oracle `tests/legacy/aws_vpc.txt` untouched; diverging cases marked with in-scope bug IDs.
+- (3) Production commands: none use `--resource vpc`.
+- (4) Fail-closed paths (`require_filter_tags`) raise `ValueError` before any SDK call (`aws.calls == []`), in both dry run and real run.
+- (5) No locked safety test, `safety_lock.json`, `PLAN.md`, `STATUS.md`, `BUGS.md`, or `CLEANUP_SAFETY.md` edited.
+- (6) `crc/aws/vpc/README.md` Safety Invariants and Public API updated (`ARCH-002` green).
+- (7) Unfixed parts (second half of `BUG-012` and age gate of `BUG-083`) explained under `## Owner decision`.
+- (8) `make check` (`ruff check .`, `mypy`, `lint-imports`, `pytest -q`) green: **42450 passed** (up from 42444 at `182466d`).
+
+VERDICT: APPROVE

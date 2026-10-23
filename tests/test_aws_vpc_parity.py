@@ -712,7 +712,7 @@ def test_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run(_new, case, monkeypatch, caplog, capsys)
-    assert _scan_free(new.calls) == _scan_free(old.calls)
+    assert new.calls == _expected_calls(case, old.calls)
     assert new.error == old.error
     assert new.deleted == old.deleted
     assert new.count == old.count
@@ -738,6 +738,8 @@ def _run_cleaner(
         now=NOW,
     )
     cleaner = get("aws", "vpc")(ctx)
+    assert isinstance(cleaner, VpcCleaner)
+    cleaner.sleep = lambda seconds: None
     error: tuple[str, str] | None = None
     deleted: list[str] = []
     try:
@@ -753,8 +755,7 @@ def _run_cleaner(
 
 
 def _scan_free(calls: Sequence[tuple[Any, ...]]) -> list[tuple[Any, ...]]:
-    """Drop the instance scan reads (BUG-088): main reads `subnets.all` and
-    `subnet.instances.all` in its terminate step, the fix reads them first and only once."""
+    """Drop the old post-route-table instance scan reads from the oracle call list."""
     seen: set[tuple[Any, ...]] = set()
     kept: list[tuple[Any, ...]] = []
     for call in calls:
@@ -767,13 +768,29 @@ def _scan_free(calls: Sequence[tuple[Any, ...]]) -> list[tuple[Any, ...]]:
     return kept
 
 
+def _expected_calls(case: Case, old_calls: Sequence[tuple[Any, ...]]) -> list[tuple[Any, ...]]:
+    """Expected calls for unmarked cases: identical to the oracle except that the read-only
+    instance scan (`subnets.all` + `subnet.instances.all` per subnet) runs before `DhcpOptions`
+    instead of after `route_tables.all` (BUG-088)."""
+    without_old_scan = _scan_free(old_calls)
+    out: list[tuple[Any, ...]] = []
+    for i, call in enumerate(without_old_scan):
+        if call[0] == "DhcpOptions" and i + 1 < len(without_old_scan):
+            _, region, vpc_id, _ = without_old_scan[i + 1]
+            vpc = next(v for v in case.regions[region] if v.id == vpc_id)
+            out.append(("subnets.all", region, vpc_id))
+            out.extend(("subnet.instances.all", region, s.id) for s in vpc.subnets)
+        out.append(call)
+    return out
+
+
 def _sdk(calls: Sequence[tuple[Any, ...]]) -> list[tuple[Any, ...]]:
     return [c for c in calls if c[0] not in ("boto3.client", "boto3.resource")]
 
 
 def _by_region(calls: Sequence[tuple[Any, ...]]) -> dict[str, list[tuple[Any, ...]]]:
     grouped: dict[str, list[tuple[Any, ...]]] = {}
-    for call in _scan_free(_sdk(calls)):
+    for call in _sdk(calls):
         grouped.setdefault(call[1], []).append(call)
     return grouped
 
@@ -809,7 +826,7 @@ def test_cleaner_protocol_matches_main(
         assert _mutations(new.calls) == _mutations(old.calls)
         return
     assert new.deleted == old.deleted
-    assert _by_region(new.calls) == _by_region(old.calls)
+    assert _by_region(new.calls) == _by_region(_expected_calls(case, old.calls))
     old_logs = old.logs[:-1]
     # plan() decides every VPC up front, so after an aborted region the Cleaner path has
     # already logged the "Tags and notags not present" warning of VPCs main never reached.
@@ -958,6 +975,9 @@ def _kept_for_instances(o: Outcome) -> bool:
 _TWO_SUBNETS = {W2: [V("vpc-1", subnets=[Sub("s-1", ["i-1"]), Sub("s-2", ["i-2", "i-3"])])]}
 _DELETE_KEY = ("delete_vpc", W2, "vpc-1")
 _DEPENDENCY = ValueError("DependencyViolation")
+_DEPENDENCY_CLIENT_ERROR = ClientError(
+    {"Error": {"Code": "DependencyViolation", "Message": "in use"}}, "DeleteVpc"
+)
 
 # (case, bug id, check of the new outcome). The oracle must show the old behaviour and the new
 # outcome must differ from it.
@@ -1058,6 +1078,15 @@ DIVERGING: Sequence[tuple[Case, str, Callable[[Outcome], bool]]] = [
     ),
     (
         Case(
+            "delete-vpc-dependency-violation-exhausted-not-listed",
+            {W2: [full("vpc-1"), full("vpc-2")]},
+            errors={_DELETE_KEY: [_DEPENDENCY_CLIENT_ERROR] * FIVE},
+        ),
+        "BUG-087",
+        lambda o: o.error is None and len(_deletes(o)) == FIVE + 1 and o.deleted == ["vpc-2"],
+    ),
+    (
+        Case(
             "delete-vpc-non-client-dependency-text-not-retried",
             ONE,
             errors={_DELETE_KEY: [_DEPENDENCY] * 9},
@@ -1091,6 +1120,7 @@ def test_diverges_from_main_by_design(
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run(lambda c: _sleepless(_new(c)), case, monkeypatch, caplog, capsys)
     assert (new.calls, new.error, new.deleted) != (old.calls, old.error, old.deleted), bug
+    assert not check(old), bug
     assert check(new), bug
     via_cleaner = _run_cleaner(case, monkeypatch, caplog, capsys)
     assert via_cleaner.error == new.error
