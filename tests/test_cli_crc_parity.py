@@ -8,8 +8,7 @@ Slack calls, the Influx calls, the printed output and the return value or raised
 equal. A pair no route reaches (`route_for` is None) can only be rejected up front by
 `dispatch.validate_targets` or `argparse`; the case asserts that. A skip-only route
 (`skips.no_options`) must send nothing. The constructor and the Slack helpers (`get_msg`,
-lookups, `ping_on_slack`, `write_influxdb`) moved to `tests/test_notify_crc_parity.py`. Only the
-constructor and `scan_instances_with_tag` still run on the current `CRC` object.
+lookups, `ping_on_slack`, `write_influxdb`) are still compared on the `CRC` context object.
 """
 
 import itertools
@@ -180,8 +179,7 @@ def compare(oracle_module: ModuleType, case: Case) -> Recorded:
         return compare_notify(oracle_module, case, case.routed.removeprefix("notify:"))
     spec = ROUTED.get(case.routed or "")
     if spec is None:
-        # Only the CRC context object itself (constructor, scan, the two `*_none` notify cases)
-        # may run on NewCRC.
+        # Only the CRC context object itself (constructor, get_msg, scan) may run on NewCRC.
         assert case.routed in (None, "scan", "scan_unsupported"), f"{case.name}: no routed spec"
         new = execute(NewCRC, [sys.modules[NewCRC.scan_instances_with_tag.__module__]], case)
         for key in old:
@@ -336,8 +334,6 @@ NOTIFY_SPECS: dict[str, tuple[Op, dict[str, Any]]] = {
     "keypair": (Op("keypair"), {"get_deleted": ["k"]}),
     "kms": (Op("kms"), {"get_deleted": ["k"]}),
     "kms_empty": (Op("kms"), {"get_deleted": []}),
-    "ping_dict": (Op("disk"), {"get_deleted": {"alice": ["d"], "team": ["e"], "z": ["f"]}}),
-    "ping_empty": (Op("disk"), {"get_deleted": {}}),
 }
 NOTIFY_SPECS.update(
     {
@@ -353,6 +349,8 @@ def _influx_notifier(c: Any) -> InfluxNotifier:
 
 
 DIRECT_ACTIONS: dict[str, Callable[[Any], Any]] = {
+    "nic_none": lambda c: len(None),  # type: ignore[arg-type]
+    "vm_none": lambda c: len(None),  # type: ignore[arg-type]
     # BUG-031: notify_deleted_disk_via_slack checks exact `type(...) is list` / `dict`, so
     # non-list/non-dict values (`("d1",)`, `None`, `"d1"`) send nothing.
     "disk_4": lambda c: None,

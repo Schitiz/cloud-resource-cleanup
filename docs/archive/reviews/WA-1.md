@@ -45,3 +45,44 @@ into `tests/test_notify_crc_parity.py`. No production file, oracle or locked tes
 
 None found. (`get_msg(None)` text above is a message difference on an input production never
 passes: `crc/core/report.py:178`.)
+
+## Round 1 (Argon)
+
+Scope reviewed: `git diff fc6fa4d..HEAD` on branch `wa/1` (lane `WA-1`).
+
+### Findings & fixes made in review
+
+1. **Prevented `nic_none` and `vm_none` from falling back to `NewCRC.notify_deleted_*_via_slack` and removed merge-conflicting hunks in `tests/test_cli_crc_parity.py`**:
+   - In `c963a22`, removing `"nic_none"` and `"vm_none"` from `DIRECT_ACTIONS` caused `direct_cases()` to set `routed = None` for those 288 cases, so `compare()` fell through to `if spec is None:` and executed `NewCRC.notify_deleted_nic_via_slack` and `NewCRC.notify_deleted_vm_via_slack` on `crc/cli/notify.py` (`NotifyMixin`). In addition, `c963a22` edited the module docstring (lines 10-12) and the `if spec is None:` block in `compare()` (lines 183-184) that lane `WA-2` owns, and left dead `"ping_dict"` / `"ping_empty"` entries in `NOTIFY_SPECS`.
+   - Restored `"nic_none": lambda c: len(None)` and `"vm_none": lambda c: len(None)` in `DIRECT_ACTIONS` (matching the unrepresentable `get_deleted=None` `TypeError` without calling `NewCRC.get_msg` or `NewCRC.notify_deleted_*_via_slack`), removed the dead `"ping_dict"` / `"ping_empty"` entries from `NOTIFY_SPECS`, and reverted the two hunks outside the moved notify blocks so `tests/test_cli_crc_parity.py` merges cleanly with `WA-2` and calls zero methods on `NotifyMixin`.
+2. **Removed test-side `BUG-033` pre-loop from `current_ping` (`tests/helpers_wa1_notify.py`, `tests/test_notify_crc_parity.py`)**:
+   - `current_ping` in `c963a22` pre-called `notifier.user_groups()` and `for key in operated.keys(): len(operated[key])` in test code and passed `get_groups=lambda: user_groups` to `notifier.ping_owners(...)`, bypassing `SlackPoster.ping_owners`'s default `get_groups=None` path on `ping_dict` / `ping_empty` and never reaching `Report` or `ping_owners` on `ping_list` / `ping_no_len`.
+   - Changed `current_ping` to construct `Report` and call `crc.slack().ping_owners(report, resource)` directly as production does, and asserted the `BUG-033` divergence on `ping_list` and `ping_no_len` (`assert_bug_033_ping`: `old` calls `usergroups_list` then fails in the dead `keys()`/`len()` loop; `new` fails in `Report.__post_init__` freezing `by_owner` before `ping_owners` runs). Also added `assert len(NOTIFY_CASES) == EXPECTED_CASES` (`2160`) in `test_cases_are_not_vacuous` and fixed the `BUG-030` attribute name in `CRC`'s docstring (`'resource_suffix'`).
+
+### Checklist verification
+
+1. **No legacy CLI imports or calls**:
+   - Grepped `tests/test_cli_crc_parity.py`, `tests/test_notify_crc_parity.py`, and `tests/helpers_wa1_notify.py` for `\.(get_msg|slack_lookup_user_by_email|get_user_groups_list|write_influxdb|ping_on_slack)\(`: zero matches in `tests/test_cli_crc_parity.py` and `tests/helpers_wa1_notify.py`; in `tests/test_notify_crc_parity.py` those five methods are called only on the legacy oracle (`load_legacy_crc()`).
+   - Runtime check: poisoned every method on `crc.cli.notify.NotifyMixin` to raise `AssertionError`; all 11,747 tests in `tests/test_notify_crc_parity.py` and `tests/test_cli_crc_parity.py` pass.
+2. **All comparisons and case counts preserved**:
+   - All 15 moved case families (`15 * 144 = 2,160` cases) in `tests/test_notify_crc_parity.py` compare `load_legacy_crc()` against `crc.core.report.get_msg`, `SlackNotifier` (`lookup_user_by_email`, `user_groups`, `ping_owners`), and `InfluxNotifier.write` across `("result", "slack", "influx", "stdout")`, with `BUG-030`, `BUG-033`, `get_msg_none`, and `get_msg_bad_operation` explicitly asserted.
+   - Total test count increased from 44,411 (`fc6fa4d`) to 44,414 (`HEAD`, +3 standalone tests in `tests/test_notify_crc_parity.py`); `tests/archtest/test_count_floor.txt` raised to 44,414.
+3. **Non-vacuous (mutation checks, reverted locally without committing)**:
+   - Mutating `crc.core.report.get_msg` (`"following"` -> `"MUTATED"`) caused 144 failures in `tests/test_notify_crc_parity.py`.
+   - Mutating `crc.notify.slack_owners.SlackPoster.post` (appending `"!"` to `text`) caused 36 failures in `tests/test_notify_crc_parity.py`.
+   - Mutating `crc.notify.influx.InfluxNotifier.write` to a no-op caused 577 failures in `tests/test_notify_crc_parity.py`.
+4. **Owned files only**:
+   - `git diff --name-only fc6fa4d..HEAD`: `docs/archive/reviews/WA-1.md`, `tests/archtest/test_count_floor.txt`, `tests/helpers_wa1_notify.py` (130 lines), `tests/test_cli_crc_parity.py` (only the moved blocks), `tests/test_notify_crc_parity.py` (231 lines). No production files touched.
+
+### Gates & test count
+
+Ran `pip install -r requirements.txt -r requirements-dev.txt` followed by `make check`:
+
+- `python3 -m ruff check .`: passed
+- `python3 -m mypy`: passed (376 source files)
+- `lint-imports`: passed (5 contracts kept, 0 broken)
+- `python3 -m pytest -q -n auto`: **44414 passed in 61.10s** (`make check` wall time: **1m11.8s**; owned files: **11747 passed in 9.58s**)
+- `python3 -m tests.archtest.test_count check`: `ARCH-008: 44414 tests, floor 44414`
+
+VERDICT: APPROVE
+

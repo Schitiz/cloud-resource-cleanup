@@ -30,13 +30,26 @@ from tests.helpers_cl2_crc import (
 )
 
 OPERATION_OF_WORD = {"Deleted": Operation.DELETE, "Stopped": Operation.STOP}
+GROUPS_FAIL_STDOUT = "Something Went Wront! Could not get user_groups.\n"
+# BUG-033: main's ping_on_slack fetched user_groups and ran the dead `keys()`/`len()` loop before
+# pinging; Report.__post_init__ freezes `by_owner` into tuples before `ping_owners` runs.
+BUG_033_PING_DIVERGENT: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "ping_list": (
+        ("error", "AttributeError", "'list' object has no attribute 'keys'"),
+        ("error", "AttributeError", "'list' object has no attribute 'items'"),
+    ),
+    "ping_no_len": (
+        ("error", "TypeError", "object of type 'int' has no len()"),
+        ("error", "TypeError", "'int' object is not iterable"),
+    ),
+}
 
 
 class CRC:
     """The settings `bridge` hands to the notifiers: clients, channel and the Influx bucket.
 
     Named `CRC` on purpose: when `influxdb_conn` is absent the stdout of `InfluxNotifier.write`
-    carries "'CRC' object has no attribute 'influxdb_bucket'" (BUG-030), as it does in production.
+    carries "'CRC' object has no attribute 'resource_suffix'" (BUG-030), as it does in production.
     """
 
     def __init__(self, case: Case, logs: Logs) -> None:
@@ -84,15 +97,7 @@ def current_get_msg(crc: CRC, resource: str, word: str, ids: Sized) -> str:
 
 
 def current_ping(crc: CRC, resource: str, word: str, operated: Any) -> None:
-    """`ping_on_slack` through `SlackNotifier.ping_owners`, with the BUG-033 pre-loop of `main`.
-
-    Groups are fetched first and `len()` of every value is taken before the first ping, which
-    keeps the call order and the error text for a non-dict or a value without `len()`.
-    """
-    notifier = crc.slack()
-    user_groups = notifier.user_groups()
-    for key in operated.keys():  # noqa: SIM118 - AttributeError text of a non-dict
-        len(operated[key])
+    """`ping_on_slack` through `Report` and `SlackNotifier.ping_owners` as production calls it."""
     report = Report(
         crc.cloud,
         OPERATION_OF_WORD[word],
@@ -100,7 +105,20 @@ def current_ping(crc: CRC, resource: str, word: str, operated: Any) -> None:
         (Section(resource, ()),),
         by_owner=operated,
     )
-    notifier.ping_owners(report, resource, get_groups=lambda: user_groups)
+    crc.slack().ping_owners(report, resource)
+
+
+def assert_bug_033_ping(case: Case, name: str, old: Recorded, new: Recorded) -> None:
+    """Assert the BUG-033 divergence for non-dict / non-iterable `ping_on_slack` inputs."""
+    expected_old, expected_new = BUG_033_PING_DIVERGENT[name]
+    assert old["result"] == expected_old, case.name
+    assert new["result"] == expected_new, case.name
+    expected_slack: list[Any] = [] if case.scenario.slack == "off" else [("usergroups_list", {})]
+    fail_out = case.scenario.slack == "off" or case.scenario.groups_fail
+    assert old["slack"] == expected_slack, case.name
+    assert old["stdout"] == (GROUPS_FAIL_STDOUT if fail_out else ""), case.name
+    assert old["influx"] == [] == new["influx"] == new["slack"], case.name
+    assert new["stdout"] == "", case.name
 
 
 def scenario_grid(values: dict[str, Any], **overrides: Any) -> Iterator[tuple[str, Scenario]]:

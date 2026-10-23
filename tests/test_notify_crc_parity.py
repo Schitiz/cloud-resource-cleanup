@@ -10,11 +10,13 @@ the Slack calls, the Influx points, stdout and the return value or error are com
 A divergence is asserted, not skipped:
 - BUG-030: without `influxdb_conn` the write fails with `AttributeError`, printed and swallowed;
   both sides print the same text (the settings object is named `CRC`).
-- BUG-033: `ping_on_slack` takes the groups first and `len()` of every value before pinging; the
-  current side reproduces that pre-loop, so the call order and error text are equal.
+- BUG-033: `ping_on_slack` on `main` fetched user groups first and ran the dead
+  `for key in operated_list.keys(): operated_list_length += len(operated_list[key])` loop before
+  pinging; `Report` freezes `by_owner` into tuples in `__post_init__` before `ping_owners` runs,
+  so non-dict / non-iterable owner inputs (`ping_list`, `ping_no_len`) fail there without calling
+  `usergroups_list`.
 - `get_msg(None)`: main raised `TypeError` from `len()`, `get_msg` of the report module raises
-  `TypeError` from `list()`. Production never gets there: `crc.cli.notify._section` calls `len()`
-  first and keeps the text of main (the `nic_none` and `vm_none` cases of the CLI parity file).
+  `TypeError` from `list()`.
 - `get_msg` with an operation word other than "Deleted"/"Stopped": main prints any word, the
   report module takes an `Operation`, so the current side raises `KeyError` mapping the word.
 """
@@ -38,7 +40,9 @@ from tests.helpers_cl2_crc import (
     oracle,
 )
 from tests.helpers_wa1_notify import (
+    BUG_033_PING_DIVERGENT,
     CRC,
+    assert_bug_033_ping,
     current_get_msg,
     current_ping,
     execute_current,
@@ -48,6 +52,7 @@ from tests.helpers_wa1_notify import (
 __all__ = ["oracle"]
 
 COMPARED = ("result", "slack", "influx", "stdout")
+EXPECTED_CASES = 2160
 NONE_LEN = ("error", "TypeError", "object of type 'NoneType' has no len()")
 NONE_ITER = ("error", "TypeError", "'NoneType' object is not iterable")
 
@@ -158,6 +163,9 @@ def compare(oracle_module: ModuleType, case: Case, name: str) -> Recorded:
     act_current = next(act for n, _, _, act in CASES if n == name)
     old = execute(oracle_module.CRC, [oracle_module], case)
     new = execute_current(case, act_current)
+    if name in BUG_033_PING_DIVERGENT:
+        assert_bug_033_ping(case, name, old, new)
+        return old
     for key in COMPARED:
         if key == "result" and (name in DIVERGENT or name == "get_msg_bad_operation"):
             continue
@@ -212,6 +220,7 @@ def test_bug_033_ping_checks_groups_then_lengths(oracle: ModuleType) -> None:
 
 
 def test_cases_are_not_vacuous(oracle: ModuleType) -> None:
+    assert len(NOTIFY_CASES) == EXPECTED_CASES
     seen = {"slack": 0, "influx": 0, "stdout": 0, "error": 0, "ok": 0}
     for param in NOTIFY_CASES[::7]:
         outcome = execute(oracle.CRC, [oracle], param.values[0])
