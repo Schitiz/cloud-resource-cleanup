@@ -29,7 +29,6 @@ from crc.oci.disk import Disk, DiskRuntime
 from crc.oci.spot_vm import SpotVM, SpotVmRuntime
 from crc.oci.spot_vm.client import RegionClients
 from crc.oci.vm import VM, VmRuntime
-from tests.helpers_cli_routes import provide_legacy_keypairs
 from tests.test_cli_crc_parity import Case, Logs, Scenario, build, oracle
 from tests.test_oci_disk import NOW as DISK_NOW
 from tests.test_oci_disk import FakeApi as DiskApi
@@ -39,8 +38,6 @@ from tests.test_oci_spot_instances import inst as spot_inst
 from tests.test_oci_spot_instances import paginate
 from tests.test_oci_vm import FakeApi as VmApi
 from tests.test_oci_vm import inst
-
-provide_legacy_keypairs()
 
 __all__ = ["oracle"]
 

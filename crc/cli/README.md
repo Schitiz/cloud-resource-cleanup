@@ -31,7 +31,7 @@ plain `dict`, as on `main`.
 
 ## Public API
 
-- `route_for()`: the route of a (cloud, kind) pair, or None when the pair keeps the legacy handler (module bridge.py).
+- `route_for()`: the route of a (cloud, kind) pair, or None when the pair is not in the route tables (module bridge.py).
 - `is_routed_kind()`: True when at least one cloud routes the kind.
 - `run_routed()`: run one routed pair through the engine with its notifiers.
 - `init_run_logging()`: initialise the log file and root handlers as Service did in every adapter; patched by the parity tests.

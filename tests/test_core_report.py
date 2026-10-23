@@ -1,16 +1,13 @@
 """Report parity with crc.py: Slack texts, Influx points and payload, owner pings."""
 
-import importlib.util
 import sys
 from collections.abc import Iterator
-from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, Mock
 
 import pytest
 
-from crc.cli import vm_ops
 from crc.core.cleaner import Candidate, Failure, Operation, Plan, Result
 from crc.core.report import (
     DISK,
@@ -28,22 +25,17 @@ from crc.core.report import (
     get_msg,
     influx_resource_name,
 )
+from tests.helpers_oracle import load_legacy_crc
 
-ROOT = Path(__file__).resolve().parent.parent
 IDS = ["i-1", "i-2"]
 
 
 @pytest.fixture(scope="module")
 def crc_cli() -> Iterator[ModuleType]:
-    """crc.py loaded under another name: the `crc` package already owns that name."""
-    spec = importlib.util.spec_from_file_location("crc_cli_under_test", ROOT / "crc.py")
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["crc_cli_under_test"] = module
-    spec.loader.exec_module(module)
+    """Oracle crc.py (`tests/legacy/crc_main.txt`) loaded with frozen module oracles."""
+    module = load_legacy_crc("crc_cli_under_test")
     yield module
-    del sys.modules["crc_cli_under_test"]
+    sys.modules.pop("crc_cli_under_test", None)
 
 
 def make_crc(
@@ -183,9 +175,9 @@ def test_spot_vm_notification_and_disk_message(
         get_deleted_disks=disks,
         get_deleted_volumes=disks,
     )
-    monkeypatch.setattr(vm_ops, "AZU_SpotVM", lambda *_a, **_kw: fake_spot)
-    monkeypatch.setattr(vm_ops, "GCP_SpotVM", lambda *_a, **_kw: fake_spot)
-    monkeypatch.setattr(vm_ops, "OCI_SpotVM", lambda *_a, **_kw: fake_spot)
+    monkeypatch.setattr(crc_cli, "AZU_SpotVM", lambda *_a, **_kw: fake_spot)
+    monkeypatch.setattr(crc_cli, "GCP_SpotVM", lambda *_a, **_kw: fake_spot)
+    monkeypatch.setattr(crc_cli, "OCI_SpotVM", lambda *_a, **_kw: fake_spot)
     instance.delete_spot_instances({}, {}, {"days": 1}, "retention_age")
     related = (
         {NIC: ("nic-1",), DISK: tuple(disks)}

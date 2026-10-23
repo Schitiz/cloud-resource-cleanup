@@ -34,10 +34,9 @@ from crc.cli import scan as cli_scan
 from crc.cli.routes import skips
 from crc.core import logger
 from crc.core.cleaner import Candidate, Operation, Plan, Result, RunContext
-from tests.helpers_cli_routes import FakeCleaners, provide_legacy_keypairs
+from tests.helpers_cli_routes import FakeCleaners
+from tests.helpers_oracle import load_legacy_crc
 from tests.helpers_routed_calls import RoutedCall
-
-provide_legacy_keypairs()
 
 ROOT = Path(__file__).resolve().parent.parent
 ORACLE = ROOT / "tests" / "legacy" / "crc_main.txt"
@@ -99,9 +98,8 @@ HIT_ERRORS = {
 }
 MIN_CASES = 8000
 RUN_ORACLE = (
-    "import crc.aws.keypairs as _kp; _kp.KeyPairs = type('KeyPairs', (), {}); "
-    "import sys; path = sys.argv[1]; sys.argv = ['crc.py', *sys.argv[2:]]; "
-    "exec(compile(open(path).read(), 'crc.py', 'exec'), {'__name__': '__main__'})"
+    "import sys; sys.argv = ['crc.py', *sys.argv[2:]]; "
+    "from tests.helpers_oracle import load_legacy_crc; load_legacy_crc().main()"
 )
 Events = list[Any]
 
@@ -145,7 +143,7 @@ def load_by_path(name: str, path: Path) -> ModuleType:
     return module
 
 
-ORACLE_MODULE = load_by_path("crc_main_oracle_parity", ORACLE)
+ORACLE_MODULE = load_legacy_crc("crc_main_oracle_parity")
 NEW_MODULE = load_by_path("crc_py_main_parity", ROOT / "crc.py")
 
 

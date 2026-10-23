@@ -64,15 +64,3 @@ class FakeCleaners:
 
     def options_of(self, cloud: str, kind: str) -> Mapping[str, Any]:
         return next(options for c, k, options in self.runs if (c, k) == (cloud, kind))
-
-
-def provide_legacy_keypairs() -> None:
-    """Let the frozen oracle `tests/legacy/crc_main.txt` import `KeyPairs`, deleted in ENG-0.
-
-    The oracle does `from crc.aws.keypairs import KeyPairs` at import time and every parity test
-    replaces the name with a fake before it runs, so an empty stand-in is enough.
-    """
-    from crc.aws import keypairs
-
-    if not hasattr(keypairs, "KeyPairs"):
-        setattr(keypairs, "KeyPairs", type("KeyPairs", (), {}))  # noqa: B010

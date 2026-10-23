@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from crc.cli import dispatch, resource_ops
+from crc.cli import dispatch
 from crc.cli.constants import CLOUDS, RESOURCES
 from crc.cli.context import RunContext
 from crc.cli.inputs import Options, Targets, read_options, resolve_targets
@@ -119,33 +119,20 @@ def test_bug_017_cloud_all_skips_unsupported_pairs_with_a_warning(
 
 
 @pytest.mark.parametrize(
-    ("resource", "adapter_attr", "expected_cloud"),
+    ("resource", "expected_cloud"),
     [
-        ("keypair", None, "aws"),
-        ("kms", None, "aws"),
+        ("keypair", "aws"),
+        ("kms", "aws"),
     ],
 )
 def test_bug_017_cloud_all_real_crc_does_not_build_skipped_clouds(
     monkeypatch: pytest.MonkeyPatch,
     resource: str,
-    adapter_attr: str | None,
     expected_cloud: str,
 ) -> None:
     deleted: list[str] = []
-
-    class FakeAdapter:
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            pass
-
-        def delete(self) -> None:
-            deleted.append(expected_cloud)
-
-    if adapter_attr is not None:
-        monkeypatch.setattr(resource_ops, adapter_attr, FakeAdapter)
-    else:
-        FakeCleaners().install(monkeypatch).side_effect[(expected_cloud, resource)] = lambda ctx: (
-            deleted.append(expected_cloud)
-        )
+    cleaners = FakeCleaners().install(monkeypatch)
+    cleaners.side_effect[(expected_cloud, resource)] = lambda ctx: deleted.append(expected_cloud)
     options = read_options(
         {
             "cloud": "all",
@@ -157,6 +144,7 @@ def test_bug_017_cloud_all_real_crc_does_not_build_skipped_clouds(
     )
     dispatch.run_dispatch(CONTEXT, options, resolve_targets(options))
     assert deleted == [expected_cloud]
+    assert [(c, k) for c, k, _ in cleaners.runs] == [(expected_cloud, resource)]
 
 
 def test_bug_017_cloud_all_nic_raises_before_any_cleaner(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -169,21 +157,12 @@ def test_bug_017_cloud_all_nic_raises_before_any_cleaner(monkeypatch: pytest.Mon
 
 def test_bug_017_cloud_all_nic_real_crc_deletes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
     deleted: list[str] = []
-
-    class FakeNIC:
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            pass
-
-        def delete(self) -> None:
-            deleted.append("azure")
-
-    monkeypatch.setattr(resource_ops, "NIC", FakeNIC)
-    FakeCleaners().install(monkeypatch).side_effect[("azure", "nic")] = lambda ctx: deleted.append(
-        "azure"
-    )
+    cleaners = FakeCleaners().install(monkeypatch)
+    cleaners.side_effect[("azure", "nic")] = lambda ctx: deleted.append("azure")
     with pytest.raises(ValueError, match=r"NICs operation is only supported on Azure\."):
         run("all", "nic")
     assert deleted == []
+    assert cleaners.runs == []
 
 
 @pytest.mark.parametrize("resource", ["disk", "all"])

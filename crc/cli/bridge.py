@@ -31,7 +31,7 @@ TABLES: dict[str, dict[str, Route]] = {
 
 
 def route_for(cloud: Any, kind: Any) -> Route | None:
-    """The route of a pair, or None when the pair still runs the legacy handler."""
+    """The route of a pair, or None when `(cloud, kind)` is not in the route tables."""
     return TABLES.get(cloud, {}).get(kind)
 
 

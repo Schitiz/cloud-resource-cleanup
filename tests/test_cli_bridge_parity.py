@@ -19,7 +19,6 @@ from crc.cli.routes import NotifyMode, Route, skips
 from crc.cli.runner import CRC as NewCRC
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext
 from crc.core.registry import Registry
-from tests.helpers_cli_routes import provide_legacy_keypairs
 from tests.test_cli_crc_parity import (
     AGE,
     FULL,
@@ -31,8 +30,6 @@ from tests.test_cli_crc_parity import (
     oracle,
     scenario_grid,
 )
-
-provide_legacy_keypairs()
 
 __all__ = ["oracle"]
 

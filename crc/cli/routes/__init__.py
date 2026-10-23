@@ -1,8 +1,7 @@
-"""Route tables: which (cloud, kind) pairs the CLI runs through `crc.core.engine`.
+"""Route tables: how the CLI runs each (cloud, kind) pair through `crc.core.engine`.
 
 One module per cloud (`aws`, `azu`, `gcp`, `oci`) holds `ROUTES`, a dict from resource kind to a
-`Route`. A kind that is not in its cloud's table keeps the legacy `CRC` handler of
-`crc/cli/dispatch.py`. The dispatcher asks `route_for` before it looks up the legacy handler.
+`Route`. Every supported pair and the two warn-only spot pairs are in their cloud's table.
 """
 
 import enum

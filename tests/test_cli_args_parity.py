@@ -10,7 +10,6 @@ import argparse
 import importlib.util
 import sys
 from collections.abc import Callable
-from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -19,11 +18,8 @@ import pytest
 
 from crc.cli import args as cli_args
 from crc.cli import validate as cli_validate
-from tests.helpers_cli_routes import provide_legacy_keypairs
+from tests.helpers_oracle import load_legacy_crc
 
-provide_legacy_keypairs()
-
-ORACLE = Path(__file__).parent / "legacy" / "crc_main.txt"
 ROOT = Path(__file__).resolve().parent.parent
 BASE = ["-c", "aws"]
 MIN_CASES = 600
@@ -57,12 +53,7 @@ DEFAULTS_EXPECTED: dict[str, Any] = {
 
 @pytest.fixture(scope="module")
 def oracle() -> ModuleType:
-    loader = SourceFileLoader("legacy_crc_main", str(ORACLE))
-    spec = importlib.util.spec_from_file_location("legacy_crc_main", ORACLE, loader=loader)
-    assert spec is not None
-    module = importlib.util.module_from_spec(spec)
-    loader.exec_module(module)
-    return module
+    return load_legacy_crc("legacy_crc_main")
 
 
 def _run(

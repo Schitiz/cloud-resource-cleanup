@@ -105,6 +105,11 @@ def test_gcp_spot_instances_without_a_project_raises_before_any_cleaner(
             "spot_instance_requests is AWS-only; skipped for azure (use --resource spot_instances)",
         ),
         (
+            "gcp",
+            "spot_instance_requests",
+            "spot_instance_requests is AWS-only; skipped for gcp (use --resource spot_instances)",
+        ),
+        (
             "oci",
             "spot_instance_requests",
             "spot_instance_requests is AWS-only; skipped for oci (use --resource spot_instances)",

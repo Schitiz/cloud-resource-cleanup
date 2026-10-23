@@ -7,14 +7,11 @@ method calls, the attribute reads, the Slack calls, the Influx calls, the printe
 return value or raised error must be equal.
 """
 
-import importlib.util
 import io
 import itertools
 from collections.abc import Callable, Iterator
 from contextlib import redirect_stdout
 from dataclasses import dataclass, field
-from importlib.machinery import SourceFileLoader
-from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
@@ -22,11 +19,8 @@ import pytest
 
 from crc.cli import resource_ops, vm_ops
 from crc.cli.runner import CRC as NewCRC
-from tests.helpers_cli_routes import provide_legacy_keypairs
+from tests.helpers_oracle import load_legacy_crc
 
-provide_legacy_keypairs()
-
-ORACLE = Path(__file__).parent / "legacy" / "crc_main.txt"
 ADAPTERS = [
     "AWS_Disk",
     "ElasticIPs",
@@ -184,12 +178,7 @@ class Case:
 
 @pytest.fixture(scope="module")
 def oracle() -> ModuleType:
-    loader = SourceFileLoader("legacy_crc_main_crc", str(ORACLE))
-    spec = importlib.util.spec_from_file_location("legacy_crc_main_crc", ORACLE, loader=loader)
-    assert spec is not None
-    module = importlib.util.module_from_spec(spec)
-    loader.exec_module(module)
-    return module
+    return load_legacy_crc("legacy_crc_main_crc")
 
 
 def build(crc_class: Any, case: Case, logs: Logs) -> Any:
