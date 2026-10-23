@@ -33,6 +33,7 @@ from crc.cli import scan as cli_scan
 from crc.core import logger
 from crc.core.cleaner import Candidate, Operation, Plan, Result, RunContext
 from tests.helpers_cli_routes import FakeCleaners, provide_legacy_keypairs
+from tests.helpers_cli_routes_gcp import GCP_ROUTED_CALLS
 
 provide_legacy_keypairs()
 
@@ -358,13 +359,28 @@ ROUTED_CALLS: dict[str, RoutedCall] = {
 }
 
 
+BY_CLOUD: dict[tuple[str, str], RoutedCall] = {
+    pair: RoutedCall(*call) for pair, call in GCP_ROUTED_CALLS.items()
+}
+
+
+def routed_call(cloud: str, kind: str) -> RoutedCall:
+    """The oracle call of a routed pair: the per-cloud table wins over the AWS-shaped one."""
+    return BY_CLOUD.get((cloud, kind)) or ROUTED_CALLS[kind]
+
+
 def strip_unused_args(events: Events) -> Events:
-    """Drop the oracle call arguments that the routed AWS adapters never read."""
-    inverse = {call.method: call for call in ROUTED_CALLS.values()}
+    """Drop the oracle call arguments that the routed cleaners never read."""
+    inverse = {
+        (cloud, routed_call(cloud, kind).method): routed_call(cloud, kind)
+        for cloud, table in bridge.TABLES.items()
+        for kind in table
+    }
     kept: Events = []
     for event in events:
-        call = inverse.get(str(event[0]).removeprefix("crc."))
-        if call is not None and event[0].startswith("crc.") and event[1] == "aws":
+        cloud = event[1] if len(event) > 1 else None
+        call = inverse.get((str(cloud), str(event[0]).removeprefix("crc.")))
+        if call is not None and event[0].startswith("crc."):
             args = [a for a, key in zip(event[2], call.keys, strict=False) if key is not None]
             event = (event[0], event[1], args, event[3])
         kept.append(event)
@@ -389,7 +405,7 @@ def install_routed_fakes(fakes: Fakes, monkeypatch: pytest.MonkeyPatch) -> None:
     cleaners = FakeCleaners().install(monkeypatch)
     for cloud, table in bridge.TABLES.items():
         for kind in table:
-            call = ROUTED_CALLS[kind]
+            call = routed_call(cloud, kind)
             if kind == "snapshot":
                 cleaners.side_effect[(cloud, kind)] = snapshot_side_effect(fakes)
                 cleaners.plans[(cloud, kind)] = Plan(
@@ -405,7 +421,10 @@ def install_routed_fakes(fakes: Fakes, monkeypatch: pytest.MonkeyPatch) -> None:
                 call: RoutedCall = call,
             ) -> None:
                 assert context.dry_run is ("--dry_run" in fakes.case.argv)
-                if kind in {"ip", "vpc", "vm", "spot_instance_requests", "disk"}:
+                if kind in {"ip", "vpc", "vm", "spot_instance_requests", "disk"} and (
+                    cloud,
+                    kind,
+                ) != ("gcp", "ip"):
                     assert "notags" in context.options
                 stop = call.stop if context.operation is Operation.STOP else None
                 method = stop or call.method
