@@ -40,7 +40,7 @@ The names below are synced with this README by ARCH-002. The disk, vm and spot_v
 
 ## Extension Rules
 
-1. Do not add features or fix bugs while restructuring; a behaviour fix names its `BUG-NNN` (`docs/refactor/BUGS.md`).
+1. A behaviour fix names its `BUG-NNN` (`docs/refactor/BUGS.md`); do not fix a quirk inside an unrelated change.
 2. New resources go in a new module with the `Cleaner` contract (`ARCHITECTURE.md`, "Add a resource
    cleaner"): a `Cleaner` registered with `@register("oci", ...)`. Follow the `disk/` or `vm/` subpackage: pure policy from `crc.core.policy`,
    age from `crc.core.age`, SDK calls behind a Protocol in a `api.py` or `client.py` module, injected through the

@@ -703,6 +703,16 @@ def _assert_matches_main(old: Outcome, new: Outcome) -> None:
     if old.error is not None:
         # main may already have deleted volumes before the error; plan() fails before any delete
         assert [c for c in new.calls if _is_delete(c)] == []
+        assert [c for c in new.calls if not _is_delete(c)] == [
+            c for c in old.calls if not _is_delete(c)
+        ]
+        assert new.logs == [
+            log
+            for log in expected_logs(old.logs, BUGS, RULES)
+            if not log[2].startswith("count of items")
+            and not _is_apply_log(log)
+            and not _is_summary_log(log)
+        ]
         return
     assert new.deleted == old.deleted
     assert new.count == old.count

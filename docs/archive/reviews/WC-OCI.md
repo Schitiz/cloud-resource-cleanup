@@ -62,3 +62,44 @@ Scope reviewed: `git diff 302612d..HEAD` on branch `wc/oci` (lane `WC-OCI`).
 
 VERDICT: APPROVE
 
+
+## Round 2 (Opus)
+
+Scope: `git diff 302612d..HEAD` on `wc/oci`, plus round 1's fixes.
+
+### Round 1 fixes
+
+- The wording trims in `crc/oci/README.md`, `crc/oci/spot_vm/README.md`, `crc/oci/_logger.py`, `crc/oci/disk/attachments.py` and `crc/oci/disk/cleaner.py` are correct, and no code changed. I agree with its findings.
+
+### Findings and fixes made in this round
+
+- **Error cases in the parity comparison were weaker than they need to be.** `_assert_matches_main` (`tests/test_oci_disk_parity.py`) returned early for every oracle case that raises: it checked only the error, stdout and "no deletes", and never compared reads or log lines. Plan-before-apply only drops deletes and their apply-phase logs. So for the 9 raising cases (`max-age-not-a-dict`, `naive-created-time`, `missing-created-time`, `attachment-listing-unexpected-error`, `boot-attachment-listing-unexpected-error`, `list-volumes-unexpected-error`, `unexpected-error-in-later-region`, `unexpected-error-in-boot-volume-after-volume-delete`, `regions-unexpected-error-propagates`), the comparison now also checks two things, in both the engine-path test and the Cleaner-protocol test:
+  - the non-delete SDK calls are equal to the oracle's, in order;
+  - the log records are equal to the oracle's plan-phase logs (BUG-353 and BUG-358 levels applied; the apply-phase and summary logs are left out).
+
+  All of these cases pass. The error path is now compared at least as strictly as the adapter-based test compared it.
+- **One leftover refactor phrase.** `crc/oci/README.md` Extension Rule 1 said "while restructuring". I reworded it to match the other OCI READMEs.
+- **The `count of items in disk_names_to_delete` filter is correct.** That line comes only from the oracle's `count` property. The test reads that property, but `crc.py` never does (same pattern as BUG-081 and BUG-181). The CLI never emits it, so dropping it is not a lost production log line.
+
+### Checks
+
+1. **Nothing production uses was deleted.** Only `crc/oci/disk/adapter.py` (`Disk`), `DiskRuntime`, `Clock` and the adapter-only aliases are gone. The diff does not touch `crc/cli/**` (`scan.py`, `routes/oci.py`, bridge). `build_disk_cleaner` stays registered as `oci` / `disk`. `crc/oci/vm` and `crc/oci/spot_vm` code is unchanged (only their READMEs changed), and the five hash-locked adapters are untouched.
+2. **The parity tests drive the registered Cleaner through the engine.** `test_matches_main`, `test_quirk_is_preserved`, `test_disk_diverges_from_oracle` and `test_unknown_attachments_keep_the_volumes` call `crc.core.engine.run` with `build_disk_cleaner`. All 66 oracle cases from `tests/legacy/oci_disk.txt` are kept. BUG-096/097/098 and BUG-353/358 are still asserted. The only changed quirk expectation is the allowed plan-before-apply case (BUG-408). Local deliberate breaks, reverted and not committed:
+   - reversing the delete order in `DiskCleaner.apply`: 26 failures across `tests/test_oci_disk_parity.py`, `tests/test_oci_disk_fix.py` and `tests/test_oci_logger.py`;
+   - changing the `No OCI disk to delete.` text in `settings.log_summary`: 43 failures;
+   - forcing dry-run deletes in `apply` (engine-path `test_matches_main` only): 42 failures.
+3. **Deleted names are gone and the READMEs are clean.** A grep of `crc/`, `crc.py` and `tests/` (excluding `tests/legacy`) for `crc.oci.disk.adapter`, the OCI `Disk` import, `DiskRuntime` and `_LIST_CONTEXT` finds nothing. The four OCI READMEs have no rung, legacy-path, adapter-history or wave wording. The VM and SpotVM READMEs still list `adapter.py`, which is correct because those classes still exist. Every doc and test path they cite exists.
+4. **No locked or out-of-scope file was touched.** The diff touches no hash-locked test, no `tests/legacy/*.txt` oracle and nothing under `tests/archtest/**`, `docs/refactor/**`, AGENTS.md or ARCHITECTURE.md.
+5. **Size limits and Public API pass.** ARCH-002 and ARCH-004 are green inside `make check`. `crc/oci/disk/cleaner.py` is 237 lines.
+6. **Gates are green.** After `pip install -r requirements.txt -r requirements-dev.txt`, `make check` passed in 68 s wall time:
+   - ruff: clean;
+   - mypy: no issues in 372 source files;
+   - lint-imports: 5 contracts kept, 0 broken;
+   - pytest: `44415 passed in 50.92s`;
+   - `ARCH-008: 44415 tests, floor 44415`. The count is unchanged, so the floor was not raised.
+
+## New bugs
+
+None.
+
+ROUND 2 VERDICT: APPROVE
