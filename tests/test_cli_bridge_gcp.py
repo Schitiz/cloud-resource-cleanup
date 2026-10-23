@@ -299,6 +299,16 @@ def test_disk_close_error_reports_partial_succeeded_before_reraising(
     assert old.influx[0][3]["names"] == "['d1', 'd4']"
 
 
+@pytest.mark.parametrize("case", ["ip", "ip-match-all"])
+def test_ip_dry_run_logs_each_region_then_its_actions_as_legacy(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, case: str
+) -> None:
+    old, new = run_both(monkeypatch, caplog, case, dry_run=True, slack=False, influx=False)
+    assert new.run_log == old.run_log
+    kinds = [line.split()[0] for line in new.run_log]
+    assert kinds.index("ACTION") < len(kinds) - 1 - kinds[::-1].index("REGION")
+
+
 def test_route_table_routes_the_kinds_and_leaves_spot_instances_legacy() -> None:
     assert sorted(bridge.TABLES["gcp"]) == ["disk", "ip", "vm"]
     assert bridge.route_for("gcp", "spot_instances") is None

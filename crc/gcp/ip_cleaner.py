@@ -78,9 +78,10 @@ class IpCleaner:
             region_plan = self.plan_region(region)
             candidates.extend(region_plan.candidates)
             skipped.extend(region_plan.skipped)
+            if context.dry_run:
+                for c in region_plan.candidates:
+                    logger.current().action("would_delete", c.region, c.id, c.name)
         if context.dry_run:
-            for c in candidates:
-                logger.current().action("would_delete", c.region, c.id, c.name)
             _log_summary([c.id for c in candidates], dry_run=True)
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
 

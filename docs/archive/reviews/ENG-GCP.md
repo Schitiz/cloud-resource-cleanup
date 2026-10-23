@@ -62,3 +62,42 @@ Scope reviewed: `git diff 6a98441..HEAD` on branch `eng/gcp` (lane `ENG-GCP`).
 
 VERDICT: APPROVE
 
+
+## Round 2 (Opus)
+
+Scope: `git diff 6a98441..HEAD` on `eng/gcp`, round 1 fixes included.
+
+### Round 1 fixes checked
+
+- `DiskCleaner.partial_succeeded` (round 1 fix 1) is correct. A dry-run `close()` error reports every planned disk, as `Disk.delete()` did (it logged and recorded each disk before the final `close()`). In a real run `apply()` exposes the confirmed deletes. A project-level listing error reports an empty list in both paths. Moving the dry-run ACTION and summary lines inside `try` keeps their text and count.
+- `spot_instances` staying on the legacy handler is correct. `_spot_instances` warns and returns under `--cloud all` for gcp and oci, and `Route.precheck` can only raise. The Owner action (a `Route.skip` hook) stands.
+
+### Independent checks
+
+1. **Parity of the routed pairs.** Every value in `routes/gcp.py` (`_ip`, `_disk`, `_vm`) matches the legacy arguments. `project_id` and `notags` come from `Options`, which are the same values `make_crc` stores on the CRC object (`crc/cli/main.py:42-45`). `instance_state` is only set for delete, and the VM factory forces the default state for `STOP` anyway (`crc/gcp/vm_cleaner.py:221`). Disk uses report-then-reraise as `delete_disks` did. In `tests/helpers_gcp_bridge.py` the legacy side patches `dispatch.route_for` to `None`, so it really runs `HANDLERS` on the adapters. Dry runs make no mutating GCP call. Slack text and recipients, Influx points, console output and exceptions are equal. GCP candidates carry the name as id, so the ENG-1 "ids instead of names" problem cannot occur. RUN START and RESULT lines are equal, `selected=` included.
+2. **Mutation checks for vacuous tests (none found).** I broke `routes/gcp.py` four ways:
+   - `exception_regex` of `ip` set to None: 14 failures, 4 of them in the oracle test `test_cli_main_parity.py` (`gcp-ip-*` and `all-ip-*`).
+   - `slack_user_label` of `disk` set to None: 10 failures.
+   - `detach_age` of `disk` set to None: 2 failures in `test_cli_main_parity.py` (`gcp-disk-*`).
+   - `disk` route without `REPORT_THEN_RERAISE`: 5 failures.
+   - Passing `--resource_states` to `vm` stop: no failure, but it changes nothing (the factory ignores the states for `STOP`).
+3. **Locked safety tests.** `tests/test_gcp_spot_vm.py`, the other 4 locked files and `tests/archtest/safety_lock.json` are untouched and pass. All 8 locked `test_gcp_spot_vm.py` tests (SAF-008, 039 x2, 041, 043, 044, 045 x2) have a same-named copy in `tests/test_gcp_spot_vm_engine.py` that goes through `SpotVMCleaner`, `build_spot_cleaner`, the registry or the `spot_vm` modules, with the same assertions (the delete order `instance, operation, disk`, fail-closed zero custom age, MIG `UserList` metadata).
+4. **Protected files.** No edits to `tests/legacy/*.txt`, `tests/archtest/**` (except the floor raised by `make raise-test-floor`), `AGENTS.md`, `ARCHITECTURE.md`, `.cursor/**`, `pyproject.toml`, `Makefile` or `requirements*.txt`. In `docs/archive/**` only this review file changed.
+5. **Limits and docs.** The lane's source files are at most 240 lines (`disk_cleaner.py`), ARCH-004 passes, and the READMEs match the Public API (ARCH-002). The BUGS.md counts line checks out against the table: 392 rows, low 295, 60 fixed, 5 partly fixed, no duplicate IDs. BUG-400 is at the end of the low group.
+
+### Fix made in round 2
+
+- **GCP ip dry-run log order now matches the adapter** (`crc/gcp/ip_cleaner.py` `plan()`). `IP.delete()` logged each region's REGION line and then that region's `would_delete` ACTION lines. The routed `plan()` logged all REGION lines first, which BUG-400 had listed as a difference. `plan()` now logs each region's ACTION lines right after that region's REGION line. The pinned single-region test in `tests/test_gcp_logger.py` still holds. New test: `test_ip_dry_run_logs_each_region_then_its_actions_as_legacy` (2 cases) in `tests/test_cli_bridge_gcp.py` checks that the whole run log equals the legacy one; both cases fail without the fix. I updated the wording of BUG-400 to match.
+- **Not fixed: disk and vm dry runs.** Their adapters logged each zone's ACTION lines before its REGION line, because `plan_zone` is a generator and the REGION line is written when it runs out. `test_disk_dry_run_logs_would_delete_and_never_done` and `test_vm_stop_dry_run_logs_would_stop_from_plan` pin the opposite order for `plan()`, so these two stay as recorded in BUG-400. Only the order changes; the set of lines, their text and the RESULT counts are equal. In a real run, logging every REGION line before the ACTION lines follows from the allowed plan-before-apply change.
+
+## New bugs (round 2)
+
+- `crc/gcp/disk_cleaner.py:76` and `:94`: through the engine a real disk run calls `close()` twice, once at the end of `plan()` and once at the end of `apply()`; `Disk.delete()` called it once. If `close()` raises in `plan()`, the pair now stops before any delete and reports an empty list, where the legacy path deleted every disk, reported them and then raised. This means fewer deletes, never more. The exception and exit code are the same.
+- `crc/gcp/disk_client.py:106`: `close()` resets `_service`, so `apply()` builds the discovery service a second time (`discovery.build`) in every real run. The SDK call sequence differs from `main` (same shape as BUG-390). No mutation.
+
+### Gates
+
+- `make check` (after `pip install -r requirements.txt -r requirements-dev.txt`): ruff, mypy strict (348 files), lint-imports (5 kept, 0 broken), ARCH-001..009, SAF-LOCK green.
+- Tests: 43938 at the start of round 2 (pytest 51.7s, `make check` 69s wall). After round 2: **43940 passed in 50.0s** (`make check` 56s wall), `ARCH-008: 43940 tests, floor 43940` (floor raised with `make raise-test-floor`).
+
+ROUND 2 VERDICT: APPROVE
