@@ -30,3 +30,36 @@ Optional new invariant (needs a new locked test if the owner wants it hash-locke
 
 - `crc/oci/vm/cleaner.py` `_is_old`: a naive `time_created` is not given a timezone as `crc/oci/spot_vm/decide.py:is_old_instance` does, so with BUG-162 fixed such an instance is now kept with a recorded failure instead of being evaluated. Safe (fail closed); the spot VM variant treats it as local time. Exists on main: yes (`crc/oci/vm.py:121` on main raised `TypeError`).
 - The `oke` guard is a case-insensitive substring match (`policy._looks_oke`), so any tag or metadata entry containing `oke` (for example a tag value such as `joker`) keeps a VM. Same on `spot_vm` today; fail closed, not fixed.
+
+## Round 1 (Argon)
+
+Scope reviewed: `git diff 182466d..HEAD` (`crc/oci/vm/cleaner.py`, `crc/oci/vm/client.py`, `crc/oci/vm/README.md`, `tests/test_oci_vm_fix.py`, `tests/test_oci_vm_parity.py`, `docs/refactor/reviews/FIX-OCI-VM.md`).
+
+### Findings
+
+1. **Fixed bugs (`BUG-158`, `BUG-162`):**
+   - `BUG-158` (`crc/oci/vm/cleaner.py:40,235-240`, `crc/oci/vm/client.py:43-51`): `VmCleaner._skip_reason` calls `policy.oci_is_managed_or_oke_node(instance.freeform_tags, getattr(instance, "defined_tags", None), getattr(instance, "metadata", None) or {})` immediately after the lifecycle state check (including when `filter_tags` is empty), returning `"OKE or instance pool member"` and recording run-log skip key `"managed"`. Verified against `crc/oci/spot_vm/decide.py:63-69,95-113`.
+   - `BUG-162` (`crc/oci/vm/cleaner.py:45,176-181`): `VmCleaner.decide` wraps `self._skip_reason(instance, clock)` in `try/except Exception`, logs `Error occurred while evaluating instance <display_name>: <e>` at `ERROR`, calls `_logger.record_failure(region, instance.id, e)`, and returns `Skipped(id=instance.id, reason="evaluation failed", name=instance.display_name)` so both the `VM` adapter and `VmCleaner.plan` keep the instance and continue across remaining instances and regions.
+   - `tests/test_oci_vm_fix.py` adds 23 unit tests covering `BUG-158` (freeform key/value, defined tags, metadata, delete and stop, empty `filter_tags`, ordering after state check, dry run, missing optional attributes, `VM` adapter) and `BUG-162` (missing and naive `time_created`, malformed `MAX_AGE`, multi-region continuation, `ERROR` log, `RunLog.fail` recording, `VM` adapter) that fail on `182466d` and pass on `HEAD`.
+2. **Direction rule and parity (`tests/test_oci_vm_parity.py`):**
+   - Neither fix can delete, stop, or release any instance that was kept before: `BUG-158` only adds a skip branch, and `BUG-162` keeps instances that previously raised an unhandled exception while letting healthy instances finish and be reported.
+   - `tests/legacy/oci_vm.txt` is untouched. Only the 5 `BUG-162` cases (`max-age-not-a-dict`, `naive-created-time`, `missing-created-time`, `unexpected-error-in-later-instance-after-action`, `unexpected-error-in-later-region`) are in `DIVERGES`, where `_assert_bug_162_outcome` verifies that the oracle raises and the new code succeeds with the exact expected mutations, results, counts, and `ERROR` logs; all other 70 cases (for both `delete` and `stop`, adapter and Cleaner) assert exact equality with the oracle.
+3. **Production commands and fail-closed paths:**
+   - All 5 production Jenkins commands for `--cloud oci --resource vm` keep the same CLI flags and selection (except keeping OKE/instance-pool nodes and instances whose evaluation raises). `plan()` remains strictly read-only before any SDK mutation.
+4. **Protected files and docs (`ARCH-002`):**
+   - `tests/archtest/safety_lock.json`, the 5 hash-locked test files, `docs/refactor/PLAN.md`, `docs/refactor/STATUS.md`, `docs/refactor/BUGS.md`, and `CLEANUP_SAFETY.md` are untouched.
+   - `crc/oci/vm/README.md` updates `Public API` (`SdkInstance`) and `Safety Invariants` for `BUG-158` and `BUG-162`.
+   - **NIT (protected CODEOWNERS file, do not edit):** `CLEANUP_SAFETY.md:183` currently scopes `[SAF-045]` under leftover/spot disks; owner may update `CLEANUP_SAFETY.md:183` as proposed under `## Owner action` above (`[SAF-045] GCP skips GKE/MIG members; OCI skips OKE / instance-pool members (tags/metadata) in both the OCI Spot VM and the OCI VM cleaner (crc/oci/vm, skip reason managed).`).
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`:
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed |
+| `mypy` | Success: no issues found in 229 source files |
+| `lint-imports` | Contracts: 5 kept, 0 broken |
+| `pytest -q` | 42467 passed (42444 at `182466d`, +23) |
+
+VERDICT: APPROVE
