@@ -230,7 +230,7 @@ class VmCleaner:
                 if state.get("error"):
                     raise RuntimeError(f"zone operation {name} failed: {state['error']}")
                 return
-            logging.info(f"Waiting for GCP zone operation {zone}/{name} (status={status})")
+            logging.debug(f"Waiting for GCP zone operation {zone}/{name} (status={status})")
             time.sleep(settings.poll_sec)
         raise RuntimeError(f"zone operation {name} not done after {settings.wait_sec}s")
 

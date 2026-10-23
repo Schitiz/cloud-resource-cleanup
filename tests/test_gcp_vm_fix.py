@@ -155,6 +155,14 @@ def test_dry_run_neither_acts_nor_polls() -> None:
     assert client.calls == []
 
 
+def test_the_poll_line_is_debug(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.DEBUG)
+    client = Client({}, states=[{"status": "RUNNING"}, {"status": "DONE"}])
+    assert cleaner(client).apply(one(), ctx()).succeeded == ("a",)
+    waits = [r.levelno for r in caplog.records if r.getMessage().startswith("Waiting for GCP")]
+    assert waits == [logging.DEBUG]
+
+
 def test_later_instances_are_still_processed_after_an_unfinished_operation() -> None:
     client = Client({}, states=[{"status": "DONE", "error": {"x": 1}}, {"status": "DONE"}])
     plan = Plan(candidates=tuple(Candidate(id=n, name=n, region="z") for n in "ab"))
