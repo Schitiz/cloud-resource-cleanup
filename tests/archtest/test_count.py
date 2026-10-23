@@ -20,7 +20,6 @@ _REMEDIATION = (
     "is back at or above the floor. Never edit `test_count_floor.txt` to lower it; it only "
     "rises through `make raise-test-floor`."
 )
-_SUMMARY = re.compile(r"^(\d+) tests? collected", re.MULTILINE)
 _NODE_LINES = re.compile(r"^\S+\.py::", re.MULTILINE)
 
 

@@ -45,3 +45,48 @@ Each has a real check plus tmp_path self-tests that prove it fires and does not 
 ## New bugs
 
 None found.
+
+## Round 1 (Argon)
+
+Reviewed `git diff cea0a8a..HEAD` against the W2-ENFORCE task and Wave W2 contract.
+
+### Findings
+
+- **BLOCKING (fixed):** `tests/archtest/readonly_plan.py` (`find_plan_mutations_in_siblings` / `_scan_siblings`) only followed direct sibling calls from `plan()` and 1-hop `self.<method>()` calls, missing sibling calls made from same-module helper functions (such as `list_matches()` in `crc/aws/spot_instance_requests/cleaner.py` or `_decide()` in `crc/aws/spot_instance_requests/requests.py`), multi-hop `self.<method>()` chains, and plain `import pkg.sibling` without `as`. Fixed by traversing `_local_functions` (all transitively reachable same-module functions and `self`/`cls` methods) at each module hop and supporting unaliased `import pkg.sibling` calls, with two new `tmp_path` self-tests (`via-local-func`, `import-plain`). Still passes cleanly on the repository.
+- **NIT (fixed):**
+  - `tests/archtest/bug_refs.py`: widened `_REF` from `\bBUG-(\d{3,})\b` to `\bBUG-(\d+)\b` so 1- or 2-digit bug-ID typos (e.g. `BUG-04`) are also caught.
+  - `tests/archtest/test_count.py`: removed unused `_SUMMARY` regex.
+  - Raised `tests/archtest/test_count_floor.txt` from `43068` to `43070` via `make raise-test-floor` for the 2 added ARCH-005 self-tests.
+
+### Verification
+
+1. **Checks enforce rules, fire in self-tests, and provide usable `REMEDIATION`:**
+   - **ARCH-003 (`tests/archtest/bans.py`):** extended via `PACKAGE_BANS` to `crc/core` (`clock`, `print`, `sys.exit`), `crc/cli` (`re`), and `crc/notify` (`re`, `env`, `sys.exit`), keeping `re` in `crc/core/policy.py` and legitimate boundary constructs in `crc/cli` and `crc/notify`. `crc/core` `env` ban is deferred to `## Wave B checks` (no allowlist entry added; `APPROVED_ALLOWLIST` remains pinned to the 2 owner-approved `_base.py` entries).
+   - **ARCH-005 (`tests/archtest/readonly_plan.py`):** existing `check_plan_readonly` is untouched; `check_plan_readonly_siblings` follows relative and package-local sibling imports (`from .x import f`, `from . import x`, `from pkg.x import f`, `import pkg.x [as x]`) transitively across local helpers, `self`/`cls` methods, and sibling chains, and passes on the repository.
+   - **ARCH-006 (`tests/archtest/banned_constructs.py`):** bans `async def`, `await`, `async for`, `async with`, and imports of `asyncio`, `pydantic`, `httpx`, `tenacity`, and `threading` across `crc/` and `crc.py` (including legacy files).
+   - **ARCH-007 (`tests/archtest/frozen_inputs.py`, `frozen_inputs.json`, `update_frozen_inputs.py`):** verifies SHA-256 hashes of all 31 `tests/legacy/*.txt` files and `requirements.txt`; self-tests cover modified, added, and deleted files; remediation explicitly forbids agents from running `update_frozen_inputs.py` or editing `frozen_inputs.json`.
+   - **ARCH-008 (`tests/archtest/test_count.py`, `test_count_floor.txt`):** `make check` runs `python -m tests.archtest.test_count check` after `pytest`; `make raise-test-floor` only raises the floor (`43070`).
+   - **ARCH-009 (`tests/archtest/bug_refs.py`):** scans all `.py` and `.md` files under `crc/**` and `tests/**` for `BUG-NNN` references and verifies each has a row in `docs/refactor/BUGS.md`.
+   - All rules are documented in the `tests/archtest/README.md` table and pass `ARCH-002`.
+2. **No existing check or test weakened; no hash-locked file or oracle edited:**
+   - Verified `safety_lock.json`, `update_safety_lock.py`, the 5 hash-locked test files, and `tests/legacy/*.txt` are untouched.
+   - The edits in `tests/test_cli_args_parity.py` and `tests/test_gcp_disk_fix.py` only stabilize parametrize IDs (`set` ordering and `object()` memory addresses) for `pytest-xdist` collection determinism, and `tests/test_log_fix_*.py` construct the synthetic unknown `"BUG-" + "999"` string so `ARCH-009` does not flag it.
+3. **`crc/core/age.py` split and `MAX_AGE`:**
+   - Split `crc/core/age.py` (284 -> 120 lines) into `crc/core/age_spec.py` (55 lines) and `crc/core/age_tags.py` (145 lines); all three are well under 250 lines.
+   - `crc/core/age.py` re-exports all public symbols (`__all__`), preserving `from crc.core import age as core_age`, `from crc.core.age import ...`, `crc.core` re-exports, `crc.service.Service` delegation, and `core_age` mock targets. `MAX_AGE` remains read at call time in `crc/core/age.py` with identical behaviour and is listed under `## Wave B checks`.
+4. **Fast feedback & runtimes:**
+   - `requirements-dev.txt` pins `pytest-xdist==3.8.0`.
+   - `Makefile` defines `make check`, `make check-fast`, `make lint`, `make test-file F=...`, and `make raise-test-floor`.
+   - Runtimes on this VM: `make check-fast` runs 9,368 tests in **20.3s** total (19.3s pytest, under the 30s target); `make check` runs all 43,070 tests + lint + ARCH-008 in **1m00.8s** (down from ~2m58s sequential).
+
+### Gates
+
+Ran `pip install -r requirements.txt -r requirements-dev.txt && make check`:
+- `ruff check .`: All checks passed!
+- `mypy`: Success: no issues found in 262 source files
+- `lint-imports`: Contracts: 5 kept, 0 broken
+- `pytest -q -n auto`: **43070 passed in 53.92s** (43010 at `cea0a8a`, +60)
+- `python -m tests.archtest.test_count check`: `ARCH-008: 43070 tests, floor 43070`
+
+VERDICT: APPROVE
+

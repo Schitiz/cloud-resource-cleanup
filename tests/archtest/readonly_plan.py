@@ -96,6 +96,14 @@ _Func = ast.FunctionDef | ast.AsyncFunctionDef
 _Hit = tuple[Path, int, str, str]
 
 
+def _dotted(node: ast.expr) -> str | None:
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    return ".".join(reversed([*parts, node.id])) if isinstance(node, ast.Name) else None
+
+
 class _Module:
     """A parsed module with its top-level functions and the sibling modules it imports."""
 
@@ -114,8 +122,8 @@ class _Module:
             elif isinstance(node, ast.Import):
                 for alias in node.names:
                     target = self._sibling(alias.name.split("."), 0)
-                    if target is not None and alias.asname:
-                        self.module_imports[alias.asname] = target
+                    if target is not None:
+                        self.module_imports[alias.asname or alias.name] = target
 
     def _sibling(self, parts: list[str], level: int) -> Path | None:
         """The `.py` file of a module in this module's own package directory, if any."""
@@ -163,37 +171,69 @@ def _callee(
         sibling = _load(cache, path, module.root)
         func = sibling.funcs.get(attr)
         return (sibling, func) if func is not None else None
-    if (
-        isinstance(target, ast.Attribute)
-        and isinstance(target.value, ast.Name)
-        and target.value.id in module.module_imports
-    ):
-        sibling = _load(cache, module.module_imports[target.value.id], module.root)
-        func = sibling.funcs.get(target.attr)
-        return (sibling, func) if func is not None else None
+    if isinstance(target, ast.Attribute):
+        mod = _dotted(target.value)
+        if mod is not None and mod in module.module_imports:
+            sibling = _load(cache, module.module_imports[mod], module.root)
+            func = sibling.funcs.get(target.attr)
+            return (sibling, func) if func is not None else None
     return None
+
+
+def _local_functions(
+    func: _Func,
+    module_funcs: dict[str, _Func],
+    class_methods: dict[str, _Func],
+) -> list[_Func]:
+    """`func` and every same-module function or `self`/`cls` method it reaches transitively."""
+    reached: list[_Func] = []
+    seen: set[str] = set()
+
+    def visit(current: _Func, kind: str) -> None:
+        key = f"{kind}:{current.name}"
+        if key in seen:
+            return
+        seen.add(key)
+        reached.append(current)
+        for call in _calls(current):
+            target = call.func
+            if isinstance(target, ast.Attribute):
+                owner = target.value
+                if isinstance(owner, ast.Name) and owner.id in {"self", "cls"}:
+                    callee = class_methods.get(target.attr)
+                    if callee is not None:
+                        visit(callee, "m")
+            elif isinstance(target, ast.Name):
+                callee = module_funcs.get(target.id)
+                if callee is not None:
+                    visit(callee, "f")
+
+    visit(func, "m" if func.name in class_methods else "f")
+    return reached
 
 
 def _scan_siblings(
     func: _Func,
     module: _Module,
+    class_methods: dict[str, _Func],
     cache: dict[Path, _Module],
     seen: set[tuple[Path, str]],
 ) -> list[_Hit]:
     """Mutating calls in sibling-module functions reachable from `func`."""
     hits: list[_Hit] = []
-    for call in _calls(func):
-        resolved = _callee(call, module, cache)
-        if resolved is None:
-            continue
-        sibling, callee = resolved
-        key = (sibling.path, callee.name)
-        if key in seen:
-            continue
-        seen.add(key)
-        for line, attr, name in _scan(callee, sibling.funcs, {}, {f"f:{callee.name}"}):
-            hits.append((sibling.path, line, attr, name))
-        hits.extend(_scan_siblings(callee, sibling, cache, seen))
+    for local_fn in _local_functions(func, module.funcs, class_methods):
+        for call in _calls(local_fn):
+            resolved = _callee(call, module, cache)
+            if resolved is None:
+                continue
+            sibling, callee = resolved
+            key = (sibling.path, callee.name)
+            if key in seen:
+                continue
+            seen.add(key)
+            for line, attr, name in _scan(callee, sibling.funcs, {}, {f"f:{callee.name}"}):
+                hits.append((sibling.path, line, attr, name))
+            hits.extend(_scan_siblings(callee, sibling, {}, cache, seen))
     return hits
 
 
@@ -201,7 +241,7 @@ def find_plan_mutations_in_siblings(path: Path, root: Path) -> list[_Hit]:
     """Mutating calls in sibling modules reachable from a `plan` method of `path`.
 
     Follows `from .x import f`, `from . import x` (`x.f()`), the absolute forms of both that
-    name a module of the same package directory, and `import pkg.x as x`. Calls inside `path`
+    name a module of the same package directory, and `import pkg.x [as x]`. Calls inside `path`
     itself are the job of `find_plan_mutations`.
     """
     module = _Module(path, root)
@@ -211,18 +251,7 @@ def find_plan_mutations_in_siblings(path: Path, root: Path) -> list[_Hit]:
         methods = {n.name: n for n in cls.body if isinstance(n, _FUNCTIONS)}
         plan = methods.get("plan")
         if plan is not None:
-            hits.extend(_scan_siblings(plan, module, cache, set()))
-            for call in _calls(plan):
-                target = call.func
-                is_self_call = (
-                    isinstance(target, ast.Attribute)
-                    and isinstance(target.value, ast.Name)
-                    and target.value.id in {"self", "cls"}
-                    and target.attr in methods
-                )
-                if is_self_call:
-                    assert isinstance(target, ast.Attribute)
-                    hits.extend(_scan_siblings(methods[target.attr], module, cache, set()))
+            hits.extend(_scan_siblings(plan, module, methods, cache, set()))
     return sorted(set(hits))
 
 

@@ -7,7 +7,7 @@ from tests.archtest._common import SKIP_DIRS, relpath, violation
 
 RULE = "ARCH-009"
 BUGS_PATH = "docs/refactor/BUGS.md"
-_REF = re.compile(r"\bBUG-(\d{3,})\b")
+_REF = re.compile(r"\bBUG-(\d+)\b")
 _ROW = re.compile(r"^\|\s*(BUG-\d{3,})\s*\|", re.MULTILINE)
 _REMEDIATION = (
     "Bug IDs are never invented in code. Look the bug up in docs/refactor/BUGS.md and fix the "

@@ -121,6 +121,15 @@ SIBLING_CASES = {
         "    def plan(self):\n        self._go()\n",
         HELPER,
     ),
+    "via-local-func": (
+        "from .helper import wipe\n\n\ndef _local(c):\n    wipe(c)\n\n\n"
+        "class C:\n    def plan(self):\n        _local(self.c)\n",
+        HELPER,
+    ),
+    "import-plain": (
+        _plan_module("import crc.aws.helper", "crc.aws.helper.wipe(self.c)"),
+        HELPER,
+    ),
     "transitive": (_plan_module("from .chain import outer", "outer(self.c)"), HELPER),
 }
 
