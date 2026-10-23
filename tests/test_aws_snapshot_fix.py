@@ -307,6 +307,13 @@ def test_malformed_tags_on_a_young_snapshot_are_read_and_kept(
     ]
 
 
+@pytest.mark.parametrize("tags", [{"a": "b"}, ["x"]], ids=["dict", "non-mapping-entry"])
+def test_non_list_tags_on_a_young_snapshot_are_not_read_as_on_main(tags: Any) -> None:
+    clients = {"r1": Ec2([snap("y", 1, Tags=tags), snap("a")])}
+    plan = cleaner_for(clients, {"keep": []}).plan(_ctx())
+    assert [c.id for c in plan.candidates] == ["a"]
+
+
 def test_protected_snapshot_with_a_malformed_sibling_tag_is_kept() -> None:
     tags = [{"Key": "autoclean"}, {"Value": "x"}, {"Key": "auto_clean", "Value": "false"}]
     clients = {"r1": Ec2([snap("a", Tags=tags)])}

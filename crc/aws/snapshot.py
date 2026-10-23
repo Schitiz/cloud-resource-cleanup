@@ -104,12 +104,16 @@ def _skip_failed_region(region: str, error: BaseException) -> None:
     logger.current().fail(region, "-", error)
 
 
+def _is_tag_list(tags: Any) -> bool:
+    return isinstance(tags, list) and all(isinstance(t, Mapping) for t in tags)
+
+
 def _read_tags(tags: Any) -> dict[str, Any]:
     """BUG-144: tag map of a list of tag entries; an entry without `Key` is ignored and a
     missing `Value` reads as ''. Non-list or non-mapping `tags` still raise as on main."""
     if not tags:
         return {}
-    if not isinstance(tags, list) or not all(isinstance(t, Mapping) for t in tags):
+    if not _is_tag_list(tags):
         return {t["Key"]: t["Value"] for t in tags}
     tag_map: dict[str, Any] = {}
     for entry in tags:
@@ -266,7 +270,9 @@ class SnapshotCleaner:
         snap_id = snap["SnapshotId"]
         start_time = snap["StartTime"]
         tags = snap.get("Tags")
-        tag_map = _read_tags(tags) if self._exception_tags else None
+        # Tags that are not a list of mappings are read only after the age gate, so they
+        # raise for old snapshots only, as on main.
+        tag_map = _read_tags(tags) if self._exception_tags and _is_tag_list(tags) else None
         if not policy.snapshot_old_enough(start_time, now, self._age_days):
             logger.current().skip("too_young")
             return Skipped(id=snap_id, reason="newer than age_days")
