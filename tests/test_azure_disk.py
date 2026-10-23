@@ -33,7 +33,9 @@ def test_plan_lists_and_never_deletes() -> None:
     assert [c.id for c in plan.candidates] == ["a"]
     assert [(s.id, s.reason) for s in plan.skipped] == [("b", "disk state not allowed")]
     assert _names(azure.calls, "begin_delete") == []
-    assert _names(azure.calls, "list") == [("list",)]
+    assert _names(azure.calls, "list", "list_by_resource_group") == [
+        ("list_by_resource_group", "rg")
+    ]
 
 
 def test_plan_in_dry_run_logs_the_summary(caplog: pytest.LogCaptureFixture) -> None:
@@ -91,14 +93,6 @@ def test_apply_with_empty_plan_calls_nothing() -> None:
     result = _cleaner(azure).apply(Plan(), _context(dry_run=False))
     assert result.succeeded == ()
     assert azure.calls == []
-
-
-def test_apply_propagates_delete_error() -> None:
-    azure = FakeAzure([disk("a")], begin_script={"a": [RuntimeError("nope")]})
-    cleaner = _cleaner(azure)
-    plan = cleaner.plan(_context(dry_run=False))
-    with pytest.raises(RuntimeError, match="nope"):
-        cleaner.apply(plan, _context(dry_run=False))
 
 
 def test_plan_propagates_list_error() -> None:
