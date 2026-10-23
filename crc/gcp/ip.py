@@ -12,10 +12,21 @@ import logging
 from collections.abc import Iterable, Sequence
 from typing import Protocol
 
+from google.api_core.exceptions import GoogleAPIError
+from google.auth.exceptions import GoogleAuthError
 from google.cloud import compute_v1
 
 from crc.core import logger, policy
-from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext, Skipped
+from crc.core.cleaner import (
+    Candidate,
+    Cleaner,
+    Failure,
+    Operation,
+    Plan,
+    Result,
+    RunContext,
+    Skipped,
+)
 from crc.core.registry import register
 from crc.gcp._scan import ZoneScan
 from crc.service import Service
@@ -37,6 +48,15 @@ class AddressView(Protocol):
         ...
 
 
+class OperationView(Protocol):
+    """The long-running delete operation GCP returns; `result()` blocks until it is done and
+    raises when it failed."""
+
+    def result(self) -> object:
+        """Wait for the operation to finish."""
+        ...
+
+
 class GcpIpClient(Protocol):
     """The three Compute Engine calls this cleaner uses."""
 
@@ -48,8 +68,8 @@ class GcpIpClient(Protocol):
         """Addresses of one region."""
         ...
 
-    def delete_address(self, project_id: str, region: str, address: str) -> object:
-        """Delete one address of a region."""
+    def delete_address(self, project_id: str, region: str, address: str) -> OperationView:
+        """Start the deletion of one address of a region."""
         ...
 
 
@@ -66,12 +86,13 @@ class ComputeIpClient:
         )
         return addresses
 
-    def delete_address(self, project_id: str, region: str, address: str) -> object:
-        return compute_v1.AddressesClient().delete(
+    def delete_address(self, project_id: str, region: str, address: str) -> OperationView:
+        operation: OperationView = compute_v1.AddressesClient().delete(
             project=project_id,
             region=region,
             address=address,
         )
+        return operation
 
 
 def _log_summary(deleted: Sequence[str], *, dry_run: bool) -> None:
@@ -85,8 +106,9 @@ def _log_summary(deleted: Sequence[str], *, dry_run: bool) -> None:
 
 class IpCleaner:
     """Deletes RESERVED addresses whose name contains a `filter_regex` entry (any; empty
-    matches all) unless the inverted exception test excludes them (BUG-001). Applies to every
-    region of the project."""
+    matches all) unless it contains an `exception_regex` entry (any; BUG-001 fixed). Applies
+    to every region of the project. A failed delete is recorded and the next address goes on
+    (BUG-063); an address counts as deleted only once its operation finished (BUG-064)."""
 
     cloud = "gcp"
     kind = "ip"
@@ -104,6 +126,7 @@ class IpCleaner:
         self._filter_regex = filter_regex
         self._exception_regex = exception_regex
         self._state = state
+        self.failures: list[Failure] = []
 
     def supports(self, operation: Operation) -> bool:
         return operation is Operation.DELETE
@@ -132,14 +155,15 @@ class IpCleaner:
         for candidate in plan.candidates:
             by_region.setdefault(candidate.region, []).append(candidate)
         deleted: list[str] = []
+        self.failures = []
         for region, items in by_region.items():
             deleted.extend(self.apply_region(region, items, dry_run=context.dry_run))
         _log_summary(deleted, dry_run=context.dry_run)
-        return Result(succeeded=tuple(deleted))
+        return Result(succeeded=tuple(deleted), failed=tuple(self.failures))
 
     def plan_region(self, region: str) -> Plan:
         """List one region and decide, in the order of `main`: log the address, read its
-        name, skip other states, then the filter and the (inverted) exception test."""
+        name, skip other states, then the filter and the exception test."""
         candidates: list[Candidate] = []
         skipped: list[Skipped] = []
         scan = ZoneScan(region)
@@ -168,28 +192,36 @@ class IpCleaner:
     def apply_region(
         self, region: str, candidates: Sequence[Candidate], *, dry_run: bool
     ) -> list[str]:
-        """Delete `candidates` one by one and return their names (also in a dry run, where
-        nothing is deleted). The caller records the names only once the whole region is done."""
+        """Delete `candidates` one by one and return the names deleted (all of them in a dry
+        run, where nothing is deleted). A failed address is recorded in `failures` and skipped."""
+        deleted: list[str] = []
         for candidate in candidates:
-            if not dry_run:
-                self._delete(region, candidate)
+            if not dry_run and not self._delete(region, candidate):
+                continue
             kind = "would_delete" if dry_run else "deleted"
             logger.current().action(kind, region, candidate.id, candidate.name)
-        return [candidate.id for candidate in candidates]
+            deleted.append(candidate.id)
+        return deleted
 
-    def _delete(self, region: str, candidate: Candidate) -> None:
+    def _delete(self, region: str, candidate: Candidate) -> bool:
         try:
-            self._client.delete_address(self._project_id, region, candidate.id)
+            self._client.delete_address(self._project_id, region, candidate.id).result()
+        except (GoogleAPIError, GoogleAuthError, OSError) as e:
+            logging.error(f"Error occurred while deleting IP address {candidate.id}: {e}")
+            logger.current().fail(region, candidate.id, e)
+            self.failures.append(Failure(id=candidate.id, error=str(e)))
+            return False
         except Exception as e:
             logger.current().fail(region, candidate.id, e)
             raise
         logging.info(f"Deleting IP address: {candidate.id}")
+        return True
 
     def _matches_filter(self, name: str) -> bool:
         return policy.filter_substring_matches(self._filter_regex or (), name)
 
     def _excluded(self, name: str) -> bool:
-        return policy.gcp_ip_exception_excludes(self._exception_regex or (), name)
+        return any(pattern in name for pattern in self._exception_regex or ())
 
 
 @register("gcp", "ip")
@@ -209,8 +241,8 @@ def build_ip_cleaner(context: RunContext) -> Cleaner:
 
 class IP(Service):
     """Legacy entry point used by `crc.py`: deletes RESERVED GCP addresses whose name contains
-    a `filter_regex` entry and is not excluded by the (inverted) `exception_regex`. In dry run
-    it only lists them.
+    a `filter_regex` entry and does not contain an `exception_regex` entry. In dry run it only
+    lists them.
 
     Attributes: `default_state` ("RESERVED"), `deleted_ips` (names deleted, or listed in a dry
     run), `dry_run`, `project_id`, `filter_regex`, `exception_regex`. `get_deleted` and `count`

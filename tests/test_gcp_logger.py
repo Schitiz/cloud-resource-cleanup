@@ -256,7 +256,7 @@ def test_ip_delete_error_is_recorded_and_still_raises(caplog: pytest.LogCaptureF
     caplog.set_level(logging.INFO)
     client = ips.FakeClient({"r": [ips.addr("a")]})
 
-    def boom(project_id: str, region: str, address: str) -> object:
+    def boom(project_id: str, region: str, address: str) -> ips.FakeOperation:
         raise RuntimeError("quota")
 
     client.delete_address = boom  # type: ignore[method-assign]

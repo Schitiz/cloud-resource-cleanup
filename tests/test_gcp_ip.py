@@ -25,6 +25,19 @@ def addr(name: str, status: str = "RESERVED") -> Any:
     return types.SimpleNamespace(name=name, status=status)
 
 
+class FakeOperation:
+    def __init__(self, log: list[tuple[str, ...]], address: str, error: Exception | None) -> None:
+        self.log = log
+        self.address = address
+        self.error = error
+
+    def result(self) -> object:
+        self.log.append(("result", self.address))
+        if self.error is not None:
+            raise self.error
+        return None
+
+
 class FakeClient:
     def __init__(self, regions: dict[str, list[Any]]) -> None:
         self.regions = regions
@@ -39,9 +52,9 @@ class FakeClient:
         items: list[AddressView] = self.regions[region]
         return items
 
-    def delete_address(self, project_id: str, region: str, address: str) -> object:
+    def delete_address(self, project_id: str, region: str, address: str) -> FakeOperation:
         self.calls.append(("delete_address", project_id, region, address))
-        return object()
+        return FakeOperation(self.calls, address, None)
 
     def names(self) -> list[str]:
         return [call[0] for call in self.calls]
@@ -90,10 +103,10 @@ def test_plan_outside_dry_run_logs_no_summary(caplog: pytest.LogCaptureFixture) 
         (["ip-"], None, ["ip-a"]),
         (["ip-", "keep"], None, ["ip-a", "keep-b"]),
         (["zzz"], None, []),
-        (None, ["keep"], ["keep-b"]),
-        (None, ["zzz"], []),
-        (["ip-"], ["ip-a"], ["ip-a"]),
-        (["keep"], ["ip-"], []),
+        (None, ["keep"], ["ip-a"]),
+        (None, ["zzz"], ["ip-a", "keep-b"]),
+        (["ip-"], ["ip-a"], []),
+        (["keep"], ["ip-"], ["keep-b"]),
     ],
 )
 def test_plan_filters(
@@ -109,9 +122,9 @@ def test_plan_records_skip_reasons() -> None:
     plan = cleaner(client, ["b", "c"], ["c"]).plan(ctx())
     assert [(s.id, s.reason) for s in plan.skipped] == [
         ("a", "status is not RESERVED"),
-        ("b", "exception_regex"),
+        ("c", "exception_regex"),
     ]
-    assert [c.id for c in plan.candidates] == ["c"]
+    assert [c.id for c in plan.candidates] == ["b"]
 
 
 def test_plan_propagates_listing_errors() -> None:
@@ -134,8 +147,11 @@ def test_apply_deletes_in_plan_order_and_logs(caplog: pytest.LogCaptureFixture) 
     assert result.succeeded == ("a", "b", "c")
     assert client.calls == [
         ("delete_address", PROJECT, "r1", "a"),
+        ("result", "a"),
         ("delete_address", PROJECT, "r1", "b"),
+        ("result", "b"),
         ("delete_address", PROJECT, "r2", "c"),
+        ("result", "c"),
     ]
     assert [r.getMessage() for r in caplog.records] == [
         "Deleting IP address: a",
@@ -151,7 +167,7 @@ def test_apply_acts_only_on_the_plan() -> None:
     plan = Plan(candidates=(Candidate(id="b", name="b", region="r"),))
     result = cleaner(client).apply(plan, ctx())
     assert result.succeeded == ("b",)
-    assert client.calls == [("delete_address", PROJECT, "r", "b")]
+    assert client.calls == [("delete_address", PROJECT, "r", "b"), ("result", "b")]
 
 
 def test_apply_in_dry_run_deletes_nothing() -> None:
@@ -161,9 +177,11 @@ def test_apply_in_dry_run_deletes_nothing() -> None:
     assert client.calls == []
 
 
-def test_apply_error_propagates_without_summary(caplog: pytest.LogCaptureFixture) -> None:
+def test_apply_unexpected_error_propagates_without_summary(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     class Failing(FakeClient):
-        def delete_address(self, project_id: str, region: str, address: str) -> object:
+        def delete_address(self, project_id: str, region: str, address: str) -> FakeOperation:
             raise RuntimeError("quota")
 
     caplog.set_level(logging.WARNING)

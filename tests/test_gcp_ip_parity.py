@@ -32,6 +32,15 @@ BUGS = {"BUG-358"}
 THREE = 3
 
 
+@dataclass(frozen=True)
+class Fixed:
+    """The new outcome of a case whose inputs trigger an in-scope bug (BEHAVIOUR_FIX.md 3)."""
+
+    bug: str
+    deleted: list[str]
+    deletes: list[tuple[str, str]]
+
+
 def addr(name: Any, status: Any = "RESERVED") -> Any:
     return types.SimpleNamespace(name=name, status=status)
 
@@ -180,6 +189,44 @@ def _cases() -> list[Case]:
 
 CASES = _cases()
 
+_EAST = "us-east1"
+_WEST = "us-west1"
+DIVERGING: dict[str, Fixed] = {
+    "exception-inverted-keeps-matching": Fixed(
+        "BUG-001", ["ip-a", "ip-b"], [(_EAST, "ip-a"), (_EAST, "ip-b")]
+    ),
+    "exception-inverted-no-match-excludes-all": Fixed(
+        "BUG-001",
+        ["ip-a", "ip-b", "keep-c"],
+        [(_EAST, "ip-a"), (_EAST, "ip-b"), (_EAST, "keep-c")],
+    ),
+    "exception-any-of-many": Fixed(
+        "BUG-001", ["ip-b", "keep-c"], [(_EAST, "ip-b"), (_EAST, "keep-c")]
+    ),
+    "filter-and-exception": Fixed("BUG-001", ["ip-a"], [(_EAST, "ip-a")]),
+    "filter-and-exception-disjoint": Fixed("BUG-001", ["keep-c"], [(_EAST, "keep-c")]),
+    "exception-inverted-dry-run": Fixed("BUG-001", ["ip-a", "ip-b"], []),
+    "delete-error-first": Fixed(
+        "BUG-063",
+        ["ip-b", "keep-c"],
+        [(_EAST, "ip-a"), (_EAST, "ip-b"), (_EAST, "keep-c")],
+    ),
+    "delete-error-mid-region-loses-record": Fixed(
+        "BUG-063",
+        ["ip-a", "keep-c"],
+        [(_EAST, "ip-a"), (_EAST, "ip-b"), (_EAST, "keep-c")],
+    ),
+    "delete-error-second-region-keeps-first": Fixed(
+        "BUG-063",
+        ["ip-a", "ip-b", "keep-d"],
+        [(_EAST, "ip-a"), (_EAST, "ip-b"), (_WEST, "ip-c"), (_WEST, "keep-d")],
+    ),
+}
+
+
+def _deletes(calls: Sequence[tuple[Any, ...]]) -> list[tuple[str, str]]:
+    return [(c[2], c[3]) for c in calls if c[0] == "addresses.delete"]
+
 
 class FakeRegionsClient:
     def __init__(self, gcp: "FakeGcp") -> None:
@@ -217,7 +264,7 @@ class FakeAddressesClient:
         error = self.gcp.case.delete_errors.get((region, address))
         if error is not None:
             raise error
-        return types.SimpleNamespace(name="operation")
+        return types.SimpleNamespace(name="operation", result=lambda: None)
 
 
 class FakeGcp:
@@ -309,6 +356,19 @@ def test_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run(_new, case, monkeypatch, caplog, capsys)
+    if case.id in DIVERGING:
+        fixed = DIVERGING[case.id]
+        assert (new.deleted, _deletes(new.calls), new.error) != (
+            old.deleted,
+            _deletes(old.calls),
+            old.error,
+        ), f"{fixed.bug}: oracle no longer shows the bug"
+        assert new.error is None
+        assert new.deleted == fixed.deleted
+        assert new.count == len(fixed.deleted)
+        assert _deletes(new.calls) == fixed.deletes
+        assert new.stdout == old.stdout
+        return
     assert new.calls == old.calls
     assert new.error == old.error
     assert new.deleted == old.deleted
@@ -362,6 +422,13 @@ def test_cleaner_protocol_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run_cleaner(case, monkeypatch, caplog, capsys)
+    if case.id in DIVERGING:
+        fixed = DIVERGING[case.id]
+        assert new.error is None
+        assert new.deleted == fixed.deleted
+        assert _deletes(new.calls) == fixed.deletes
+        assert new.stdout == old.stdout
+        return
     old_deletes = _only(old.calls, "addresses.delete")
     new_deletes = _only(new.calls, "addresses.delete")
     if new.error is not None:
@@ -398,8 +465,6 @@ def _find(case_id: str) -> Case:
 
 
 QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
-    ("exception-inverted-keeps-matching", lambda o: o.deleted == ["keep-c"]),
-    ("exception-inverted-no-match-excludes-all", lambda o: o.deleted == []),
     ("exception-empty-list-excludes-none", lambda o: o.deleted == ["ip-a", "ip-b", "keep-c"]),
     ("exception-none-excludes-none", lambda o: o.deleted == ["ip-a", "ip-b", "keep-c"]),
     ("filter-is-substring-not-regex", lambda o: o.deleted == ["ip.a"]),
@@ -436,14 +501,6 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
         "addresses-iteration-error-after-delete-pending",
         lambda o: o.error is not None and _only(o.calls, "addresses.delete") == [],
     ),
-    (
-        "delete-error-mid-region-loses-record",
-        lambda o: o.error is not None and o.deleted == [],
-    ),
-    (
-        "delete-error-second-region-keeps-first",
-        lambda o: o.error is not None and o.deleted == ["ip-a", "ip-b"],
-    ),
     ("delete-error-ignored-in-dry-run", lambda o: o.error is None and len(o.deleted) == THREE),
     ("delete-error-region-without-matches-not-hit", lambda o: o.error is None),
 ]
@@ -463,6 +520,49 @@ def test_quirk_is_preserved(
     new = _run(_new, case, monkeypatch, caplog, capsys)
     assert check(old), "oracle no longer shows the quirk"
     assert check(new)
+
+
+FIXED_QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool], Callable[[Outcome], bool]]] = [
+    (
+        "exception-inverted-keeps-matching",
+        lambda o: o.deleted == ["keep-c"],
+        lambda o: o.deleted == ["ip-a", "ip-b"],
+    ),
+    (
+        "exception-inverted-no-match-excludes-all",
+        lambda o: o.deleted == [],
+        lambda o: o.deleted == ["ip-a", "ip-b", "keep-c"],
+    ),
+    (
+        "delete-error-mid-region-loses-record",
+        lambda o: o.error is not None and o.deleted == [],
+        lambda o: o.error is None and o.deleted == ["ip-a", "keep-c"],
+    ),
+    (
+        "delete-error-second-region-keeps-first",
+        lambda o: o.error is not None and o.deleted == ["ip-a", "ip-b"],
+        lambda o: o.error is None and o.deleted == ["ip-a", "ip-b", "keep-d"],
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("case_id", "old_check", "new_check"), FIXED_QUIRKS, ids=[q[0] for q in FIXED_QUIRKS]
+)
+def test_fixed_quirk_diverges_from_main(
+    case_id: str,
+    old_check: Callable[[Outcome], bool],
+    new_check: Callable[[Outcome], bool],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    case = _find(case_id)
+    old = _run(_legacy, case, monkeypatch, caplog, capsys)
+    new = _run(_new, case, monkeypatch, caplog, capsys)
+    assert case_id in DIVERGING
+    assert old_check(old), "oracle no longer shows the bug"
+    assert new_check(new)
 
 
 def test_second_delete_call_accumulates_like_main(
