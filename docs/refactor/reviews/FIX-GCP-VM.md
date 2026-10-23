@@ -59,3 +59,30 @@ errors. With a clean run the logs are the same as before (no extra log lines on 
 - `crc/gcp/vm.py` `VM.__init__` / `ComputeVmClient._compute()`: the discovery service is closed
   by the `with` in `list_zones()` and then reused for delete/stop/poll (exists on main: yes,
   `crc.py:1429` shape). It works because googleapiclient reopens connections; not changed.
+
+## Round 1 (Argon)
+
+### Findings
+
+None (no BLOCKING or NIT issues).
+
+- **(1) Fixed bugs and tests**:
+  - `BUG-185`: `VmCleaner._act()` / `_wait_operation()` (`crc/gcp/vm.py:208-236`) and `ComputeVmClient.get_zone_operation()` (`crc/gcp/vm_client.py:60-62`, `104-108`) poll `zoneOperations().get()` every `poll_sec` (default 5.0 s) up to `wait_sec` (default 180.0 s) after `delete_instance` or `stop_instance` before appending to `recorded` and emitting the `ACTION` run-log line. Missing operation names, poll exceptions, operation errors (`state.get("error")`), and timeouts raise inside `apply_instance()`'s `try` block, logging `Error occurred while <op> instance <id>: ...`, recording `logger.current().fail(zone, id, e)`, and leaving the instance unrecorded. Covered by `tests/test_gcp_vm_fix.py` and `tests/test_gcp_vm_parity.py`.
+  - `BUG-186`: `VmCleaner.plan_zone()` and `_evaluate()` (`crc/gcp/vm.py:130-180`) isolate per-instance evaluation errors (logging `Error occurred while evaluating instance <name>: ...`, calling `logger.current().fail(zone, name, e)`, and keeping the instance) and per-zone instance listing / iteration errors (logging `Zone <zone>: failed listing GCP instances: ...`, calling `region_skipped(zone, e)` and `fail(zone, "-", e)`, skipping the `REGION` line, and continuing with the next zone). Project-level `zones().list()` still raises fail-closed before any mutation. Covered by `tests/test_gcp_vm_fix.py` and `FIX_186` / `EXTRA_LOGS` in `tests/test_gcp_vm_parity.py`.
+- **(2) Direction rule & parity**: Never deletes, stops, or records more than before. `tests/legacy/gcp_vm.txt` is untouched. All diverging parity cases in `tests/test_gcp_vm_parity.py` are explicitly gated on `BUG-185` / `BUG-186` (`FIX_186`) and assert exact calls, results, counts, and logs; all non-diverging cases assert full equality with the oracle.
+- **(3) Production commands**: All six Jenkins commands in the task notes (including the `-d --notags` command without `--age`, since `BUG-183` is out of scope) retain identical CLI flags and candidate selection.
+- **(4) Fail-closed paths**: Missing `project_id`, `zones().list()` errors, and per-instance evaluation errors fail closed before any SDK mutation.
+- **(5) Protected files**: No edits to locked safety tests, `tests/archtest/safety_lock.json`, `docs/refactor/PLAN.md`, `docs/refactor/STATUS.md`, `docs/refactor/BUGS.md`, or `CLEANUP_SAFETY.md`.
+- **(6) README sync (ARCH-002)**: `crc/gcp/README.md` Public API, module list (`vm_client.py`), and Safety Invariants are updated for `BUG-185` and `BUG-186`.
+- **(7) Owner decisions**: Documented under `## Owner decision` above.
+
+### Gates
+
+- `ruff check`: pass
+- `ruff format --check`: pass
+- `mypy`: pass (`Success: no issues found in 219 source files`)
+- `lint-imports`: pass (`8 contracts kept, 0 broken`)
+- `pytest`: pass (`42462 passed`)
+
+VERDICT: APPROVE
+
