@@ -29,3 +29,44 @@ Files changed:
 Test count (pytest -q): 42438 before (8073087, per `STATUS.md`), 42444 after (6 new tests in `tests/test_core_logger.py`, 0 removed; the CLI test was extended in place). `make check` green.
 
 Left: nothing.
+
+## Round 1 (Argon)
+
+Scope reviewed: `git diff 8073087..HEAD` on branch `logging/fix-header` (rung `LOG-FIX2`).
+
+### Checks
+
+1. **Behaviour & scope (`crc/core/logger.py`, `crc/utils.py`)**:
+   - `crc/core/logger.py` adds `logging_ready()` and `RunLog.release_header()` to emit the current run's held `RUN START` line (`BUG-364`). `logging_ready()` is a no-op when there is no current run, no held header, or an unattached run (`self.attached` check in `_emit_header`), and is idempotent when called multiple times. Existing fallbacks (`_log()` releasing on the next `RunLog` call once root handlers exist, and `finish()` forcing emission when still held) remain intact. No module-level `logging.*` call is used in `crc/core/logger.py`.
+   - `crc/utils.py` imports `from crc.core import logger as run_log` and calls `run_log.logging_ready()` in `init_logging` after the root handlers are added and noisy loggers are configured, right before the `Logging initialized with file: ...` line. `crc/core` imports nothing new (`lint-imports` keeps all 5 contracts).
+   - `crc/core/logger.py` adds `_one_line(text)` (`" | ".join(part for part in (p.strip() for p in text.splitlines()) if part)`) and applies it in `_error_text()` so `FAILED` lines are always a single line while preserving `error=<ExceptionType>: <message>` (`BUG-365`). Per-resource error lines in cloud cleaners are untouched.
+   - No change to what is selected, deleted, or stopped, SDK call order, Slack text, InfluxDB points, CLI flags, or exit codes.
+2. **Line formats & levels (`crc/core/logger.py`, `docs/refactor/LOGGING.md`)**:
+   - `RUN START`, `REGION`, `ACTION`, `SKIPPED`, `ERRORS`, `FAILED`, and `RESULT` formats, key names, key order, and levels match `docs/refactor/LOGGING.md`.
+3. **Parity & regression tests (`tests/test_cli_logging_init.py`, `tests/test_core_logger.py`, `tests/test_crc_utils_parity.py`)**:
+   - All frozen oracles under `tests/legacy/` are untouched (`git diff 8073087..HEAD -- tests/legacy/` is empty), and no `expected_logs` rules were altered or loosened.
+   - `tests/test_cli_logging_init.py` logs `"cleaner own line"` immediately after `init_logging` (before any `RunLog` call) and asserts `RUN START` appears once, before `"cleaner own line"`, before `REGION`, and before `RESULT` both on stderr and in `crc.log`.
+   - `tests/test_core_logger.py` adds 6 unit tests covering `logging_ready()` (no current run, held header called twice, called after header already emitted, unattached run) and `FAILED` line formatting (multi-line exception and plain string messages collapsed with ` | `, single-line message unchanged).
+4. **Safety lock**:
+   - `tests/archtest/safety_lock.json` and all five hash-locked safety test files are untouched.
+5. **Docs & READMEs (`crc/core/README.md`, `docs/refactor/LOGGING.md`, `docs/refactor/BUGS.md`, `docs/refactor/PLAN.md`, `docs/refactor/STATUS.md`)**:
+   - `crc/core/README.md` documents `release_header` and `logging_ready()` under `## Public API` (ARCH-002).
+   - **Fixed in review**: moved `BUG-364` and `BUG-365` (`Risk = low`) in `docs/refactor/BUGS.md` from after `BUG-363` (`Risk = high`, where `LOG-FIX` review had moved `BUG-363`) to the end of the `low` risk group (after `BUG-362`) so `BUGS.md` stays strictly sorted by risk (`critical` 5, `high` 27, `medium` 62, `low` 271; 365 rows total) per Rule 4; added `BUG-364` and `BUG-365` to the `## Bugs` table in `docs/refactor/LOGGING.md`; updated `LOG-FIX2` state in `docs/refactor/STATUS.md`.
+
+### BLOCKING
+
+None.
+
+### NIT
+
+None. No issues in do-not-edit files (`AGENTS.md`, `ARCHITECTURE.md`, `CLEANUP_SAFETY.md`, `docs/refactor/PLAN.md`, `.cursor/**`, `tests/archtest/**`).
+
+### Gates & test count
+
+- `python3 -m ruff check .`: passed
+- `python3 -m mypy`: passed (228 source files)
+- `lint-imports`: passed (5 contracts kept, 0 broken)
+- `python3 -m pytest -q`: 42444 passed (42438 at `8073087`, +6 in `tests/test_core_logger.py`)
+
+VERDICT: APPROVE
+
