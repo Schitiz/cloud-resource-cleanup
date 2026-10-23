@@ -72,6 +72,7 @@ class Case:
     release_errors: Mapping[tuple[str, str], Exception] = field(default_factory=dict)
     regions_error: Exception | None = None
     fails_in_plan: bool = False
+    diverges: str | None = None
 
 
 ENV = tags({"env": "test", "owner": "qa"})
@@ -153,17 +154,24 @@ CASES = [
     ),
     Case("exception-none", {"us-west-2": [eip("1.1.1.1", ENV)]}, exception_tags=None),
     Case("exception-empty-tag-list", {"us-west-2": [eip("1.1.1.1", [])]}, exception_tags={"a": []}),
-    Case("notags-raises-type-error", {"us-west-2": [eip("1.1.1.1", ENV)]}, notags={"env": []}),
+    Case(
+        "notags-raises-type-error",
+        {"us-west-2": [eip("1.1.1.1", ENV)]},
+        notags={"env": []},
+        diverges="BUG-011",
+    ),
     Case(
         "notags-raises-in-first-region-skips-later-regions",
         {"us-west-2": [eip("1.1.1.1", ENV)], "eu-west-1": [eip("2.2.2.2", ENV)]},
         notags={"zzz": []},
+        diverges="BUG-011",
     ),
     Case(
         "notags-dry-run-raises",
         {"us-west-2": [eip("1.1.1.1", ENV)]},
         notags={"env": []},
         dry_run=True,
+        diverges="BUG-011",
     ),
     Case(
         "notags-exception-hit-on-first-tag-skips",
@@ -176,6 +184,7 @@ CASES = [
         {"us-west-2": [eip("1.1.1.1", ENV)]},
         notags={"env": []},
         exception_tags={"owner": []},
+        diverges="BUG-011",
     ),
     Case(
         "notags-empty-tag-list-never-skips", {"us-west-2": [eip("1.1.1.1", [])]}, notags={"a": []}
@@ -405,6 +414,28 @@ def debug_logs(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG)
 
 
+BUG_011_OLD = ("TypeError", "'bool' object is not iterable")
+
+# BUG-011: notags no longer raises; the new outcome of each diverging case (the oracle
+# still raises the TypeError, asserted in `_assert_diverges`).
+DIVERGED: Mapping[str, Callable[[Outcome], bool]] = {
+    "notags-raises-type-error": lambda o: o.error is None and o.deleted == [],
+    "notags-raises-in-first-region-skips-later-regions": lambda o: (
+        o.error is None and o.deleted == ["1.1.1.1", "2.2.2.2"]
+    ),
+    "notags-dry-run-raises": lambda o: o.error is None and o.deleted == [],
+    "notags-exception-hit-on-second-tag-raises": lambda o: o.error is None and o.deleted == [],
+}
+
+
+def _assert_diverges(case: Case, old: Outcome, new: Outcome) -> None:
+    assert case.diverges == "BUG-011"
+    assert old.error == BUG_011_OLD, "oracle no longer shows BUG-011"
+    assert new != old
+    assert DIVERGED[case.id](new)
+    assert not [c for c in new.calls if c[0] == "release_address" and case.dry_run]
+
+
 @pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
 def test_matches_main(
     case: Case,
@@ -415,6 +446,9 @@ def test_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run(_new, case, monkeypatch, caplog, capsys)
+    if case.diverges:
+        _assert_diverges(case, old, new)
+        return
     assert new.calls == old.calls
     assert new.error == old.error
     assert new.deleted == old.deleted
@@ -469,6 +503,10 @@ def test_cleaner_protocol_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run_cleaner(case, monkeypatch, caplog, capsys)
+    if case.diverges:
+        assert old.error == BUG_011_OLD
+        assert DIVERGED[case.id](new)
+        return
     assert new.error == old.error
     assert new.stdout == old.stdout
     old_releases = [c for c in old.calls if c[0] == "release_address"]
@@ -495,13 +533,7 @@ def _find(case_id: str) -> Case:
 
 
 QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
-    (
-        "notags-raises-type-error",
-        lambda o: o.error == ("TypeError", "'bool' object is not iterable"),
-    ),
-    ("notags-dry-run-raises", lambda o: o.error is not None and o.deleted == []),
     ("notags-exception-hit-on-first-tag-skips", lambda o: o.error is None and o.deleted == []),
-    ("notags-exception-hit-on-second-tag-raises", lambda o: o.error is not None),
     ("notags-empty-tag-list-never-skips", lambda o: o.deleted == ["1.1.1.1"]),
     ("notags-on-untagged-ignored", lambda o: o.deleted == []),
     ("untagged-skipped", lambda o: o.deleted == ["2.2.2.2"]),
@@ -544,6 +576,24 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
 ]
 
 
+@pytest.mark.parametrize(
+    "case_id", sorted(DIVERGED), ids=sorted(DIVERGED)
+)
+def test_bug_011_notags_no_longer_raises(
+    case_id: str,
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    case = _find(case_id)
+    old = _run(_legacy, case, monkeypatch, caplog, capsys)
+    new = _run(_new, case, monkeypatch, caplog, capsys)
+    assert old.error == BUG_011_OLD
+    assert new.error is None
+    assert DIVERGED[case_id](new)
+
+
 @pytest.mark.parametrize(("case_id", "check"), QUIRKS, ids=[q[0] for q in QUIRKS])
 def test_quirk_is_preserved(
     case_id: str,
@@ -579,6 +629,19 @@ SKIP_SPECS: Sequence[tuple[Any, Any]] = [
 ]
 
 
+# BUG-011: (SKIP_SPECS index, SKIP_TAGS index) -> new outcome where the oracle raises the
+# TypeError. notags {"env": []} keeps (skips) an address that has an `env` tag; a tag
+# without `Value` is read for notags and raises KeyError, as for AWS VMs.
+_BUG_011_SKIP: Mapping[tuple[int, int], tuple[str, Any]] = {
+    (5, 0): ("ok", True),
+    (5, 2): ("ok", True),
+    (5, 3): ("ok", True),
+    (5, 5): ("KeyError", "'Value'"),
+    (6, 3): ("ok", True),
+    (6, 5): ("KeyError", "'Value'"),
+}
+
+
 def _skip_outcome(obj: Any, tag_list: Any) -> tuple[str, Any]:
     try:
         return ("ok", obj._should_skip_instance(tag_list))
@@ -595,7 +658,13 @@ def test_should_skip_instance_matches_main(
     exception_tags, notags = spec
     old = _load_oracle().ElasticIPs(False, {}, exception_tags, notags)
     new = ElasticIPs(False, {}, exception_tags, notags)
-    assert _skip_outcome(new, tag_list) == _skip_outcome(old, tag_list)
+    old_outcome = _skip_outcome(old, tag_list)
+    new_outcome = _skip_outcome(new, tag_list)
+    if old_outcome == BUG_011_OLD:
+        assert notags
+        assert new_outcome == _BUG_011_SKIP[(SKIP_SPECS.index(spec), SKIP_TAGS.index(tag_list))]
+    else:
+        assert new_outcome == old_outcome
 
 
 def test_registered_factory_builds_cleaner() -> None:

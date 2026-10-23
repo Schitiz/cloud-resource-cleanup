@@ -142,10 +142,10 @@ def test_apply_skips_region_on_connectivity_error() -> None:
     assert result.succeeded == ("2.2.2.2",)
 
 
-def test_notags_raises_as_on_main() -> None:
-    aws = Aws({"r1": [tagged("1.1.1.1", a="b")]})
-    with pytest.raises(TypeError, match="'bool' object is not iterable"):
-        cleaner(aws, notags={"a": []}).plan(context())
+def test_notags_keeps_matching_address_bug_011() -> None:
+    aws = Aws({"r1": [tagged("1.1.1.1", a="b"), tagged("2.2.2.2", c="d")]})
+    plan = cleaner(aws, notags={"a": []}).plan(context())
+    assert [c.id for c in plan.candidates] == ["2.2.2.2"]
 
 
 @pytest.mark.parametrize(
