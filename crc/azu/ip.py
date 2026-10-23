@@ -127,7 +127,7 @@ class AzureIpCleaner:
 
         Raises `ValueError` before any SDK call when the resource group is empty.
         """
-        if not self._resource_group:
+        if not self._resource_group or not self._resource_group.strip():
             raise ValueError("Azure IP cleanup needs a non-empty resource group")
         return self._client_factory().public_ip_addresses.list(self._resource_group)
 

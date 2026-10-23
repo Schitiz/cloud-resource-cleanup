@@ -54,3 +54,61 @@ None.
   `tag-value-none-with-string-spec-raises`; exists on main: yes). Not fixed.
 - `crc/azu/ip.py` `decide()`: no age gate; an empty `filter_tags` selects every unused IP of the
   group, including untagged ones (SAF-011; exists on main: yes). Already recorded in the README.
+
+## Round 1 (Argon)
+
+Scope reviewed: `git diff 182466d..HEAD` (`crc/azu/ip.py`, `crc/azu/README.md`,
+`docs/refactor/reviews/FIX-AZU-IP.md`, `tests/helpers_azure_ip.py`, `tests/test_azure_ip.py`,
+`tests/test_azure_ip_fix.py`, `tests/test_azure_ip_parity.py`, `tests/test_azure_logger.py`)
+against `docs/refactor/BUGS.md` (`BUG-074`, `BUG-013`, `BUG-077`, `BUG-076`),
+`.cursor/skills/crc-python-refactor/BEHAVIOUR_FIX.md`, and `CLEANUP_SAFETY.md`.
+
+### Verification
+
+1. **Fixed bugs (`BUG-074`, `BUG-013`, `BUG-077`, `BUG-076`):**
+   - `BUG-074` (`crc/azu/ip.py:28-30`, `:125-133`): `PublicIpOperations` narrows to `list(resource_group_name)` and `AzureIpCleaner.list_ips()` calls `self._client_factory().public_ip_addresses.list(self._resource_group)` using `Base.resource_group` (never subscription-wide `list_all()`, never derived from `ip.id`). Verified against `182466d:crc/azu/ip.py` that all 16 bug-fix test cases in `tests/test_azure_ip_fix.py` fail on `182466d` and pass now.
+   - `BUG-013` / `BUG-077` (`crc/azu/ip.py:156-159`): `exception_match` and `notags_match` pass `ip.tags or {}` to `policy.should_skip_by_tags`, so `ip.tags is None` is treated as having no tags and never raises `TypeError` (including when `filter_tags` already excludes the IP or after earlier deletes).
+   - `BUG-076` (`crc/azu/ip.py:49-59`, `:164-165`): `_in_use(ip)` checks `ip_configuration`, `nat_gateway`, `linked_public_ip_address`, and `service_public_ip_address` via `getattr(ip, field, None) is not None` and skips with reason `"in_use"`.
+2. **Direction rule and parity (`tests/test_azure_ip_parity.py`):**
+   - `tests/legacy/azu_ip.txt` is untouched.
+   - Scoping to `list(resource_group)` and checking the three additional in-use fields only keeps more / lists fewer resources; fixing the `TypeError` on `ip.tags is None` and `getattr` default on `_IN_USE_FIELDS` only affects inputs that previously crashed the run.
+   - All non-diverging cases assert exact equality on `_scoped(old.calls, case)`, `error`, `deleted`, `count`, `logs`, and `stdout`.
+3. **Production Jenkins commands:**
+   - Both production `--filter_tags` invocations (`yba-crc-cleanup-notifications` and `db-stress-tests-cleanup-notifications`) run with unchanged CLI flags and select only matching unused IPs in `$RESOURCE_GROUP` while skipping untagged and in-use IPs.
+4. **Fail-closed paths:**
+   - `list_ips()` raises `ValueError("Azure IP cleanup needs a non-empty resource group")` when `self._resource_group` is empty or whitespace-only before calling `self._client_factory()`.
+5. **Protected and forbidden files:**
+   - `tests/archtest/safety_lock.json`, all five hash-locked safety test files, `docs/refactor/PLAN.md`, `docs/refactor/STATUS.md`, `docs/refactor/BUGS.md`, `CLEANUP_SAFETY.md`, `AGENTS.md`, `ARCHITECTURE.md`, `.cursor/**`, and `tests/archtest/**` are untouched.
+6. **README and `ARCH-002`:**
+   - `crc/azu/README.md` updates `PublicIpOperations` in `## Public API` and documents the `FIX-AZU-IP` invariants (`BUG-074`, `BUG-013`, `BUG-077`, `BUG-076`) in `## Safety Invariants`.
+7. **Unfixed bugs:**
+   - None in scope left unfixed; `## Owner decision` records `None.`
+
+### Fixed in this round
+
+- `crc/azu/ip.py:130`: tightened `if not self._resource_group or not self._resource_group.strip():` in `list_ips()` so whitespace-only resource group strings also fail closed with `ValueError` before any SDK call.
+- `tests/test_azure_ip_parity.py:71-95`, `:248-308`, `:373-387`, `:450-462`, `:506-596`:
+  - Added three parity cases (`in-use-nat-gateway-skipped`, `in-use-linked-ip-skipped`, `in-use-service-ip-skipped`) marked with `BUG-076` in `DIVERGING`, proving the oracle deletes IPs attached via `nat_gateway`, `linked_public_ip_address`, or `service_public_ip_address` while the fix keeps them.
+  - Tightened `test_matches_main` and `test_cleaner_protocol_matches_main` on `DIVERGING` cases to assert exact `old.deleted`, `new.calls` (`_expected_calls`), `new.logs` (`_expected_logs`), and `new.stdout == ""`.
+  - Added `FIXED_QUIRKS` and `test_fixed_quirk` so the six quirk checks from `AZ-1` that were removed from `QUIRKS` are replaced by checks naming `BUG-013`, `BUG-077`, and `BUG-076` and asserting both the oracle's buggy outcome and the fixed outcome (`BEHAVIOUR_FIX.md` section 3).
+- `tests/test_azure_ip_fix.py:105-110`, `:182-251`: added whitespace-only resource group fail-closed coverage and `test_production_jenkins_filter_tags_selection` covering both production Jenkins `--filter_tags` payloads.
+
+### Findings
+
+- **BLOCKING:** none.
+- **NIT:** none.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`:
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed! |
+| `mypy` (`crc`, `tests`) | Success: no issues found in 229 source files |
+| `lint-imports` | Contracts: 5 kept, 0 broken |
+| `pytest -q` | 42470 passed in 139.61s |
+
+Test count: 42444 on base (`182466d`), 42455 before review, 42470 after review additions (+26 total, +15 in round 1).
+
+VERDICT: APPROVE

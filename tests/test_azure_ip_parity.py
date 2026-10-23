@@ -68,6 +68,33 @@ CASES = [
     Case("untagged-with-filter", [ip("a", None), ip("b", {})], filter_tags={"env": []}),
     Case("associated-skipped", [ip("a", ENV, config={"id": "nic"}), ip("b", ENV)]),
     Case("associated-and-dry-run", [ip("a", ENV, config={"id": "nic"})], dry_run=True),
+    Case(
+        "in-use-nat-gateway-skipped",
+        [
+            types.SimpleNamespace(
+                name="a", tags=ENV, ip_configuration=None, nat_gateway={"id": "g"}
+            ),
+            ip("b", ENV),
+        ],
+    ),
+    Case(
+        "in-use-linked-ip-skipped",
+        [
+            types.SimpleNamespace(
+                name="a", tags=ENV, ip_configuration=None, linked_public_ip_address={"id": "l"}
+            ),
+            ip("b", ENV),
+        ],
+    ),
+    Case(
+        "in-use-service-ip-skipped",
+        [
+            types.SimpleNamespace(
+                name="a", tags=ENV, ip_configuration=None, service_public_ip_address={"id": "s"}
+            ),
+            ip("b", ENV),
+        ],
+    ),
     Case("exception-key-only", [ip("a", ENV), ip("b", PROD)], exception_tags={"owner": []}),
     Case(
         "exception-key-and-value",
@@ -216,6 +243,7 @@ class Diverges:
     bug: str
     deleted: list[str]
     old_error: tuple[str, str] | None
+    old_deleted: list[str] | None = None
 
 
 TYPE_ERROR = ("TypeError", "argument of type 'NoneType' is not iterable")
@@ -225,14 +253,53 @@ ATTRIBUTE_ERROR = (
 )
 
 DIVERGING: dict[str, Diverges] = {
-    "untagged-with-exception-raises": Diverges("BUG-013", ["a"], TYPE_ERROR),
-    "untagged-with-notags-raises": Diverges("BUG-013", ["a"], TYPE_ERROR),
-    "untagged-raises-even-if-filter-excludes": Diverges("BUG-077", [], TYPE_ERROR),
-    "untagged-raises-after-earlier-deletes": Diverges("BUG-077", ["a", "b", "c", "d"], TYPE_ERROR),
-    "untagged-raises-in-dry-run": Diverges("BUG-013", ["a", "c"], TYPE_ERROR),
-    "untagged-with-exception-attached-ip-still-raises": Diverges("BUG-013", [], TYPE_ERROR),
-    "missing-ip-configuration-attribute": Diverges("BUG-076", ["a"], ATTRIBUTE_ERROR),
+    "untagged-with-exception-raises": Diverges("BUG-013", ["a"], TYPE_ERROR, []),
+    "untagged-with-notags-raises": Diverges("BUG-013", ["a"], TYPE_ERROR, []),
+    "untagged-raises-even-if-filter-excludes": Diverges("BUG-077", [], TYPE_ERROR, []),
+    "untagged-raises-after-earlier-deletes": Diverges(
+        "BUG-077", ["a", "b", "c", "d"], TYPE_ERROR, ["a", "b"]
+    ),
+    "untagged-raises-in-dry-run": Diverges("BUG-013", ["a", "c"], TYPE_ERROR, ["a"]),
+    "untagged-with-exception-attached-ip-still-raises": Diverges("BUG-013", [], TYPE_ERROR, []),
+    "missing-ip-configuration-attribute": Diverges("BUG-076", ["a"], ATTRIBUTE_ERROR, []),
+    "in-use-nat-gateway-skipped": Diverges("BUG-076", ["b"], None, ["a", "b"]),
+    "in-use-linked-ip-skipped": Diverges("BUG-076", ["b"], None, ["a", "b"]),
+    "in-use-service-ip-skipped": Diverges("BUG-076", ["b"], None, ["a", "b"]),
 }
+
+
+def _expected_calls(case: Case, deleted: Sequence[str]) -> list[tuple[Any, ...]]:
+    group = case.resource_group or "env-rg"
+    wanted = set(deleted)
+    calls: list[tuple[Any, ...]] = [("client", "sub-1"), ("list", group)]
+    for item in case.ips:
+        name = getattr(item, "name", None)
+        calls.append(("yield", name))
+        if not case.dry_run and name in wanted:
+            calls.append(("begin_delete", group, name))
+    return calls
+
+
+def _expected_logs(case: Case, deleted: Sequence[str]) -> list[tuple[str, int, str]]:
+    items = list(deleted)
+    if case.dry_run:
+        logs = [
+            (
+                "root",
+                logging.WARNING,
+                f"List of Azure IPs (Total: {len(items)}) which will be deleted: {items}",
+            )
+        ]
+    else:
+        logs = [("root", logging.INFO, f"Deleted IP address: {name}") for name in items]
+        logs.extend(
+            [
+                ("root", logging.WARNING, f"number of Azure IPs deleted: {len(items)}"),
+                ("root", logging.WARNING, f"List of Azure IPs deleted: {items}"),
+            ]
+        )
+    logs.append(("root", logging.INFO, f"count of items in deleted_ips: {len(items)}"))
+    return logs
 
 
 def _scoped(calls: Sequence[tuple[Any, ...]], case: Case) -> list[tuple[Any, ...]]:
@@ -308,16 +375,14 @@ def test_matches_main(
     if case.id in DIVERGING:
         fix = DIVERGING[case.id]
         assert old.error == fix.old_error, f"{fix.bug}: oracle no longer shows the bug"
+        assert old.deleted == fix.old_deleted, f"{fix.bug}: oracle no longer shows the bug"
         assert new.error is None
         assert new.deleted == fix.deleted
         assert new.count == len(fix.deleted)
         assert (new.error, new.deleted) != (old.error, old.deleted)
-        assert ("list", case.resource_group) in new.calls
-        deletes = [c for c in new.calls if c[0] == "begin_delete"]
-        expected = [("begin_delete", case.resource_group, n) for n in fix.deleted]
-        if case.dry_run:
-            expected = []
-        assert deletes == expected
+        assert new.calls == _expected_calls(case, fix.deleted)
+        assert new.logs == _expected_logs(case, fix.deleted)
+        assert new.stdout == ""
         return
     assert new.calls == _scoped(old.calls, case)
     assert new.error == old.error
@@ -376,9 +441,16 @@ def test_cleaner_protocol_matches_main(
     new = _run_cleaner(case, monkeypatch, caplog, capsys)
     if case.id in DIVERGING:
         fix = DIVERGING[case.id]
+        group = case.resource_group or "env-rg"
+        assert old.error == fix.old_error, f"{fix.bug}: oracle no longer shows the bug"
+        assert old.deleted == fix.old_deleted, f"{fix.bug}: oracle no longer shows the bug"
         assert new.error is None
         assert new.deleted == fix.deleted
-        assert _only(new.calls, "list", "list_all") == [("list", case.resource_group or "env-rg")]
+        assert new.stdout == ""
+        assert _only(new.calls, "list", "list_all") == [("list", group)]
+        expected_deletes = [] if case.dry_run else [("begin_delete", group, n) for n in fix.deleted]
+        assert _only(new.calls, "begin_delete") == expected_deletes
+        assert new.logs == _expected_logs(case, fix.deleted)[:-1]
         return
     assert new.error == old.error
     assert new.stdout == old.stdout
@@ -441,6 +513,58 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
 ]
 
 
+@dataclass
+class FixedQuirk:
+    case_id: str
+    bug: str
+    old_check: Callable[[Outcome], bool]
+    new_check: Callable[[Outcome], bool]
+
+
+FIXED_QUIRKS: Sequence[FixedQuirk] = [
+    FixedQuirk(
+        "untagged-with-exception-raises",
+        "BUG-013",
+        lambda o: o.error == TYPE_ERROR and o.deleted == [],
+        lambda o: o.error is None and o.deleted == ["a"],
+    ),
+    FixedQuirk(
+        "untagged-with-notags-raises",
+        "BUG-013",
+        lambda o: o.error == TYPE_ERROR and o.deleted == [],
+        lambda o: o.error is None and o.deleted == ["a"],
+    ),
+    FixedQuirk(
+        "untagged-raises-even-if-filter-excludes",
+        "BUG-077",
+        lambda o: o.error == TYPE_ERROR,
+        lambda o: o.error is None and o.deleted == [],
+    ),
+    FixedQuirk(
+        "untagged-raises-after-earlier-deletes",
+        "BUG-077",
+        lambda o: (
+            o.error == TYPE_ERROR
+            and o.deleted == ["a", "b"]
+            and [c[0] for c in o.calls if c[0] == "begin_delete"] == ["begin_delete"] * 2
+        ),
+        lambda o: o.error is None and o.deleted == ["a", "b", "c", "d"],
+    ),
+    FixedQuirk(
+        "untagged-raises-in-dry-run",
+        "BUG-013",
+        lambda o: o.error == TYPE_ERROR and o.deleted == ["a"],
+        lambda o: o.error is None and o.deleted == ["a", "c"],
+    ),
+    FixedQuirk(
+        "missing-ip-configuration-attribute",
+        "BUG-076",
+        lambda o: o.error == ATTRIBUTE_ERROR,
+        lambda o: o.error is None and o.deleted == ["a"],
+    ),
+]
+
+
 @pytest.mark.parametrize(("case_id", "check"), QUIRKS, ids=[q[0] for q in QUIRKS])
 def test_quirk_is_preserved(
     case_id: str,
@@ -455,6 +579,25 @@ def test_quirk_is_preserved(
     new = _run(_new, case, monkeypatch, caplog, capsys)
     assert check(old), "oracle no longer shows the quirk"
     assert check(new)
+
+
+@pytest.mark.parametrize(
+    "quirk",
+    FIXED_QUIRKS,
+    ids=[f"{q.case_id}[{q.bug}]" for q in FIXED_QUIRKS],
+)
+def test_fixed_quirk(
+    quirk: FixedQuirk,
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    case = _find(quirk.case_id)
+    old = _run(_legacy, case, monkeypatch, caplog, capsys)
+    new = _run(_new, case, monkeypatch, caplog, capsys)
+    assert quirk.old_check(old), f"{quirk.bug}: oracle no longer shows the bug"
+    assert quirk.new_check(new), f"{quirk.bug}: fix did not produce expected outcome"
 
 
 def test_oracle_lists_subscription_wide_new_code_lists_the_configured_group(

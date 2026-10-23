@@ -102,10 +102,11 @@ def test_group_from_environment_is_listed(monkeypatch: pytest.MonkeyPatch) -> No
     assert ("list", "env-rg") in azure.calls
 
 
-def test_empty_resource_group_fails_closed_before_any_listing() -> None:
+@pytest.mark.parametrize("group", ["", "   "])
+def test_empty_resource_group_fails_closed_before_any_listing(group: str) -> None:
     azure = FakeAzure([ip("a", ENV)])
     with pytest.raises(ValueError, match="resource group"):
-        _cleaner(azure, group="").plan(_context(dry_run=False))
+        _cleaner(azure, group=group).plan(_context(dry_run=False))
     assert azure.calls == []
 
 
@@ -177,3 +178,76 @@ def test_in_use_ip_is_never_deleted_by_the_adapter(monkeypatch: pytest.MonkeyPat
     adapter.delete()
     assert adapter.get_deleted == ["free"]
     assert [c for c in azure.calls if c[0] == "begin_delete"] == [("begin_delete", "rg", "free")]
+
+
+@pytest.mark.parametrize(
+    ("filter_tags", "matching_tags"),
+    [
+        (
+            {
+                "yb_task": [
+                    "bug_bash_22_9_2023",
+                    "uitest",
+                    "itest",
+                    "itests",
+                    "itest-system",
+                    "db-cross-functional",
+                    "test",
+                    "testing",
+                    "manual-testing",
+                    "manual_testing",
+                    "Test",
+                    "internal_testing",
+                ],
+                "crc": ["gke"],
+            },
+            {"crc": "gke"},
+        ),
+        (
+            {
+                "yb_task": [
+                    "stress",
+                    "stress-dev",
+                    "stress-chaos",
+                    "stress-lru-cdc",
+                    "stress-smoke-cdc",
+                    "smoke-core",
+                    "stress-smoke-core",
+                    "stress-sqlancer",
+                    "stress-lru-core",
+                    "stress-scale",
+                ]
+            },
+            {"yb_task": "stress-chaos"},
+        ),
+    ],
+    ids=["yba-crc-cleanup", "db-stress-tests-cleanup"],
+)
+def test_production_jenkins_filter_tags_selection(
+    monkeypatch: pytest.MonkeyPatch,
+    filter_tags: dict[str, list[str]],
+    matching_tags: dict[str, str],
+) -> None:
+    azure = FakeAzure(
+        [
+            ip("match-unused", matching_tags),
+            ip("match-attached", matching_tags, config={"id": "nic"}),
+            types.SimpleNamespace(
+                name="match-nat",
+                tags=matching_tags,
+                ip_configuration=None,
+                nat_gateway={"id": "ng"},
+            ),
+            ip("untagged", None),
+            ip("other-task", {"yb_task": "production"}),
+        ]
+    )
+    azure.install(monkeypatch)
+    adapter = IP("rg-prod", False, filter_tags, {}, {})
+    adapter.delete()
+    assert adapter.get_deleted == ["match-unused"]
+    assert ("list", "rg-prod") in azure.calls
+    assert ("list_all",) not in azure.calls
+    assert [c for c in azure.calls if c[0] == "begin_delete"] == [
+        ("begin_delete", "rg-prod", "match-unused")
+    ]
