@@ -81,3 +81,73 @@ Scope reviewed: `git diff f6f209e..HEAD` on branch `eng/clean` (lane `ENG-CLEAN`
 - `python3 -m tests.archtest.test_count check`: `ARCH-008: 44396 tests, floor 44396`
 
 VERDICT: CHANGES_REQUESTED
+
+## Round 2 (Opus)
+
+Scope: `git diff f6f209e..HEAD` (commits `048883a`, `4320aa4`). No code change in this round.
+
+### Round 1 fixes checked
+- The GCP `spot` / `spot-nothing` bridge cases are real: `tests/test_cli_bridge_gcp.py` runs the legacy
+  `SpotVM` handler and the real `SpotVMCleaner` on the same fake API, real and dry, and compares
+  mutations, run-log lines, Slack and Influx. They also cover the failed-delete, first-zone,
+  project-listing and later-listing error paths.
+- `tests/test_cli_bridge_oci.py` now reaches OCI `spot_instances` through `dispatch._run_handler` and
+  `bridge.route_for`. The workaround that built its own `Route` is gone.
+- `tests/test_cli_route_skip.py` has a positive control: with an explicit `--cloud` the fake cleaner
+  runs and applies (line 77). So the "nothing ran" assertions under `--cloud all` cannot pass
+  vacuously. The notifier assertion records the cloud.
+- Round 1 also edited the `## Counts` line of `BUGS.md`, besides the one allowed row. This keeps the
+  totals true and earlier ENG lanes did the same, so it is not blocking. The owner may want to
+  confirm it.
+
+### Independent checks
+1. **Parity of the newly routed pairs (GCP and OCI `spot_instances`): OK.**
+   - The skip happens inside RUN START/RESULT, as the legacy handler's did (`dispatch._run_handler`
+     wraps both paths).
+   - The warning has the same text, on the same logger (`crc.cli.dispatch`), and is checked before
+     the project check, as in `_spot_instances` (dispatch.py:90 vs routes/skips.py:12).
+   - The GCP check raises `project_id is required for GCP Spot VM cleanup` before any registry,
+     notifier or logging setup, as `CRC.delete_spot_instances` did (vm_ops.py:159). It also raises
+     in a dry run, as before.
+   - OCI has no check, as before.
+   - Dry run never mutates (dry bridge cases).
+   - The only behaviour change is that every region is listed before any delete (BUG-409, plus one
+     clause in `CLEANUP_SAFETY.md`). The row sits at the end of the low group, with Exists on main
+     "yes" and location the `crc.py` adapter loop.
+2. **Parity tests not vacuous: OK.**
+   - `test_cli_main_parity.py`: the oracle `FakeCRC` now raises the GCP project error, as the real
+     method does. The routed side reaches the fake cleaner through `GCP_ROUTED_CALLS` and
+     `routed_calls_oci.CALLS`, with the oracle argument order.
+   - `test_core_selection.py` now passes `project_id="proj"`. This only keeps the GCP pair from
+     raising and asserts nothing new.
+   - I found no fake or patch that is never called.
+3. **Hash-locked tests: OK.** The five locked test files and `safety_lock.json` are untouched and
+   pass. The engine copies `tests/test_{aws_disk,aws_spot_instance_requests,azu_spot_vm,gcp_spot_vm,oci_spot_vm}_engine.py`
+   exist and pass.
+4. **Protected files: OK.** No oracle, archtest, guardrail or requirements file was edited. The one
+   exception is `tests/archtest/test_count_floor.txt`, which `make raise-test-floor` raised.
+5. **Limits and READMEs: OK.**
+   - Every non-test file is under 250 lines. The largest touched ones are `helpers_gcp_bridge.py`
+     (246) and `dispatch.py` (201). ARCH-004 is green.
+   - The Public API sections of `crc/cli/README.md` and `crc/cli/routes/README.md` list `Route.skip`,
+     `Skip` and `explicit_cloud_spot`.
+6. **Gates:** I ran `pip install -r requirements.txt -r requirements-dev.txt`, then `make check`.
+   - ruff, mypy strict (361 files), lint-imports (5 kept) and the archtests are green.
+   - **44396 passed in 54.1s** (`make check` about 73s wall time). ARCH-008: 44396, floor 44396.
+
+### Blocking (scope not done; round 1 finding still open)
+- **Step (1) is incomplete.** `crc/cli/dispatch.py:105` `HANDLERS` still holds all six entries. The two
+  warn-only pairs (`spot_instances` on AWS, `spot_instance_requests` off AWS) still run legacy
+  handlers. The `disk`, `ip`, `nic` and `vm` handlers and the GCP/OCI branch of `_spot_instances`
+  are now dead code.
+- **Step (2) is not started:** CRC methods, `notify.py`, `adapter_args.py`, `HANDLERS`, the `crc.py`
+  re-exports and the adapters.
+- **Step (3) is not decided:** `crc/core/selection.py`.
+- `crc/` line count: **19301 before, 19346 after** (+45). The lane's goal was a net deletion.
+
+### New bugs
+- None in behaviour. One doc nit: the `Route` docstring (`crc/cli/routes/__init__.py:58`) names "the
+  kinds a cloud does not have" as a use of `skip`, but no route uses it that way yet. The two
+  warn-only pairs still use dispatch handlers.
+
+ROUND 2 VERDICT: CHANGES_REQUESTED
