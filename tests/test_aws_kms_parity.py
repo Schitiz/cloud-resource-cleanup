@@ -681,31 +681,38 @@ def debug_logs(caplog: pytest.LogCaptureFixture) -> None:
 
 LOG_BUGS = {"BUG-357"}
 
-FIXED: Mapping[str, tuple[list[str], list[str]]] = {
-    # case id: (deleted, keys whose describe_key was called)
-    "filter-multi-value-never-matches": (["k1", "k2"], ["k1", "k2"]),
-    "filter-empty-value-list-adds-no-constraint": ([], []),
-    "filter-empty-value-list-key-present": (["k1"], ["k1"]),
-    "exception-set-tagged-key-keyerror-skips": (["k2"], ["k2"]),
-    "exception-set-value-list": (["k1"], ["k1"]),
-    "exception-with-key-and-tagkey-entries": (["k1"], ["k1"]),
-    "exception-with-key-only-key-list": (["k1"], ["k1"]),
-    "exception-multi-value-hit-keeps": (["k2"], ["k2"]),
-    "exception-production-tags": (["other", "untagged"], ["other", "untagged"]),
-    "age-tag-never-matches-tagkey-entries": ([], ["k1"]),
-    "age-tag-tagkey-short-selects-earlier": (["k1"], ["k1"]),
-    "age-tag-tagkey-unparseable-falls-back-to-age": (["k1"], ["k1"]),
-    "policy-match-then-statement-without-aws-stays-selected": (["k2"], ["k1", "k2"]),
+FIXED: Mapping[str, tuple[list[str], list[str], list[str]]] = {
+    # case id: (old_deleted, new_deleted, keys whose describe_key was called)
+    "filter-multi-value-never-matches": ([], ["k1", "k2"], ["k1", "k2"]),
+    "filter-empty-value-list-adds-no-constraint": (["k1", "k2"], [], []),
+    "filter-empty-value-list-key-present": (["k1", "k2", "k3"], ["k1"], ["k1"]),
+    "exception-set-tagged-key-keyerror-skips": (["k2"], ["k2"], ["k2"]),
+    "exception-set-value-list": ([], ["k1"], ["k1"]),
+    "exception-with-key-and-tagkey-entries": ([], ["k1"], ["k1"]),
+    "exception-with-key-only-key-list": ([], ["k1"], ["k1"]),
+    "exception-multi-value-hit-keeps": ([], ["k2"], ["k2"]),
+    "exception-production-tags": (["untagged"], ["other", "untagged"], ["other", "untagged"]),
+    "age-tag-never-matches-tagkey-entries": (["k1"], [], ["k1"]),
+    "age-tag-tagkey-short-selects-earlier": ([], ["k1"], ["k1"]),
+    "age-tag-tagkey-unparseable-falls-back-to-age": (["k1"], ["k1"], ["k1"]),
+    "policy-match-then-statement-without-aws-stays-selected": (
+        ["k1", "k2"],
+        ["k2"],
+        ["k1", "k2"],
+    ),
 }
 
 
 def assert_fixed(case: Case, old: "Outcome", new: "Outcome") -> None:
     """A case marked with a BUG ID: the oracle (main) still shows the old outcome, the new code
     differs from it and gives exactly the fixed outcome (BEHAVIOUR_FIX.md section 3)."""
-    deleted, described = FIXED[case.id]
+    old_deleted, deleted, described = FIXED[case.id]
     assert case.diverges.startswith("BUG-")
+    assert old.error is None
+    assert old.deleted == old_deleted
     assert (new.calls, new.deleted, new.logs) != (old.calls, old.deleted, old.logs)
     assert new.error is None
+    assert new.stdout == old.stdout
     assert new.deleted == deleted
     assert [c[1] for c in new.calls if c[0] == "describe_key"] == described
     scheduled = [str(c[1]) for c in new.calls if c[0] == "schedule_key_deletion"]
@@ -784,9 +791,12 @@ def test_cleaner_protocol_matches_main(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
+    adapter = _run(_new, case, monkeypatch, caplog, capsys)
     new = _run_cleaner(case, monkeypatch, caplog, capsys)
     if case.diverges:
         assert_fixed(case, old, new)
+        assert _without_client(new.calls) == _without_client(adapter.calls)
+        assert new.logs == adapter.logs
         return
     assert new.error == old.error
     assert new.stdout == old.stdout
