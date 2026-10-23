@@ -7,6 +7,7 @@
 from typing import Any
 
 import crc.oci.disk
+import crc.oci.spot_vm
 import crc.oci.vm  # noqa: F401
 from crc.cli.inputs import Options
 from crc.cli.routes import NotifyMode, Route
@@ -20,6 +21,9 @@ def _disk(options: Options) -> dict[str, Any]:
         "age": options.age,
         "custom_age_tag_key": options.custom_age_tag_key,
     }
+
+
+_spot_instances = _disk
 
 
 def _vm(options: Options) -> dict[str, Any]:

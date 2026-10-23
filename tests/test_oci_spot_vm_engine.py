@@ -1,6 +1,7 @@
 # Copyright (c) Yugabyte, Inc.
 
-"""Cleaner-based copy of the locked `tests/test_oci_spot_vm.py` (SAF-037, SAF-045).
+"""Cleaner-based copy of the locked `tests/test_oci_spot_vm.py` (SAF-040, SAF-041, SAF-043,
+SAF-044, SAF-045, SAF-046).
 
 Same cases as the locked file, but they drive `SpotVmCleaner` (and the modules it is made of)
 through the `Cleaner` contract instead of building the legacy `SpotVM` adapter. For the owner to

@@ -1,12 +1,12 @@
 """Parity: the engine bridge with the real OCI cleaners against the legacy adapters.
 
-The oracle `CRC` (`tests/legacy/crc_main.txt`) runs the real `Disk` and `VM` adapters, the bridge
-runs `DiskCleaner` and `VmCleaner` built by their registered factories; both read the same fake
-SDK API, Slack and Influx clients. For `disk` and `vm` (delete and stop), in a dry run and a real
-run, the run-log lines (RUN START, ACTION, SKIPPED, ERRORS, RESULT, REGION), the other log
-records, Slack, Influx, stdout and the raised error must be equal, and so must the mutating SDK
-calls. The only allowed difference: a listing error in a later region now stops the pair before
-any mutation (BUG-408).
+The oracle `CRC` (`tests/legacy/crc_main.txt`) runs the real `Disk`, `VM` and `SpotVM` adapters,
+the bridge runs `DiskCleaner`, `VmCleaner` and `SpotVmCleaner` built by their registered
+factories; both read the same fake SDK API, Slack and Influx clients. For `disk`, `vm` (delete and
+stop) and `spot_instances`, in a dry run and a real run, the run-log lines (RUN START, ACTION,
+SKIPPED, ERRORS, RESULT, REGION), the other log records, Slack, Influx, stdout and the raised
+error must be equal, and so must the mutating SDK calls. The only allowed difference: a listing
+error in a later region now stops the pair before any mutation (BUG-408).
 """
 
 import logging
@@ -23,15 +23,22 @@ import pytest
 
 from crc.cli import bridge, dispatch
 from crc.cli.inputs import Targets, read_options
+from crc.cli.routes import Route
+from crc.cli.routes import oci as oci_routes
 from crc.cli.runner import CRC as NewCRC
 from crc.core import logger
 from crc.oci.disk import Disk, DiskRuntime
+from crc.oci.spot_vm import SpotVM, SpotVmRuntime
+from crc.oci.spot_vm.client import RegionClients
 from crc.oci.vm import VM, VmRuntime
 from tests.helpers_cli_routes import provide_legacy_keypairs
 from tests.test_cli_crc_parity import Case, Logs, Scenario, build, oracle
 from tests.test_oci_disk import NOW as DISK_NOW
 from tests.test_oci_disk import FakeApi as DiskApi
 from tests.test_oci_disk import att, vol
+from tests.test_oci_spot_instances import FakeClient as SpotApi
+from tests.test_oci_spot_instances import inst as spot_inst
+from tests.test_oci_spot_instances import paginate
 from tests.test_oci_vm import FakeApi as VmApi
 from tests.test_oci_vm import inst
 
@@ -67,7 +74,7 @@ class Down(DiskApi, VmApi):
     def list_volumes(self) -> Sequence[Any]:
         raise self.error
 
-    def list_instances(self) -> Sequence[Any]:
+    def list_instances(self, *args: Any, **kwargs: Any) -> Sequence[Any]:
         raise self.error
 
 
@@ -97,6 +104,17 @@ def _vm_apis(second: str | None) -> dict[str, Any]:
     return {"r1": first, "r2": _second(second, VmApi([inst("d")]))}
 
 
+def _spot_apis(second: str | None) -> dict[str, Any]:
+    od = spot_inst("od")
+    od.preemptible_instance_config = None
+    first = SpotApi(
+        [spot_inst("a"), spot_inst("young", hours=1), od],
+        {"a": ["vol-a", "vol-keep"]},
+        {"vol-keep": {"owner": "x"}},
+    )
+    return {"r1": first, "r2": _second(second, SpotApi([spot_inst("d")], {"d": ["vol-d"]}))}
+
+
 def _second(error: str | None, normal: Any) -> Any:
     if error == "connect":
         return Down(oci.exceptions.ConnectTimeout("t"))
@@ -114,6 +132,12 @@ KINDS = [
     ),
     Kind("vm", "delete", lambda c: c.delete_vm(TAGS, {}, {"hours": 5}, "age_tag", None), _vm_apis),
     Kind("vm", "stop", lambda c: c.stop_vm(TAGS, {}, {"hours": 5}, "age_tag"), _vm_apis),
+    Kind(
+        "spot_instances",
+        "delete",
+        lambda c: c.delete_spot_instances(TAGS, {}, {"hours": 5}, "age_tag"),
+        _spot_apis,
+    ),
 ]
 
 
@@ -133,17 +157,23 @@ def _patch_sdk(mp: pytest.MonkeyPatch, apis: dict[str, Any], oracle_module: Modu
     mp.setattr("crc.oci._base.Base.__init__", lambda self: None)
     mp.setattr("crc.oci.disk.cleaner.Base", lambda: object())
     mp.setattr("crc.oci.vm.cleaner.Base", lambda: object())
+    mp.setattr("crc.oci.spot_vm.cleaner.Base", lambda: object())
 
     def factory(base: Any) -> Callable[[str], Any]:
         return lambda region: apis[region]
 
+    def spot_factory(region: str) -> RegionClients:
+        return RegionClients(apis[region], apis[region], "cmp")
+
     def regions(base: Any) -> Callable[[], list[str]]:
         return lambda: list(apis)
 
-    for name in ("crc.oci.disk.cleaner", "crc.oci.vm.cleaner"):
+    for name in ("crc.oci.disk.cleaner", "crc.oci.vm.cleaner", "crc.oci.spot_vm.cleaner"):
         mp.setattr(f"{name}.regions_of", regions)
     mp.setattr("crc.oci.disk.cleaner.api_for", factory)
     mp.setattr("crc.oci.vm.cleaner.compute_api_for", factory)
+    mp.setattr("crc.oci.spot_vm.cleaner.clients_for", lambda base: spot_factory)
+    mp.setattr("crc.oci.spot_vm.client.oci.pagination.list_call_get_all_results", paginate)
     api_factory, lister = factory(None), regions(None)
 
     def clock() -> Any:
@@ -155,8 +185,14 @@ def _patch_sdk(mp: pytest.MonkeyPatch, apis: dict[str, Any], oracle_module: Modu
     def make_vm(*args: Any) -> VM:
         return VM(*args, runtime=VmRuntime(api_factory, lister, clock))  # type: ignore[misc]
 
+    def make_spot(*args: Any) -> SpotVM:
+        spot = SpotVM(*args, runtime=SpotVmRuntime(spot_factory, lister, paginate, clock))  # type: ignore[misc]
+        spot.compartment_id = "cmp"
+        return spot
+
     mp.setattr(oracle_module, "OCI_Disk", make_disk)
     mp.setattr(oracle_module, "OCI_VM", make_vm)
+    mp.setattr(oracle_module, "OCI_SpotVM", make_spot)
     mp.setattr(bridge, "init_run_logging", lambda: None)
     mp.setattr(bridge, "datetime", type("D", (), {"now": staticmethod(lambda tz=None: DISK_NOW)}))
 
@@ -192,6 +228,15 @@ def _capture() -> Iterator[Collector]:
 def _act(run: Run, crc: Any, options: Any, targets: Targets) -> None:
     kind = run.kind
     if run.routed:
+        if kind.name == "spot_instances":
+            logger.begin("oci", kind.name, kind.operation, run.dry, dispatch._run_options(options))
+            try:
+                bridge.run_routed(
+                    crc, "oci", kind.name, options, targets, Route(oci_routes._spot_instances)
+                )
+            finally:
+                logger.finish()
+            return
         assert bridge.route_for("oci", kind.name) is not None
         handler = dispatch.HANDLERS.get(kind.name)
         dispatch._run_handler(handler, crc, "oci", kind.name, options, targets)
@@ -262,7 +307,7 @@ def test_routed_pair_matches_the_legacy_adapter(
     assert new["result"] == old["result"]
     assert new["stdout"] == old["stdout"]
     assert new["run"][0] == old["run"][0]
-    if second == "boom" and not dry:
+    if second == "boom" and not dry and kind.name != "spot_instances":
         assert new["calls"] == {"r1": [], "r2": []}
         assert old["calls"]["r1"], "the legacy path deleted region r1 before the listing error"
         assert not _by_kind(new["run"], "ACTION")
@@ -274,9 +319,8 @@ def test_routed_pair_matches_the_legacy_adapter(
     assert new["influx"] == old["influx"]
     assert new["calls"] == old["calls"]
     assert new["all_calls"] == old["all_calls"]
-    if second != "boom":
-        assert sorted(new["run"]) == sorted(old["run"])
-        assert new["other"] == old["other"]
+    assert sorted(new["run"]) == sorted(old["run"])
+    assert new["other"] == old["other"]
 
 
 @pytest.mark.parametrize("kind", KINDS, ids=lambda k: f"{k.name}-{k.operation}")

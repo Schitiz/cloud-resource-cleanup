@@ -29,3 +29,32 @@ Lane ENG-OCI (branch `eng/oci`): the OCI `disk` and `vm` (delete and stop) pairs
 
 - `crc/oci/disk/cleaner.py` `plan()` (real run, error in a later region): the legacy `delete_disks` reported the volumes of earlier regions to Slack and Influx before it re-raised; routed, nothing was deleted yet, so the report is empty (covered by BUG-408, fewer deletes).
 - `crc/oci/vm/cleaner.py:_is_old` / `crc/oci/disk/decide.py`: unchanged quirks (not touched). The routed cleaner uses `options.get("age") or {}` where the adapter passes `age` as is; a `None` age behaves as an empty age in both (every resource old enough, SAF-006), so no difference was found.
+
+## Round 1 (Argon)
+
+Scope reviewed: `git diff 6a98441..HEAD` on branch `eng/oci` (lane `ENG-OCI`).
+
+### Findings & fixes made in review
+
+1. **Prepared `SpotVmCleaner` for engine dry-run parity and added `spot_instances` bridge parity tests** (`crc/oci/spot_vm/cleaner.py`, `crc/oci/spot_vm/README.md`, `crc/cli/routes/oci.py`, `tests/test_cli_bridge_oci.py`, `tests/test_oci_spot_vm_engine.py`):
+   - Leaving `"spot_instances"` out of `crc/cli/routes/oci.py::ROUTES` is required because `dispatch._spot_instances` warns and returns without Slack/Influx under `--cloud all` (`SAF-037`) and `Route.precheck` cannot skip a pair without editing `crc/cli/bridge.py` / `crc/cli/routes/__init__.py` (which are off-limits in this lane).
+   - However, `SpotVmCleaner` built by `build_spot_vm_cleaner` still lacked `engine=True`: when run through `crc.core.engine` in a dry run (`engine.run` skips `apply()`), it omitted per-region `ACTION would_delete` lines (for both instances and leftover volumes), reported `selected=0` in `RESULT`, and left `Candidate.id` as the instance OCID instead of the display name in `Report.from_plan`.
+   - Added `engine: bool = False` to `SpotVmCleaner.__init__` (passed as `engine=True` by `build_spot_vm_cleaner`), added `_spot_instances` options builder to `crc/cli/routes/oci.py`, and added `spot_instances` to `KINDS` in `tests/test_cli_bridge_oci.py` (now 104 tests across `disk`, `vm` delete, `vm` stop, and `spot_instances`). Synced `crc/oci/spot_vm/README.md` and the SAF list in `tests/test_oci_spot_vm_engine.py`.
+
+### Checklist verification
+
+1. **CLI result parity for all OCI pairs (`disk`, `vm` delete/stop routed in `ROUTES`; `spot_instances` tested via `Route(_spot_instances)`)**: selection, mutations and order within each region, `RUN START` / `RESULT` lines, `Service` / `init_logging` startup, Slack text and recipients, Influx points, console and log lines, exceptions and exit codes, `NotifyMode.REPORT_THEN_RERAISE` (`disk` via `partial_succeeded`), and `--dry_run` non-mutation match the legacy path; the only behaviour change is plan-all-regions-before-apply, recorded in `BUG-408` (`docs/refactor/BUGS.md`) and one clause in `CLEANUP_SAFETY.md`.
+2. **Parity tests non-vacuous**: `test_cli_main_parity.py` (via `tests/routed_calls_oci.py` and `FakeCleaners`), `test_cli_bridge_oci.py` (104 tests running real `DiskCleaner`, `VmCleaner`, and `SpotVmCleaner` against `oracle.CRC`), `test_cli_bridge_parity.py`, `test_cli_crc_parity.py`, `test_cli_args_parity.py`, `test_cli_dispatch_fix.py`, `test_core_selection.py`, and all `test_oci_*_parity.py` files reach real or recording fake cleaners and assert the oracle facts.
+3. **Hash-locked safety tests**: all 5 locked test files and `tests/archtest/safety_lock.json` are untouched and passing; `tests/test_oci_spot_vm_engine.py` (16 tests) covers all 15 test cases and all SAF IDs (`SAF-040`, `SAF-041`, `SAF-043`, `SAF-044`, `SAF-045`, `SAF-046`) locked to `tests/test_oci_spot_vm.py`.
+4. **Protected files**: no oracle (`tests/legacy/*.txt`), archtest (`tests/archtest/*.py`), guardrail (`AGENTS.md`, `ARCHITECTURE.md`, `.cursor/**`, `pyproject.toml`, `Makefile`), `requirements*.txt`, or shared CLI bridge/dispatch file was edited; `test_count_floor.txt` raised to `43940` via `make raise-test-floor`.
+5. **Limits & README sync**: all touched non-legacy, non-test files are at most 250 lines and functions at most 60 lines (`ARCH-004`); all package READMEs (`crc/cli`, `crc/cli/routes`, `crc/oci`, `crc/oci/disk`, `crc/oci/vm`, `crc/oci/spot_vm`) are in sync (`ARCH-002`).
+
+### Gates & test count
+
+- `python3 -m ruff check .`: passed
+- `python3 -m mypy`: passed (343 source files)
+- `lint-imports`: passed (5 contracts kept, 0 broken)
+- `python3 -m pytest -q -n auto`: **43940 passed in 60.21s** (`make check` wall time ~74s)
+- `python3 -m tests.archtest.test_count check`: `ARCH-008: 43940 tests, floor 43940`
+
+VERDICT: APPROVE
