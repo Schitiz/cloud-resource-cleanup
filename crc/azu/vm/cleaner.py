@@ -3,9 +3,9 @@
 """Azure VM cleaner.
 
 `VmCleaner` implements the `crc.core.cleaner.Cleaner` contract: `plan()` lists the VMs of the
-subscription, applies the tag and age policy and reads each VM's instance view; `apply()` deletes
-(and removes the `<vm>-NIC` NIC) or powers off the planned VMs. The legacy class in `adapter.py`
-drives the same pieces VM by VM, in the exact call order of the original implementation.
+configured resource group only, applies the tag and age policy and reads each VM's power state;
+`apply()` deletes (and removes the `<vm>-NIC` NIC) or deallocates the planned VMs. The legacy
+class in `adapter.py` drives the same pieces VM by VM, in the call order of the original code.
 """
 
 import datetime
@@ -16,7 +16,7 @@ from typing import cast
 
 from crc.azu import _logger
 from crc.azu._base import Base
-from crc.azu.vm.client import ComputeFactory, NetworkFactory, SdkVm
+from crc.azu.vm.client import ComputeFactory, InstanceStatus, NetworkFactory, SdkVm
 from crc.azu.vm_delete_helpers import begin_delete_vm_and_wait, delete_vm_primary_nic
 from crc.core import age as core_age
 from crc.core import policy
@@ -35,6 +35,9 @@ from crc.core.registry import register
 DEFAULT_INSTANCE_STATES = ("running",)
 NIC_NAME_SUFFIX = "-NIC"
 NIC_LABEL = "NIC"
+POWER_STATE_PREFIX = "PowerState/"
+SKIP_NO_POWER_STATE = "no_power_state"
+SKIP_STATE_NOT_ALLOWED = "status does not contain an allowed state"
 
 TagSpec = Mapping[str, Sequence[str]]
 Clock = Callable[[], datetime.datetime]
@@ -106,15 +109,25 @@ def _tally_of(operation: Operation, candidates: Iterable[str]) -> Tally:
     return Tally(stopped=names)
 
 
+def _power_state(statuses: Sequence[InstanceStatus]) -> str | None:
+    """The power state of an instance view: the code after `PowerState/` of the first status
+    with such a code, lower-cased, or None when there is none."""
+    for status in statuses:
+        code = getattr(status, "code", None)
+        if isinstance(code, str) and code.startswith(POWER_STATE_PREFIX):
+            return code[len(POWER_STATE_PREFIX) :].casefold()
+    return None
+
+
 def _log_processing_error(name: str, error: Exception) -> None:
     logging.error(f"Error occurred while processing {name} instance: {error}")
 
 
 class VmCleaner:
-    """Deletes (with its `<vm>-NIC`) or powers off VMs that are tagged, match the filter tags
-    (all keys), are not excluded by exception tags or notags, are old enough and whose instance
-    view status contains an allowed state. Lists the whole subscription; every other call uses
-    the configured resource group."""
+    """Deletes (with its `<vm>-NIC`) or deallocates VMs that are tagged, match the filter tags
+    (all keys), are not excluded by exception tags or notags, are old enough and whose power state
+    (the instance view status coded `PowerState/...`) equals an allowed state. Every call,
+    the listing included, uses the configured resource group."""
 
     cloud = "azure"
     kind = "vm"
@@ -185,8 +198,11 @@ class VmCleaner:
         return Result(succeeded=tuple(tally.stopped), failed=tuple(failed))
 
     def list_vms(self) -> Iterable[SdkVm]:
-        """The (lazy) subscription-wide listing."""
-        return self._compute().virtual_machines.list_all()
+        """The (lazy) listing of the configured resource group (BUG-002). An empty group raises
+        before any SDK call."""
+        if not self._resource_group:
+            raise ValueError("Azure VM cleanup needs a resource group; refusing to list")
+        return self._compute().virtual_machines.list(self._resource_group)
 
     def decide(self, vm: SdkVm, clock: Clock) -> Candidate | Skipped:
         """Tag and age checks, in the order of main. `clock` is only read by the age check, as
@@ -198,11 +214,16 @@ class VmCleaner:
             return Skipped(id=getattr(vm, "name", ""), reason=reason)
         return Candidate(id=vm.name, name=vm.name, launch_time=vm.time_created, tags=tags)
 
-    def state_allowed(self, vm_name: str, states: Sequence[str]) -> bool:
-        """True when an allowed state is a substring of the second instance view status
-        (raises when the VM has fewer than two statuses)."""
+    def state_skip_reason(self, vm_name: str, states: Sequence[str]) -> str | None:
+        """None when the VM's power state equals an allowed state, else the skip reason:
+        `no_power_state` when the instance view has no `PowerState/` status (BUG-010)."""
         view = self._compute().virtual_machines.instance_view(self._resource_group, vm_name)
-        return policy.status_contains_any_allowed(view.statuses[1].display_status, states)
+        state = _power_state(view.statuses)
+        if state is None:
+            return SKIP_NO_POWER_STATE
+        if state in states:
+            return None
+        return SKIP_STATE_NOT_ALLOWED
 
     def process(self, vm_name: str, operation: Operation, tally: Tally, *, dry_run: bool) -> bool:
         """Status check and action for one VM that passed `decide()`. Any error is logged and
@@ -210,23 +231,24 @@ class VmCleaner:
         in `plan()`), even if the action then failed."""
         selected = False
         try:
-            selected = self.state_allowed(vm_name, self._settings.instance_states)
-            if selected:
+            reason = self.state_skip_reason(vm_name, self._settings.instance_states)
+            if reason is None:
+                selected = True
                 self.act(vm_name, operation, tally, dry_run=dry_run)
             else:
-                _logger.skip("status does not contain an allowed state")
+                _logger.skip(reason)
         except Exception as e:
             _log_processing_error(vm_name, e)
             _logger.failed(self._resource_group, vm_name, e)
         return selected
 
     def act(self, vm_name: str, operation: Operation, tally: Tally, *, dry_run: bool) -> None:
-        """Delete (with the NIC) or power off one VM and record its name, also in a dry run,
+        """Delete (with the NIC) or deallocate one VM and record its name, also in a dry run,
         where nothing is called."""
         if operation is Operation.DELETE:
             self._remove(vm_name, tally, dry_run=dry_run)
         else:
-            self._power_off(vm_name, tally, dry_run=dry_run)
+            self._deallocate(vm_name, tally, dry_run=dry_run)
 
     def _remove(self, vm_name: str, tally: Tally, *, dry_run: bool) -> None:
         if not dry_run:
@@ -236,23 +258,24 @@ class VmCleaner:
         _logger.acted("would_delete" if dry_run else "deleted", self._resource_group, vm_name)
         delete_vm_primary_nic(self._network(), self._resource_group, vm_name, dry_run, tally.nics)
 
-    def _power_off(self, vm_name: str, tally: Tally, *, dry_run: bool) -> None:
+    def _deallocate(self, vm_name: str, tally: Tally, *, dry_run: bool) -> None:
         if not dry_run:
-            self._compute().virtual_machines.begin_power_off(self._resource_group, vm_name)
+            self._compute().virtual_machines.begin_deallocate(self._resource_group, vm_name)
             logging.info("Stopping virtual machine: %s", vm_name)
         tally.stopped.append(vm_name)
         _logger.acted("would_stop" if dry_run else "stopped", self._resource_group, vm_name)
 
     def _with_status(self, candidate: Candidate) -> Candidate | Skipped:
         try:
-            if self.state_allowed(candidate.id, self._settings.instance_states):
-                return candidate
+            reason = self.state_skip_reason(candidate.id, self._settings.instance_states)
         except Exception as e:
             _log_processing_error(candidate.id, e)
             _logger.failed(self._resource_group, candidate.id, e)
             return Skipped(id=candidate.id, reason="status unavailable")
-        _logger.skip("status does not contain an allowed state")
-        return Skipped(id=candidate.id, reason="status does not contain an allowed state")
+        if reason is None:
+            return candidate
+        _logger.skip(reason)
+        return Skipped(id=candidate.id, reason=reason)
 
     def _skip_reason(self, vm: SdkVm, tags: policy.Tags, clock: Clock) -> str | None:
         settings = self._settings

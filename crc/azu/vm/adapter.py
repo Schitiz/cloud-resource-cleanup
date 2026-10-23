@@ -15,7 +15,7 @@ from crc.service import Service
 
 
 class VM(Service):
-    """Deletes (`delete()`, with the `<vm>-NIC` NIC) or powers off (`stop()`) VMs that are
+    """Deletes (`delete()`, with the `<vm>-NIC` NIC) or deallocates (`stop()`) VMs that are
     tagged, match the filter tags (all keys), are not excluded by exception tags or notags, are
     old enough and are in an allowed state. In dry run it only lists them.
 
@@ -40,8 +40,8 @@ class VM(Service):
         clock: Clock = datetime.datetime.now,
     ) -> None:
         """
-        :param resource_group: Resource group used for every call except the subscription-wide
-            listing; empty means `AZURE_RESOURCE_GROUP`.
+        :param resource_group: Resource group used for every call, the listing included;
+            empty means `AZURE_RESOURCE_GROUP`.
         :param dry_run: If True, only list matching VMs without deleting or stopping them.
         :param filter_tags: Tags and values a VM must have (all keys); empty selects every
             tagged VM.
@@ -106,7 +106,7 @@ class VM(Service):
         self._perform_operation(Operation.DELETE, instance_state)
 
     def stop(self) -> None:
-        """Power off (or, in a dry run, only list) the matching VMs."""
+        """Deallocate (or, in a dry run, only list) the matching VMs."""
         self._perform_operation(Operation.STOP, self.default_instance_state)
 
     def _perform_operation(self, operation: Operation, instance_state: list[str]) -> None:

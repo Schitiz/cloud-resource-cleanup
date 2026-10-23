@@ -3,7 +3,7 @@
 ## Purpose
 
 Azure virtual machine cleaner (rung AZ-4). `VmCleaner` is a registered `Cleaner`
-(`@register("azure", "vm")`): `plan()` lists the VMs of the whole subscription, applies the tag and
+(`@register("azure", "vm")`): `plan()` lists the VMs of the configured resource group only, applies the tag and
 age policy and reads each selected VM's instance view; `apply()` deletes the VM and waits for it,
 then removes its `<vm>-NIC` NIC (through `crc/azu/vm_delete_helpers.py`), or powers the VM off.
 `VM` is the adapter entry point `crc.py` uses; `from crc.azu.vm import VM` keeps working.
@@ -18,7 +18,7 @@ Modules (split by responsibility):
 
 - `SdkVm`, `InstanceStatus`, `InstanceView`: Protocols of the SDK objects read (name, tags, time_created, statuses, display_status).
 - `LongRunningOperation`: Protocol of the poller the begin_delete calls return (result()).
-- `VmOperations`: Protocol of the four virtual_machines calls used (list_all, instance_view, begin_delete, begin_power_off); tests pass fakes.
+- `VmOperations`: Protocol of the four virtual_machines calls used (list, instance_view, begin_delete, begin_deallocate); tests pass fakes.
 - `VmComputeClient`: Protocol of the compute client part used (virtual_machines).
 - `NicOperations`: Protocol of the one network_interfaces call used (begin_delete, positional arguments).
 - `VmNetworkClient`: Protocol of the network client part used (network_interfaces).
@@ -34,12 +34,12 @@ Modules (split by responsibility):
 ## Safety Invariants
 
 - Authoritative text: `CLEANUP_SAFETY.md` (SAF-006, SAF-009, SAF-010, SAF-042; SAF-011 to SAF-013 are not met, as on main).
-- `plan()` only calls `list_all` and `instance_view`; `begin_delete`, `begin_power_off` and the NIC `begin_delete` are called from `apply()` (and the adapter) only and never in a dry run (ARCH-005).
+- `plan()` only calls `list` and `instance_view`; `begin_delete`, `begin_deallocate` and the NIC `begin_delete` are called from `apply()` (and the adapter) only and never in a dry run (ARCH-005).
 - Untagged VMs are skipped (SAF-042); filter tags need all keys, exception tags any key, notags all keys (`FILTER_VARIANTS.md` section 3, `crc.core.policy`).
 - Age uses `crc.core.age` (`get_retention_age`, fail open, then `is_old`, which still reads `MAX_AGE`); the clock is injected (`RunContext.now`, `VM(clock=...)`). There is no age gate in `__init__` (SAF-011 is not met): an empty age selects every VM that passes the tag and status checks (SAF-006).
-- A VM is acted on only when an allowed state is a substring of `instance_view(...).statuses[1].display_status`; a failing status read keeps the VM (fail closed) and is logged.
+- A VM is acted on only when an allowed state equals its power state: the code after `PowerState/` of the first instance view status with such a code, lower-cased (BUG-010, BUG-198: no substring match, an empty state matches nothing, the allowed state is compared as given, so `Running` never matches). A VM without a `PowerState/` status is kept and counted as skip `no_power_state`; a failing status read keeps the VM (fail closed) and is logged.
 - Per-VM errors (status, delete, power-off) are logged and swallowed, as on main; list errors and age errors propagate.
-- The listing is subscription-wide while status, delete and power-off use the configured resource group (BUG-002); stop is `begin_power_off`, not a deallocate (BUG-003); `statuses[1]` is unchecked (BUG-010). Quirks in `docs/refactor/BUGS.md` (`BUG-198` to `BUG-212`).
+- Every call, the listing included, uses the configured resource group (`virtual_machines.list(resource_group)`, BUG-002 fixed): nothing outside it is listed or acted on, and an empty group raises `ValueError` before any SDK call. Stop is `begin_deallocate` (BUG-003 fixed); delete is unchanged. Other quirks in `docs/refactor/BUGS.md` (`BUG-199` to `BUG-212`).
 - Do not call real cloud APIs in tests; mock every SDK client.
 
 ## Extension Rules
