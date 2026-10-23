@@ -56,6 +56,12 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> Recorder:
     monkeypatch.setattr(cli_context, "CRC", rec.crc_class())
     monkeypatch.setattr(cli_clients, "WebClient", lambda **_: object())
     monkeypatch.setattr(cli_scan, "notify_cleanup", lambda *a, **k: None)
+
+    def scan(crc: Any, key: str, value: str) -> list[Any]:
+        rec.events.append(("scan_instances_with_tag", crc.cloud))
+        return []
+
+    monkeypatch.setattr(cli_scan, "scan_instances_with_tag", scan)
     monkeypatch.delenv("MAX_AGE", raising=False)
     cleaners = FakeCleaners().install(monkeypatch)
 

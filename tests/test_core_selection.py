@@ -24,6 +24,7 @@ from crc.core.selection import (
     build_selection,
 )
 from tests.helpers_cli_routes import FakeCleaners
+from tests.helpers_oracle import load_legacy_crc
 
 ROOT = Path(__file__).resolve().parent.parent
 KMS_OPTIONS = SelectionOptions(kms_key_description="desc", kms_user="arn:user")
@@ -359,9 +360,13 @@ def test_ebs_breaker_selects_nothing_before_raising(
     assert LAST_RECORDED_CALLS == []
 
 
-def test_all_expansion_order_follows_crc_py(crc_cli: ModuleType) -> None:
-    assert list(CLOUDS) == crc_cli.CLOUDS
-    assert list(RESOURCES) == crc_cli.RESOURCES
+def test_all_expansion_order_follows_crc_py() -> None:
+    oracle = load_legacy_crc("crc_cli_selection_order")
+    try:
+        assert list(CLOUDS) == oracle.CLOUDS
+        assert list(RESOURCES) == oracle.RESOURCES
+    finally:
+        sys.modules.pop("crc_cli_selection_order", None)
 
 
 @pytest.mark.parametrize("cloud", ["aws", "azure", "gcp", "oci"])

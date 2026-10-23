@@ -5,11 +5,48 @@ import sys
 from dataclasses import replace
 from typing import Any, NoReturn
 
+from crc.aws.vm import VM as AWS_VM
+from crc.azu.vm import VM as AZU_VM
+from crc.cli.constants import CLOUDS
 from crc.cli.context import RunContext, make_crc
 from crc.cli.dispatch import _run_options
 from crc.cli.inputs import Options, Targets
 from crc.core import logger
+from crc.gcp.vm import VM as GCP_VM
 from crc.notifications import notify_cleanup
+from crc.oci.vm import VM as OCI_VM
+
+
+def _scan_vm(crc: Any) -> Any:
+    """The VM adapter of `crc.cloud` with empty filters, as the scan builds it.
+
+    Azure takes the resource group first, GCP the project after the dry run flag, AWS and OCI
+    neither. The adapter classes are looked up in this module's globals at call time.
+    """
+    if crc.cloud == "aws":
+        vm_class: Any = AWS_VM
+    elif crc.cloud == "azure":
+        vm_class = AZU_VM
+    elif crc.cloud == "gcp":
+        vm_class = GCP_VM
+    elif crc.cloud == "oci":
+        vm_class = OCI_VM
+    else:
+        raise ValueError(f"Invalid cloud provided: {crc.cloud}. Supported clouds are {CLOUDS}")
+    common: tuple[Any, ...] = ({}, {}, {}, None, crc.notags)
+    if crc.cloud == "azure":
+        return vm_class(crc.resource_group, crc.dry_run, *common)
+    if crc.cloud == "gcp":
+        return vm_class(crc.dry_run, crc.project_id, *common)
+    return vm_class(crc.dry_run, *common)
+
+
+def scan_instances_with_tag(crc: Any, tag_key: str, tag_value: str) -> Any:
+    """The instances of `crc.cloud` that carry the tag; NotImplementedError without the finder."""
+    vm = _scan_vm(crc)
+    if hasattr(vm, "find_instances_with_tag"):
+        return vm.find_instances_with_tag(tag_key, tag_value)
+    raise NotImplementedError(f"{type(vm)} does not implement find_instances_with_tag")
 
 
 def _console_url(cloud: Any, project_id: Any, hit: Any, region: Any, name: Any, rid: Any) -> Any:
@@ -65,7 +102,7 @@ def _normalize_hit(cloud: Any, project_id: Any, hit: Any) -> dict[str, Any]:
 def _find_hits(crc: Any, cloud: Any, tag_key: str, tag_value: str) -> Any:
     """Ask the cloud for the tagged instances; a failing scan counts as no hits."""
     try:
-        return crc.scan_instances_with_tag(tag_key, tag_value) or []
+        return scan_instances_with_tag(crc, tag_key, tag_value) or []
     except NotImplementedError as e:
         print(f"[{cloud}] scan not implemented: {e}")
         return []

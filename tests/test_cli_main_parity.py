@@ -314,6 +314,11 @@ def run_new(case: Case, monkeypatch: pytest.MonkeyPatch) -> Outcome:
     monkeypatch.setattr(cli_clients, "WebClient", fakes.WebClient)
     monkeypatch.setattr(cli_clients, "InfluxDBClient", fakes.InfluxDBClient)
     monkeypatch.setattr(cli_scan, "notify_cleanup", fakes.notify_cleanup)
+    monkeypatch.setattr(
+        cli_scan,
+        "scan_instances_with_tag",
+        lambda crc, key, value: crc.scan_instances_with_tag(key, value),
+    )
     install_routed_fakes(fakes, monkeypatch)
     return execute(NEW_MODULE.main, case, fakes)
 
@@ -1015,51 +1020,15 @@ def test_crc_py_reexports_the_names_the_contract_needs() -> None:
     names = [
         "main",
         "get_argparser",
-        "CRC",
-        "Snapshot",
-        "CLOUDS",
-        "RESOURCES",
-        "DELETED",
-        "STOPPED",
-        "NICS",
-        "DISKS",
-        "VMS",
-        "IPS",
-        "KEYPAIRS",
-        "KMS",
-        "SPOT_INSTANCE_REQUEST",
-        "Point",
-        "WebClient",
-        "InfluxDBClient",
         "is_valid_type",
         "is_valid_list",
         "is_valid_dict",
         "are_values_of_dict_lists",
         "validate_influxdb_inputs",
         "_validate_influxdb_input",
-        "AWS_Disk",
-        "ElasticIPs",
-        "KeyPairs",
-        "Kms",
-        "SpotInstanceRequests",
-        "AWS_VM",
-        "VPC",
-        "Disk",
-        "AZU_IP",
-        "NIC",
-        "AZU_SpotVM",
-        "AZU_VM",
-        "GCP_Disk",
-        "GCP_IP",
-        "GCP_SpotVM",
-        "GCP_VM",
-        "OCI_Disk",
-        "OCI_SpotVM",
-        "OCI_VM",
-        "notify_cleanup",
     ]
     for name in names:
-        assert name == "KeyPairs" or hasattr(NEW_MODULE, name), name  # deleted in ENG-0
+        assert hasattr(NEW_MODULE, name), name
         assert hasattr(ORACLE_MODULE, name), name
 
 

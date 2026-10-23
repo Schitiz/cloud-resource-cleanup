@@ -149,6 +149,11 @@ def test_scan_logs_run_start_and_result_per_cloud(
     crc = Mock()
     crc.scan_instances_with_tag.return_value = []
     monkeypatch.setattr(scan, "make_crc", lambda context, cloud: crc)
+    monkeypatch.setattr(
+        scan,
+        "scan_instances_with_tag",
+        lambda crc, key, value: crc.scan_instances_with_tag(key, value),
+    )
     context = RunContext(False, None, None, None, "proj", "rg", None, None)
     options = _options(scan_tag="auto_clean=false", project_id="proj", resource_group="rg")
     with pytest.raises(SystemExit) as exc_info:
