@@ -37,6 +37,7 @@ _UNREADABLE = "unreadable"
 class _NotOursError(Exception):
     """The key policy has no AWS principal to compare with `kms_user`: not one of ours."""
 
+
 TagSpec = Mapping[str, Sequence[str]]
 Clock = Callable[[], datetime.datetime]
 

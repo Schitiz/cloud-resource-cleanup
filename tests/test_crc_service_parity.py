@@ -255,5 +255,3 @@ def test_bug_356_retention_age_lines_differ_from_oracle_and_are_debug(
         assert [level for level, _ in old[2]] == expected_old
         assert [level for level, _ in new[2]] == expected_new
         assert [text for _, text in new[2]] == [text for _, text in old[2]]
-
-

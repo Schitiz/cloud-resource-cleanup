@@ -93,10 +93,28 @@ def run_crc_main(
             calls.append((current_cloud, "snapshot"))
 
     args = dict.fromkeys(
-        ["project_id", "resource_states", "filter_tags", "exception_tags", "name_regex",
-         "exception_regex", "age", "custom_age_tag_key", "max_age", "detach_age", "notags",
-         "slack_channel", "slack_notify_users", "slack_user_label", "influxdb",
-         "kms_pending_window", "kms_key_description", "kms_user", "resource_group", "scan_tag"]
+        [
+            "project_id",
+            "resource_states",
+            "filter_tags",
+            "exception_tags",
+            "name_regex",
+            "exception_regex",
+            "age",
+            "custom_age_tag_key",
+            "max_age",
+            "detach_age",
+            "notags",
+            "slack_channel",
+            "slack_notify_users",
+            "slack_user_label",
+            "influxdb",
+            "kms_pending_window",
+            "kms_key_description",
+            "kms_user",
+            "resource_group",
+            "scan_tag",
+        ]
     )
     args.update(cloud=cloud, resource=resource, operation_type=operation, dry_run=True)
     args.update(options)
@@ -123,8 +141,14 @@ OK_CASES: list[tuple[str, str, Operation, SelectionOptions | None, list[tuple[st
     ("gcp", "vm", Operation.STOP, None, [("gcp", "vm")], 0),
     ("aws", "kms", Operation.DELETE, KMS_OPTIONS, [("aws", "kms")], 0),
     ("azure", "kms", Operation.DELETE, KMS_OPTIONS, [("azure", "kms")], 0),
-    ("aws", "spot_instance_requests", Operation.DELETE, None,
-     [("aws", "spot_instance_requests")], 0),
+    (
+        "aws",
+        "spot_instance_requests",
+        Operation.DELETE,
+        None,
+        [("aws", "spot_instance_requests")],
+        0,
+    ),
     ("azure", "spot_instance_requests", Operation.DELETE, None, [], 1),
     ("gcp", "spot_instance_requests", Operation.DELETE, None, [], 1),
     ("oci", "spot_instance_requests", Operation.DELETE, None, [], 1),
@@ -138,12 +162,23 @@ OK_CASES: list[tuple[str, str, Operation, SelectionOptions | None, list[tuple[st
     ("all", "snapshot", Operation.DELETE, None, [(c, "snapshot") for c in CLOUDS], 0),
     ("all", "keypair", Operation.DELETE, None, [(c, "keypair") for c in CLOUDS], 0),
     ("all", "kms", Operation.DELETE, KMS_OPTIONS, [(c, "kms") for c in CLOUDS], 0),
-    ("all", "spot_instance_requests", Operation.DELETE, None,
-     [("aws", "spot_instance_requests")], 3),
+    (
+        "all",
+        "spot_instance_requests",
+        Operation.DELETE,
+        None,
+        [("aws", "spot_instance_requests")],
+        3,
+    ),
     ("all", "spot_instances", Operation.DELETE, None, [("azure", "spot_instances")], 3),
-    ("aws", "vm", Operation.DELETE, SelectionOptions(slack_notify_users=True,
-                                                     slack_user_label="owner"),
-     [("aws", "vm")], 0),
+    (
+        "aws",
+        "vm",
+        Operation.DELETE,
+        SelectionOptions(slack_notify_users=True, slack_user_label="owner"),
+        [("aws", "vm")],
+        0,
+    ),
 ]
 
 
@@ -174,23 +209,48 @@ def test_build_selection_matches_crc_main(
 
 
 ERROR_CASES: list[tuple[str, str, Operation, SelectionOptions | None, str]] = [
-    ("aws", "all", Operation.DELETE, KMS_OPTIONS,
-     "All Resources cleanup is supported only with all Clouds. "
-     "Format: --cloud all --resources all"),
+    (
+        "aws",
+        "all",
+        Operation.DELETE,
+        KMS_OPTIONS,
+        "All Resources cleanup is supported only with all Clouds. "
+        "Format: --cloud all --resources all",
+    ),
     ("azure", "all", Operation.DELETE, KMS_OPTIONS, "All Resources cleanup is supported only"),
     ("aws", "disk", Operation.STOP, None, "Stop is supported only for vm resource"),
     ("all", "all", Operation.STOP, KMS_OPTIONS, "Stop is supported only for vm resource"),
     ("aws", "ip", Operation.STOP, None, "Stop is supported only for vm resource"),
-    ("aws", "vm", Operation.DELETE,
-     SelectionOptions(slack_notify_users=True), "--slack_user_label is mandatory"),
+    (
+        "aws",
+        "vm",
+        Operation.DELETE,
+        SelectionOptions(slack_notify_users=True),
+        "--slack_user_label is mandatory",
+    ),
     ("aws", "kms", Operation.DELETE, None, "Key description string is required"),
-    ("aws", "kms", Operation.DELETE, SelectionOptions(kms_user="u"),
-     "Key description string is required"),
-    ("aws", "kms", Operation.DELETE, SelectionOptions(kms_key_description="d"),
-     "Jenkins user ARN is reuired"),
+    (
+        "aws",
+        "kms",
+        Operation.DELETE,
+        SelectionOptions(kms_user="u"),
+        "Key description string is required",
+    ),
+    (
+        "aws",
+        "kms",
+        Operation.DELETE,
+        SelectionOptions(kms_key_description="d"),
+        "Jenkins user ARN is reuired",
+    ),
     ("all", "all", Operation.DELETE, None, "Key description string is required"),
-    ("all", "all", Operation.DELETE, SelectionOptions(kms_key_description="d"),
-     "Jenkins user ARN is reuired"),
+    (
+        "all",
+        "all",
+        Operation.DELETE,
+        SelectionOptions(kms_key_description="d"),
+        "Jenkins user ARN is reuired",
+    ),
     ("all", "all", Operation.DELETE, KMS_OPTIONS, EBS_MESSAGE),
     ("all", "disk", Operation.DELETE, None, EBS_MESSAGE),
 ]

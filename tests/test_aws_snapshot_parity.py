@@ -587,8 +587,7 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
     (
         "ami-and-protected-logs-protection-only",
         lambda o: (
-            _logged(o, "Snap a has tag keep")
-            and not any("used by AMI" in r[2] for r in o.logs)
+            _logged(o, "Snap a has tag keep") and not any("used by AMI" in r[2] for r in o.logs)
         ),
     ),
     (

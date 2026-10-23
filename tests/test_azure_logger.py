@@ -189,7 +189,7 @@ def test_nic_failure_after_three_attempts_is_listed(
     assert _lines(caplog)[1:] == [
         "ACTION deleted cloud=azure resource=nic region=rg id=nic-a name=nic-a",
         "REGION cloud=azure resource=nic region=rg scanned=3 selected=2 seconds=S",
-        "SKIPPED cloud=azure resource=nic reason=attached count=1",
+        "SKIPPED cloud=azure resource=nic reason=in_use count=1",
         "ERRORS count=1",
         "FAILED cloud=azure resource=nic region=rg id=nic-b error=RuntimeError: busy",
         "RESULT cloud=azure resource=nic operation=delete dry_run=false selected=1 done=1 "

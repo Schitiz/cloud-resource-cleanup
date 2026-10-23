@@ -55,9 +55,7 @@ def _build_sections(
     sections = [Section(label, primary_ids, link_names=label == DISK)]
     for related_label, ids in related.items():
         slack_ids = (
-            primary_ids
-            if cloud == "azure" and label == VM and related_label == NIC
-            else None
+            primary_ids if cloud == "azure" and label == VM and related_label == NIC else None
         )
         sections.append(
             Section(

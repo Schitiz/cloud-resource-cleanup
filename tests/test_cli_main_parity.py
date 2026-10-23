@@ -705,4 +705,3 @@ def test_bug_360_main_logs_run_start_and_result_around_each_cleaner_pass(
             "done=0 failed=0 skipped=0 regions=0 regions_skipped=0 duration_s=0",
         ),
     ]
-
