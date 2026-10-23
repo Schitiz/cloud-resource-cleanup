@@ -499,4 +499,3 @@ def ping_owners_raw(crc: Any, operated: Any) -> None:
         by_owner=operated,
     )
     notifier.ping_owners(report, "Disk", get_groups=lambda: user_groups)
-

@@ -664,8 +664,7 @@ def test_repeated_run_repeats_the_calls_like_main(
     old_deleted = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Deleted")]
     azure = _setup(case, monkeypatch, caplog, capsys)
     runs = [
-        candidate_ids(engine_run("nic", _options(case), dry_run=False, now=NOW))
-        for _ in range(2)
+        candidate_ids(engine_run("nic", _options(case), dry_run=False, now=NOW)) for _ in range(2)
     ]
     new_deleted = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Deleted")]
     assert _only(azure.calls, "list", "begin_delete", "result") == _only(

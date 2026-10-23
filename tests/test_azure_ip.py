@@ -128,7 +128,12 @@ def test_supports_only_delete() -> None:
 def test_engine_run_with_injected_client(monkeypatch: pytest.MonkeyPatch) -> None:
     azure = FakeAzure([ip("a", ENV), ip("b", {"x": "y"})])
     azure.install(monkeypatch)
-    options = {"resource_group": "rg", "filter_tags": {"env": []}, "exception_tags": {}, "notags": {}}
+    options = {
+        "resource_group": "rg",
+        "filter_tags": {"env": []},
+        "exception_tags": {},
+        "notags": {},
+    }
     outcome = engine_run("ip", options, dry_run=False, now=NOW)
     assert candidate_ids(outcome) == ["a"]
     assert [section.ids for section in outcome.report.sections] == [("a",)]

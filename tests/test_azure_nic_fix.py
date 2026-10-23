@@ -25,9 +25,7 @@ def _sdk(azure: FakeAzure) -> list[tuple[Any, ...]]:
     return [c for c in azure.calls if c[0] in SDK_CALLS]
 
 
-def _engine(
-    group: str, name_regex: Any, exception_regex: Any = (), *, dry_run: bool
-) -> Any:
+def _engine(group: str, name_regex: Any, exception_regex: Any = (), *, dry_run: bool) -> Any:
     options = {
         "resource_group": group,
         "name_regex": name_regex,

@@ -266,7 +266,9 @@ def test_production_jenkins_filter_tags_selection(
         ]
     )
     azure.install(monkeypatch)
-    outcome = _engine("rg-prod", dry_run=False, filter_tags=filter_tags, exception_tags={}, notags={})
+    outcome = _engine(
+        "rg-prod", dry_run=False, filter_tags=filter_tags, exception_tags={}, notags={}
+    )
     assert candidate_ids(outcome) == ["match-unused"]
     assert ("list", "rg-prod") in azure.calls
     assert ("list_all",) not in azure.calls

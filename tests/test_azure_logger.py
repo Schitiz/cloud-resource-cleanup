@@ -1,7 +1,8 @@
 """LOG-AZU: the Azure cleaners report to `crc.core.logger` (REGION, ACTION, SKIPPED, FAILED).
 
 Azure has no regions: one REGION line per resource group, `region=<resource group>`. Every case
-runs the Cleaner through `crc.core.engine` (the Azure VM adapter for vm) under a begun run and asserts the exact new lines; the tag dumps
+runs the Cleaner through `crc.core.engine` (ip, nic, disk) or the VM classes under a begun run
+and asserts the exact lines; the tag dumps
 (BUG-358) and the per-leftover-disk skip lines are DEBUG with unchanged text.
 """
 

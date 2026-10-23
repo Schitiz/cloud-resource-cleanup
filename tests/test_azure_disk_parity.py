@@ -1,7 +1,8 @@
 """Parity: the Azure disk Cleaner, run through `crc.core.engine.run`, against main.
 
-The oracle is `tests/legacy/azu_disk.txt`. Both run against the same fake Azure compute client (the SDK classes `crc.azu._base` builds are
-replaced, so the real `Base` runs in both) and the same frozen clock. SDK calls (in order,
+The oracle is `tests/legacy/azu_disk.txt`. Both run against the same fake Azure compute client
+(the SDK classes `crc.azu._base` builds are replaced, so the real `Base` runs in both) and the
+same frozen clock. SDK calls (in order,
 including the lazy paging of `disks.list`), results, log records, stdout and raised errors must be
 identical for every case, except that `plan()` decides every disk before `apply()` deletes (so a
 listing or selection error stops the run before any delete). The engine path and the registered
@@ -765,8 +766,7 @@ def test_repeated_run_repeats_the_calls_like_main(
     old_deleted = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Deleted")]
     azure = _setup(case, monkeypatch, caplog, capsys)
     runs = [
-        candidate_ids(engine_run("disk", _options(case), dry_run=False, now=NOW))
-        for _ in range(2)
+        candidate_ids(engine_run("disk", _options(case), dry_run=False, now=NOW)) for _ in range(2)
     ]
     new_deleted = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Deleted")]
     assert _only(azure.calls, "list_by_resource_group", "begin_delete") == _only(
