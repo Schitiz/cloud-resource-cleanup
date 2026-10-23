@@ -1,14 +1,13 @@
 # Copyright (c) Yugabyte, Inc.
 
-"""Typed EC2 client Protocol, default factory and injected runtime of the Elastic IP cleaner."""
+"""Typed EC2 client Protocol and default factory of the Elastic IP cleaner."""
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
 from typing import Any, Protocol
 
 import boto3
 
-from crc.aws._common import EC2_SERVICE_NAME, ec2_regions
+from crc.aws._common import EC2_SERVICE_NAME
 
 TagSpec = Mapping[str, Sequence[str]]
 
@@ -33,11 +32,3 @@ def boto3_client(region: str) -> ElasticIpClient:
     """Default EC2 client factory."""
     client: ElasticIpClient = boto3.client(EC2_SERVICE_NAME, region_name=region)
     return client
-
-
-@dataclass(frozen=True, slots=True)
-class ElasticIpRuntime:
-    """Injected collaborators of the cleaner: the SDK client factory and the region lister."""
-
-    client_factory: ClientFactory = boto3_client
-    list_regions: RegionLister = ec2_regions

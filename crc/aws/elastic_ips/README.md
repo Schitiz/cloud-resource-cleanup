@@ -6,15 +6,14 @@ AWS Elastic IP cleaner: releases unassociated, tagged Elastic IPs that match the
 
 Modules:
 
-- `client.py`: EC2 Protocol, default factory, runtime.
+- `client.py`: EC2 Protocol and default factory.
 - `cleaner.py`: the Cleaner and its registry factory.
 
 ## Public API
 
 - `ElasticIpClient`: Protocol of the two EC2 calls used, describe_addresses and release_address; tests pass fakes.
 - `boto3_client()`: default EC2 client factory.
-- `ElasticIpRuntime`: frozen dataclass with an injectable client factory and region lister (no clock: no age gate).
-- `ElasticIpCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus per-region plan_region and apply_region).
+- `ElasticIpCleaner`: the Cleaner (supports, read-only plan, mutating apply, should_skip, plus per-region plan_region and apply_region).
 - `build_elastic_ip_cleaner()`: registry factory behind the aws / ip registration; reads filter_tags, exception_tags and notags from RunContext.options.
 - `log_summary()`: the summary lines logged once all regions are done.
 

@@ -6,7 +6,7 @@ AWS KMS key cleaner: schedules deletion of enabled keys matching description, ta
 
 Modules:
 
-- `client.py`: KMS Protocols, default factory, runtime.
+- `client.py`: KMS Protocols and default factory.
 - `settings.py`: `KmsSettings`.
 - `tags.py`: tag reading and filter matching.
 - `cleaner.py`: the Cleaner and its registry factory.
@@ -16,12 +16,11 @@ Modules:
 - `KmsPaginator`: Protocol of the list_keys paginator (paginate).
 - `KmsClient`: Protocol of the five KMS calls used (get_paginator, list_resource_tags, describe_key, get_key_policy, schedule_key_deletion); tests pass fakes.
 - `boto3_client()`: default KMS client factory.
-- `KmsRuntime`: frozen dataclass with an injectable client factory and clock (now).
 - `KmsSettings`: frozen dataclass with the filters and thresholds of one run.
 - `NotOursError`: the key policy has no AWS principal to compare with kms_user.
 - `tag_pairs()`: (TagKey, TagValue) pairs of one key; a malformed tag raises and the key is skipped.
 - `matches_filter()`: every filter key present with any of its values (BUG-007, BUG-014).
-- `KmsCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus connect_and_list, plan_keys and schedule).
+- `KmsCleaner`: the Cleaner (supports, read-only plan, mutating apply, should_skip, plus connect_and_list, plan_keys and schedule).
 - `build_kms_cleaner()`: registry factory behind the aws / kms registration; reads filter_tags, exception_tags, kms_key_description, kms_user, kms_pending_window, age and custom_age_tag_key from RunContext.options.
 - `log_summary()`: the summary lines logged once the cleanup is done.
 - `log_would_delete()`: run-log ACTION lines of the keys a dry run would schedule.

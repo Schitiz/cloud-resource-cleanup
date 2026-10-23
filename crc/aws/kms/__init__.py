@@ -4,14 +4,13 @@
 Cleaner."""
 
 from .cleaner import KmsCleaner, build_kms_cleaner
-from .client import KmsClient, KmsPaginator, KmsRuntime
+from .client import KmsClient, KmsPaginator
 from .settings import KmsSettings
 
 __all__ = [
     "KmsCleaner",
     "KmsClient",
     "KmsPaginator",
-    "KmsRuntime",
     "KmsSettings",
     "build_kms_cleaner",
 ]

@@ -616,6 +616,12 @@ def test_cleaner_protocol_matches_main(
     new_releases = [c for c in new.calls if c[0] == "release_address"]
     if case.fails_in_plan:
         assert new_releases == []
+        assert [c for c in new.calls if c[0] == "describe_addresses"] == [
+            c for c in old.calls if c[0] == "describe_addresses"
+        ]
+        if len(case.regions) <= 1:
+            assert new.logs == old.logs[:-1]
+            assert _without_client(new.calls) == _without_client(old.calls)
         return
     if new.error is None:
         assert new.deleted == old.deleted
@@ -629,6 +635,9 @@ def test_cleaner_protocol_matches_main(
             assert _without_client(new.calls) == _without_client(old.calls)
     else:
         assert new_releases == old_releases
+        assert new.logs == old.logs[:-1]
+        if len(case.regions) <= 1:
+            assert _without_client(new.calls) == _without_client(old.calls)
 
 
 def _find(case_id: str) -> Case:
