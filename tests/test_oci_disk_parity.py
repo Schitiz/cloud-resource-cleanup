@@ -818,16 +818,35 @@ def test_unknown_attachments_keep_the_volumes(
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run(_new, case, monkeypatch, caplog, capsys)
     planned = _run_cleaner(case, monkeypatch, caplog, capsys)
+    keep_msg = (
+        "Region r1: keeping every disk: block volume attachments unknown"
+        if bug == "BUG-096"
+        else "Region r1: keeping every boot disk: boot volume attachments unknown"
+    )
+    prefix_logs = [
+        log
+        for log in old.logs
+        if log[2].startswith(("Retrieved list of OCI regions:", "Region r1: skipped "))
+    ]
+    expected_cleaner_logs = [
+        *prefix_logs,
+        ("root", logging.WARNING, keep_msg),
+        ("root", logging.WARNING, "No OCI disk to delete."),
+        ("root", logging.WARNING, "number of OCI disks deleted: 0"),
+        ("root", logging.WARNING, "List of OCI disk deleted: []"),
+    ]
     assert old.deleted == oracle_deleted, "oracle no longer shows the bug"
     assert new.error is None
     assert new.deleted == []
     assert new.count == 0
-    assert [c for c in new.calls if _is_delete(c)] == []
-    assert _reads(new.calls) == _reads(old.calls)
+    assert new.calls == _reads(old.calls)
+    assert new.logs == [
+        *expected_cleaner_logs,
+        ("root", logging.INFO, "count of items in disk_names_to_delete: 0"),
+    ]
+    assert new.stdout == old.stdout
     assert planned.error is None
     assert planned.deleted == []
-    assert [c for c in planned.calls if _is_delete(c)] == []
-    assert any(
-        log[1] == logging.WARNING and log[2].startswith("Region r1: keeping every ")
-        for log in new.logs
-    )
+    assert planned.calls == _reads(old.calls)
+    assert planned.logs == expected_cleaner_logs
+    assert planned.stdout == old.stdout
