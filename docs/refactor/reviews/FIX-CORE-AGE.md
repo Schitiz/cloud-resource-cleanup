@@ -66,3 +66,22 @@ avoid merge conflicts.
   valid 1-day age. Main: yes (`crc/service.py:214-220`).
 - Duplicate AWS tag keys: the first entry decides (empty first entry keeps; before, the first non-empty won,
   BUG-289). AWS tag keys are unique, so no real impact.
+
+## Round 1 (Argon)
+
+- **Findings.** None blocking or nit.
+  - (1) **Bugs fixed:** Both `BUG-004` (present but empty/whitespace/`None`/non-string/unparseable custom age tag) and `BUG-016` (present custom age tag that parses to a non-finite, zero, negative, or otherwise invalid age) are fixed in `crc/core/age.py` (`get_retention_age` + `is_old`, delegated by `crc/service.py`). Shared validation in `_checked_retention_age` reuses `lookup_custom_age_tag` and `require_positive_age` with the same semantics as `validated_retention_age`, while keeping `validated_retention_age` (Spot modules) untouched (`WARNING` + `ValueError`). In `get_retention_age`, present-but-bad tags record `logger.current().skip("bad_age_tag")`, log at `DEBUG`, and return a fresh copy of `KEEP_AGE` (`{"days": 1_000_000}`); `is_old` returns `False` for `KEEP_AGE` before `_apply_max_age_override` so `MAX_AGE` cannot shorten it, and AWS disk's `older_than_floor` also keeps it. `tests/test_core_age_fix.py` and `tests/test_crc_service_parity.py::test_get_retention_age_bad_tag_diverges_and_keeps` fail on `182466d` and pass now.
+  - (2) **Direction & parity:** Strictly keeps more (or turns mid-run `OverflowError` / `TypeError` on malformed tags into keeps); never deletes, stops, or releases anything kept before. All `tests/legacy/*.txt` oracle files are untouched. Diverging cases in `tests/test_crc_service_parity.py` (`BUG_004_CASES`) assert both inequality with the oracle and the exact new outcome (`KEEP_AGE`, `DEBUG`-only logs); all other cases assert equality with the oracle. Diverging quirk entries in the 9 caller parity tests are marked `BUG_004_FIXED` and assert the new kept outcome.
+  - (3) **Production commands:** All 31 Jenkins commands keep working with identical flags and selection for resources without `max_retention_age` or with a valid positive tag; only resources with a present-but-broken `max_retention_age` tag change (kept, even under `--max_age '{"days": 21}'`).
+  - (4) **Fail-closed before SDK mutation:** Age checks run during candidate selection (`plan()`) before any delete/stop SDK calls.
+  - (5) **Protected files:** `tests/archtest/safety_lock.json`, the 5 hash-locked safety test files, `docs/refactor/PLAN.md`, `docs/refactor/STATUS.md`, `docs/refactor/BUGS.md`, and `CLEANUP_SAFETY.md` are untouched. Proposed `CLEANUP_SAFETY.md` (`SAF-009` and module map) updates are documented under `## Owner action`.
+  - (6) **READMEs:** `crc/core/README.md` (`## Public API` and `## Safety Invariants`) and `crc/README.md` (`## Safety Invariants`) are updated and pass `ARCH-002`.
+  - (7) **Unfixed bugs:** None (`BUG-004` and `BUG-016` are both fixed).
+- **Gates (`make check`):**
+  - `ruff check .`: passed
+  - `mypy`: passed (`Success: no issues found in 229 source files`)
+  - `lint-imports`: passed (`5 kept, 0 broken`)
+  - `pytest -q` (including `tests/archtest`): `42491 passed` (up from 42444 on `182466d`, +47 tests)
+
+VERDICT: APPROVE
+
