@@ -15,6 +15,8 @@ from typing import Any
 import pytest
 
 from crc.core.cleaner import Candidate, Operation, Plan, Result, RunContext
+from crc.core.report import Section
+from crc.notify.slack import SlackNotifier
 from tests.helpers_oracle import load_legacy_crc
 
 ADAPTERS = [
@@ -227,6 +229,138 @@ def execute(crc_class: Any, modules: list[ModuleType], case: Case) -> Recorded:
     }
 
 
+ROUTE_ADAPTERS: dict[tuple[str, str], str] = {
+    ("aws", "vm"): "AWS_VM",
+    ("azure", "vm"): "AZU_VM",
+    ("gcp", "vm"): "GCP_VM",
+    ("oci", "vm"): "OCI_VM",
+    ("azure", "spot_instances"): "AZU_SpotVM",
+    ("gcp", "spot_instances"): "GCP_SpotVM",
+    ("oci", "spot_instances"): "OCI_SpotVM",
+    ("aws", "spot_instance_requests"): "SpotInstanceRequests",
+    ("aws", "ip"): "ElasticIPs",
+    ("azure", "ip"): "AZU_IP",
+    ("gcp", "ip"): "GCP_IP",
+    ("azure", "nic"): "NIC",
+    ("aws", "disk"): "AWS_Disk",
+    ("azure", "disk"): "Disk",
+    ("gcp", "disk"): "GCP_Disk",
+    ("oci", "disk"): "OCI_Disk",
+    ("aws", "vpc"): "VPC",
+    ("aws", "kms"): "Kms",
+    ("aws", "keypair"): "KeyPairs",
+}
+
+
+def _vm_init(cloud: str, dry: bool, opts: Any) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    common = (
+        opts["filter_tags"],
+        opts["exception_tags"],
+        opts["age"],
+        opts["custom_age_tag_key"],
+        opts["notags"],
+    )
+    if cloud == "azure":
+        return (opts["resource_group"], dry, *common), {}
+    if cloud == "gcp":
+        return (dry, opts["project_id"], *common), {}
+    return (dry, *common), {}
+
+
+def _ip_init(cloud: str, dry: bool, opts: Any) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    if cloud == "azure":
+        return (
+            opts["resource_group"],
+            dry,
+            opts["filter_tags"],
+            opts["exception_tags"],
+            opts["notags"],
+        ), {}
+    if cloud == "gcp":
+        return (dry, opts["project_id"], opts["name_regex"], opts["exception_regex"]), {}
+    return (dry, opts["filter_tags"], opts["exception_tags"], opts["notags"]), {}
+
+
+def _disk_init(cloud: str, dry: bool, opts: Any) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    common = (
+        opts["filter_tags"],
+        opts["exception_tags"],
+        opts["age"],
+        opts["custom_age_tag_key"],
+        opts["notags"],
+    )
+    if cloud == "aws":
+        return (
+            dry,
+            *common,
+            opts["name_regex"],
+            opts["exception_regex"],
+            opts["detach_age"],
+        ), {}
+    if cloud == "oci":
+        return (dry, *common), {}
+    if cloud == "azure":
+        return (opts["resource_group"], dry, *common), {}
+    return (), {
+        "dry_run": dry,
+        "project_id": opts["project_id"],
+        "filter_labels": opts["filter_tags"],
+        "exception_labels": opts["exception_tags"],
+        "age": opts["age"],
+        "custom_age_tag_key": opts["custom_age_tag_key"],
+        "detach_age": opts["detach_age"],
+        "notags": opts["notags"],
+        "name_regex": opts["name_regex"],
+        "exception_regex": opts["exception_regex"],
+        "slack_notify_users": opts["slack_notify_users"],
+        "slack_user_label": opts["slack_user_label"],
+    }
+
+
+def _aws_only_init(kind: str, dry: bool, opts: Any) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    if kind == "vpc":
+        return (dry, opts["filter_tags"], opts["exception_tags"], opts["notags"]), {}
+    if kind == "kms":
+        return (
+            dry,
+            opts["filter_tags"],
+            opts["exception_tags"],
+            opts["kms_key_description"],
+            opts["kms_user"],
+            opts["kms_pending_window"],
+            opts["age"],
+            opts["custom_age_tag_key"],
+        ), {}
+    return (dry, opts["name_regex"], opts["exception_regex"], opts["age"]), {}
+
+
+def adapter_init_from_context(
+    cloud: str, kind: str, context: RunContext
+) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    """Reconstruct the oracle adapter `__init__` `(args, kwargs)` from `context.options`."""
+    dry = context.dry_run
+    opts = context.options
+    if kind in ("vm", "spot_instances", "spot_instance_requests"):
+        return _vm_init(cloud, dry, opts)
+    if kind == "ip":
+        return _ip_init(cloud, dry, opts)
+    if kind == "nic":
+        return (opts["resource_group"], dry, opts["name_regex"], opts["exception_regex"]), {}
+    if kind == "disk":
+        return _disk_init(cloud, dry, opts)
+    return _aws_only_init(kind, dry, opts)
+
+
+def record_adapter_call(cloud: str, kind: str, context: RunContext, logs: Logs) -> None:
+    """Append the oracle adapter's `delete`/`stop` entry from `context` to `logs.adapters`."""
+    adapter = ROUTE_ADAPTERS[(cloud, kind)]
+    if context.operation is Operation.STOP:
+        logs.adapters.append((adapter, "stop"))
+    else:
+        state = (context.options["instance_state"],) if "instance_state" in context.options else ()
+        logs.adapters.append((adapter, "delete", state))
+
+
 @dataclass(frozen=True)
 class Op:
     """One routed operation: the pair, the engine operation and the flags the CLI would parse."""
@@ -240,9 +374,11 @@ class Op:
 class RoutedCleaner:
     """Plans and applies the ids of the scenario, as the adapter of the oracle exposes them."""
 
-    def __init__(self, cloud: str, op: Op, scenario: Scenario, seen: list[RunContext]) -> None:
+    def __init__(
+        self, cloud: str, op: Op, scenario: Scenario, seen: list[RunContext], logs: Logs
+    ) -> None:
         self.cloud, self.kind, self.op = cloud, op.kind, op
-        self.scenario, self.seen = scenario, seen
+        self.scenario, self.seen, self.logs = scenario, seen, logs
         values = scenario.values
         raw = values["get_stopped" if op.operation == "stop" else "get_deleted"]
         self.by_owner: dict[str, tuple[str, ...]] | None = None
@@ -263,7 +399,11 @@ class RoutedCleaner:
 
     def plan(self, context: RunContext) -> Plan:
         self.seen.append(context)
-        if context.dry_run or self.kind != "disk":
+        adapter = ROUTE_ADAPTERS[(self.cloud, self.kind)]
+        args, kwargs = adapter_init_from_context(self.cloud, self.kind, context)
+        self.logs.adapters.append(("new", adapter, args, kwargs))
+        if context.dry_run:
+            record_adapter_call(self.cloud, self.kind, context, self.logs)
             self._fail()
         return Plan(
             candidates=tuple(Candidate(id=i) for i in self.ids),
@@ -272,6 +412,8 @@ class RoutedCleaner:
         )
 
     def apply(self, plan: Plan, context: RunContext) -> Result:
+        assert not context.dry_run
+        record_adapter_call(self.cloud, self.kind, context, self.logs)
         self._fail()
         return Result(
             succeeded=tuple(c.id for c in plan.candidates),
@@ -281,7 +423,12 @@ class RoutedCleaner:
 
 
 def run_routed(
-    case: Case, cloud: str, op: Op, values: dict[str, Any]
+    case: Case,
+    cloud: str,
+    op: Op,
+    values: dict[str, Any],
+    *,
+    force_slack: bool = False,
 ) -> tuple[Recorded, list[Any]]:
     """Run `bridge.run_routed` for one pair with a `RoutedCleaner`; the same fakes as the oracle."""
     from crc.cli import bridge
@@ -291,13 +438,21 @@ def run_routed(
 
     scenario = Scenario(**{**case.scenario.__dict__, "values": values})
     seen: list[RunContext] = []
-    registry = Registry()
-    registry.register(cloud, op.kind)(lambda context: RoutedCleaner(cloud, op, scenario, seen))
     logs, out = Logs(), io.StringIO()
+    registry = Registry()
+    registry.register(cloud, op.kind)(
+        lambda context: RoutedCleaner(cloud, op, scenario, seen, logs)
+    )
     result: Any = ("ok", "None")
     with pytest.MonkeyPatch.context() as patch, redirect_stdout(out):
         patch.setattr(bridge, "init_run_logging", lambda: None)
         patch.setattr(bridge, "build_registry", lambda: registry)
+        if force_slack:
+            patch.setattr(
+                bridge,
+                "build_notifiers",
+                lambda crc, route: [SlackNotifier(crc.slack_client, crc.slack_channel)],
+            )
         try:
             crc = build(CRC, Case(case.name, cloud, case.act, scenario), logs)
             options = read_options(
@@ -320,8 +475,28 @@ def run_routed(
             result = ("error", type(exc).__name__, str(exc))
     recorded = {
         "result": result,
+        "adapters": logs.adapters,
         "slack": logs.slack,
         "influx": logs.influx,
         "stdout": out.getvalue(),
     }
     return recorded, seen
+
+
+def ping_owners_raw(crc: Any, operated: Any) -> None:
+    """Run `SlackNotifier` owner pings with main's `BUG-033` pre-loop on raw `operated` input."""
+    from crc.core.report import Report
+
+    notifier = SlackNotifier(crc.slack_client, crc.slack_channel)
+    user_groups = notifier.user_groups()
+    for key in operated.keys():  # noqa: SIM118 - BUG-033: keys() + len() pre-loop before pinging
+        len(operated[key])
+    report = Report(
+        crc.cloud,
+        Operation.DELETE,
+        crc.dry_run,
+        (Section("Disk", ()),),
+        by_owner=operated,
+    )
+    notifier.ping_owners(report, "Disk", get_groups=lambda: user_groups)
+
