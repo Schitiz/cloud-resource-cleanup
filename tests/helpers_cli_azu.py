@@ -30,6 +30,7 @@ class Kind:
     make: Callable[[str], Any]
     flags: dict[str, Any]
     operation: str = "delete"
+    tag: str = ""
     variants: tuple[str, ...] = ("plain", "empty", "list_error", "delete_error")
 
 
@@ -120,12 +121,29 @@ def _spots(variant: str) -> Any:
 COMMON = {"filter_tags": ENV, "exception_tags": {}, "notags": {"owner": ["x"]}, "age": AGE}
 SPOT = {**COMMON, "filter_tags": {"yb_task": ["itest"]}}
 KINDS = [
-    Kind("vm", _vms, {**COMMON, "resource_states": ["running"]}),
-    Kind("vm", _vms, {**COMMON, "resource_states": ["stopped", "running"]}, operation="stop"),
-    Kind("vm", _vms, {**COMMON, "resource_states": ["stopped", "running"]}),
+    Kind("vm", _vms, {**COMMON, "resource_states": ["running"]}, tag="running"),
+    Kind(
+        "vm",
+        _vms,
+        {**COMMON, "resource_states": ["stopped", "running"]},
+        operation="stop",
+        tag="stop",
+    ),
+    Kind("vm", _vms, {**COMMON, "resource_states": ["stopped", "running"]}, tag="stopped"),
     Kind("ip", _ips, {**COMMON, "name_regex": ["n"], "exception_regex": ["x"]}),
     Kind("nic", _nics, {"name_regex": ["^nic"], "exception_regex": ["keep"]}),
     Kind("disk", _disks, COMMON),
     Kind("spot_instances", _spots, SPOT),
-    Kind("spot_instances", _spots, {**SPOT, "resource_group": None}, variants=("empty",)),
+    Kind(
+        "spot_instances",
+        _spots,
+        {**SPOT, "resource_group": None},
+        variants=("empty",),
+        tag="no_group",
+    ),
 ]
+
+
+def case_key(kind: Kind) -> str:
+    """The name of a kind in the frozen run-log data: resource, operation and tag."""
+    return "-".join(x for x in (kind.resource, kind.operation, kind.tag) if x)
