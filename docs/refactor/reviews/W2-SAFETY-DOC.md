@@ -95,3 +95,53 @@ Ran `pip install -r requirements.txt -r requirements-dev.txt && make check`:
 | `pytest -q` | **43010 passed in 165.36s** |
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff cea0a8a..HEAD`. I checked the Round 1 fixes first. The `validate_targets` wording ("when `--scan_tag` is not set", `crc/cli/main.py:51-53`), the `--name_regex` / `--exception_regex` / `--filter_tags` / `--notags` resource lists and the Example 10 floor of 3 + 7 days are correct. Then I did the checks again on my own.
+
+### Checks
+
+1. **SAF statements match the code on this branch.**
+   - SAF-002: the only `sys.exit` in non-test code is `crc/cli/scan.py:149,152`, and dry run is forced at `:138-140`.
+   - SAF-009: `KEEP_AGE` is set at `crc/core/age.py:23`. `is_old` returns False before `_apply_max_age_override` (`:216-220`). `get_retention_age` counts `bad_age_tag` and returns `KEEP_AGE` (`:279-280`). The callers are exactly the 9 modules listed (grep: `crc/aws/{disk/volumes,kms,vm/cleaner}.py`, `crc/azu/{disk,vm/cleaner}.py`, `crc/gcp/{disk,vm}.py`, `crc/oci/{disk,vm}/cleaner.py`) plus the `crc/service.py:92` wrapper. AWS disk does not use `is_old`: `KEEP_AGE` becomes the CreateTime floor (`crc/core/policy.py:341-349`), which is never reached, so the volume is kept just the same.
+   - SAF-010: `_apply_max_age_override` (`crc/core/age.py:154-163`) still accepts a zero `MAX_AGE`.
+   - SAF-014: `crc/cli/dispatch.py:25-28`, `:227-228`.
+   - SAF-025: `aws_disk_creation_floor` (`crc/core/policy.py:341-349`); `_detach_floor` adds `detach_age` only when both are set (`crc/aws/disk/volumes.py:207-214`); `older_than_floor` ignores `MAX_AGE` (`:69-75`).
+   - SAF-043: `crc/gcp/spot_vm/instances.py:94-95`.
+   - SAF-044 (OCI): `crc/oci/spot_vm/leftovers.py:24`, `:120-152`.
+   - SAF-045: `crc/oci/vm/cleaner.py:40`, `:235-240`.
+   - SAF-001: `log_skipped_region` is at `crc/aws/connectivity.py:26`.
+   - CLI validation section: `crc/cli/dispatch.py:187-236`, `crc/cli/inputs.py:148-158`.
+   - `crc.py` re-export shim: only imports, `__all__` and `main()` at `:103-104`.
+   - All 46 IDs are present and in order, and `SAF-LOCK` passes. No true statement was weakened: SAF-003, SAF-005 and SAF-014 lost implementation detail or history, not safety meaning.
+2. **Owner actions.** Every `FIX-*.md` "Owner action" section is applied or is "None": AWS-DISK (SAF-025 and the `yb_task` folding rule), CORE-AGE (SAF-009 and the `crc/service.py` row), CLI-MERGE and CLI-ROUTE (CLI validation), GCP-DISK (module row and keep rule), GCP-SPOT (SAF-043, SAF-044), OCI-DISK (keep rule), OCI-SPOT (SAF-044) and OCI-VM (SAF-045 and keep rule). The per-package READMEs that still say "fail open" (FIX-CORE-AGE) belong to other lanes. Round 1 already lists them under "Owner actions left".
+3. **README.**
+   - Every flag, short option, cloud and resource exists in `crc/cli/args.py`.
+   - The `stop`, `--resource all`, kms and `--scan_tag` rules match `crc/cli/inputs.py:111-128,148-158` and `crc/cli/scan.py`.
+   - The log path matches `crc/service.py` and `crc/utils.py`.
+   - The OCI and Azure environment variables match `crc/oci/_base.py:45-48` and `crc/azu/_base.py:27-31`.
+4. **File scope.** Only `CLEANUP_SAFETY.md`, `README.md` and this file changed.
+
+### Findings (fixed in review)
+
+1. **`README.md` Examples 4 and 5**: `--cloud all --resource vm` without `--project_id`. `--cloud all` runs GCP, and `GCP_VM` passes `project_id` unchecked to `list_zones` (`crc/cli/vm_ops.py:72-80`, `crc/gcp/vm.py:99`), so the GCP pass fails. I added `--project_id <project>` to both examples and noted on the `project_id` bullet that `--cloud all` needs it too.
+2. **`README.md` Example 3**: it said "older than 14 days" but sets only `--detach_age`, and GCP ignores `--age` for disks. I changed it to "detached for at least 14 days".
+
+### New bugs (not fixed)
+
+- `crc/cli/vm_ops.py:72-80`: GCP VM (`delete_vm` / `stop_vm`) has no `project_id` check, unlike GCP Spot (`:170-171`). `--cloud all` without `--project_id` reaches the GCP SDK with `project=None`, after the AWS and Azure passes have already deleted or stopped resources.
+- `crc/cli/inputs.py:115-119` with `crc/cli/dispatch.py:227-228`: the default `--resource all` can never run. A single cloud raises "needs `--cloud all`", and `--cloud all --resource all` raises at the EBS breaker. The `--resource` default and help still present it as a mode.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt`, then `make check` (wall time 179 s):
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed |
+| `mypy` | Success: no issues found in 251 source files |
+| `lint-imports` | Contracts: 5 kept, 0 broken |
+| `pytest -q` | **43010 passed in 161.64s** |
+
+ROUND 2 VERDICT: APPROVE

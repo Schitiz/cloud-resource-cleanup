@@ -131,7 +131,7 @@ To run the script, use the following command:
 python crc.py --cloud <cloud_name> --operation_type <operation_type> --resource <resource_name> --filter_tags <tags> --exception_tags <tags> --notags <tags> --age <age> --slack_channel <slack_channel> --influxdb <influxdb_connection_details>
 ```
 * `cloud` (`-c`): Specify the cloud name (aws, azure, gcp, oci or all). Required.
-* `project_id` (`-p`): Required for gcp
+* `project_id` (`-p`): Required for gcp, including `--cloud all`, which runs GCP too
 * `resource` (`-r`): Indicate the type of resource you want to target: `disk`, `ip`, `keypair`, `vm`, `vpc`, `kms`, `nic`, `snapshot`, `spot_instance_requests` (AWS only: cancel the request, then terminate), `spot_instances` (Azure, GCP and OCI Spot or preemptible VMs) or `all`. Default: 'all'. `keypair`, `kms`, `snapshot` and `vpc` are AWS only, `nic` is Azure only and `ip` is not available on OCI. A pair that is not supported raises before anything is deleted; under `--cloud all` it is skipped only when no supported pair follows it. `--resource all` needs `--cloud all`, and `--cloud all` cannot be combined with `--resource all` or `--resource disk` (see below). AWS EBS volume deletion is opt-in and needs both `--cloud aws` and `--resource disk`. Any other combination that would hit the aws+disk path raises (it does not skip and continue), so `--cloud all` / `--resource all` cannot unlock other destructive AWS cleanups as a side effect. GCP and OCI `spot_instances` need an explicit `--cloud gcp` / `--cloud oci`; under `--cloud all` only Azure `spot_instances` runs.
 * `resource_group`: Use this option to specify the resource group for Azure. If this flag is provided, the script will only operate on resources within the specified resource group. This allows for more precise targeting of resources in your Azure environment.
 * `operation_type` (`-o`): Specify the type of operation to perform on the resource (delete or stop). Default: 'delete'. `stop` is supported only with `--resource vm`.
@@ -168,19 +168,19 @@ python crc.py --cloud aws --resource vm --filter_tags "{'test_task': ['stress-te
 python crc.py --cloud azure --resource_group test-rg --resource vm --filter_tags "{'test_task': ['stress-test']}" --age "{'days': 2}" --operation_type stop
 ```
 
-3. To delete all GCP disks that are older than 14 days and have the tag `test_task` with the value `stress-test` and project_id as 'test_project':
+3. To delete all GCP disks that have been detached for at least 14 days and have the tag `test_task` with the value `stress-test` and project_id as 'test_project':
 ```
 python crc.py --cloud gcp --project_id test_project --resource disk --filter_tags "{'test_task': ['stress-test']}" --detach_age "{'days': 14}"
 ```
 
 4. To stop all VMs across all clouds that have the tag `test_task` with the value `stress-test` and `perf-test` and do not have the tag `test_owner`:
 ```
-python crc.py --cloud all --resource vm --filter_tags "{'test_task': ['stress-test', 'perf-test']}" --notags "{'test_owner': []}" --operation_type stop
+python crc.py --cloud all --project_id <project> --resource vm --filter_tags "{'test_task': ['stress-test', 'perf-test']}" --notags "{'test_owner': []}" --operation_type stop
 ```
 
 5. To perform a dry run of the script and list all VMs across all clouds that are older than 2 days and do not have the tag `test_task`:
 ```
-python crc.py --cloud all --resource vm --age "{'days': 2}" --notags "{'test_task': []}" --dry_run
+python crc.py --cloud all --project_id <project> --resource vm --age "{'days': 2}" --notags "{'test_task': []}" --dry_run
 ```
 
 6. To Delete AWS VPCs and all attached resources
