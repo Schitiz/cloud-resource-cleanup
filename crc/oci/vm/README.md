@@ -12,7 +12,8 @@ the sibling files `crc/oci/vm.py` and `crc/oci/vm_api.py` (pure move, no behavio
 Modules, split by responsibility:
 
 - `client.py`: the typed Protocols of the OCI compute calls used, their SDK implementation and the per-region factory on top of `Base` (was `vm_api.py`)
-- `cleaner.py`: settings, summary logging, `VmCleaner` and the registry factory
+- `settings.py`: `VmSettings`, the skip vocabulary and the summary logging
+- `cleaner.py`: `VmCleaner` and the registry factory (re-exports the settings names)
 - `adapter.py`: `VmRuntime` and `VM`, the class `crc.py` calls, which drives the cleaner region by region and instance by instance
 
 ## Public API
@@ -29,6 +30,8 @@ Modules, split by responsibility:
 - `build_vm_cleaner()`: registry factory behind @register("oci", "vm"); reads filter_tags, exception_tags, notags, age, custom_age_tag_key and (delete only; stop always uses RUNNING, as on main) instance_state from RunContext.options.
 - `VmRuntime`: frozen dataclass with the injected API factory, region lister and clock (now) of `VM`; unset parts come from Base.
 - `VM`: adapter crc.py calls (delete(), stop(), get_deleted, get_stopped, delete_count, stopped_count, instance_names_to_delete, instance_names_to_stop); subclasses Service and Base; decides and acts instance by instance in the order of main.
+- `log_summary()`: the closing log lines of a VM run (settings module); main's "nothing to do" warning looks at both name lists.
+- `log_for()`: `log_summary()` for a run that only fills one of the two lists.
 
 ## Safety Invariants
 

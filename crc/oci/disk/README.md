@@ -7,7 +7,9 @@ OCI block volume and boot volume cleaner (`--cloud oci --resource disk`). It del
 Modules, split by responsibility:
 
 - `api.py` (was `disk_api.py`): the typed Protocols of the OCI calls the cleaner uses, their SDK implementation and the per-region factories on top of `Base`
-- `cleaner.py` (was the first part of `disk.py`): `DiskCleaner` (registered as `oci` / `disk`), its settings and runtime dataclasses and the registry factory
+- `settings.py`: `DiskSettings`, `DiskRuntime`, the skip vocabulary and the summary log
+- `decide.py`: state, attachment, tag and age checks and small helpers over decisions and attachments
+- `cleaner.py` (was the first part of `disk.py`): `DiskCleaner` (registered as `oci` / `disk`), re-exports of the settings names, and the registry factory
 - `adapter.py` (was the last part of `disk.py`): `Disk`, the class `crc.py` calls
 
 ## Public API
@@ -23,6 +25,11 @@ Modules, split by responsibility:
 - `DiskCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus list_region, attached_volume_ids, attached_boot_volume_ids (both return None when the attachments are unknown), decide and remove used by the adapter).
 - `build_disk_cleaner()`: registry factory behind @register("oci", "disk"); reads filter_tags, exception_tags, notags, age and custom_age_tag_key from RunContext.options.
 - `Disk`: adapter crc.py calls (delete(), get_deleted, count, disk_names_to_delete); subclasses Service and Base; decides and deletes volume by volume in the order of main.
+- `skip_reason()`: why a volume is kept (state, attachment, tag, age), or None for a candidate; used by DiskCleaner.decide.
+- `is_old()`: older than age or the volume's own custom age tag (capped by MAX_AGE).
+- `in_use()`: the attachments that still claim their volume (ATTACHED or ATTACHING).
+- `sort_decisions()`: appends each decision to the candidate or skipped list in order.
+- `log_summary()`: the closing log lines of a disk run (settings module).
 
 ## Safety Invariants
 

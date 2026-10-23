@@ -39,25 +39,10 @@ from crc.oci.spot_vm.client import (
     regions_of,
 )
 from crc.oci.spot_vm.decide import Clock, SpotVmSettings, skip_reason
-
-VOLUMES_LABEL = "Disk"
-
-
-def log_summary(names: list[str], volumes: list[str], *, dry_run: bool) -> None:
-    """The closing lines of main. The lists are logged as they are (main logs its own lists)."""
-    if not names:
-        logging.warning("No OCI preemptible instances to delete.")
-    label = "which will be deleted" if dry_run else "deleted"
-    logging.warning(
-        "List of OCI preemptible instances (Total: %s) %s: %s", len(names), label, names
-    )
-    logging.warning(
-        "List of OCI leftover block volumes (Total: %s) %s: %s", len(volumes), label, volumes
-    )
-
-
-def log_instance_error(name: object, error: Exception) -> None:
-    logging.error("Error processing OCI preemptible instance %s: %s", name, error)
+from crc.oci.spot_vm.report import VOLUMES_LABEL, record_dry_run
+from crc.oci.spot_vm.report import log_instance_error as log_instance_error
+from crc.oci.spot_vm.report import log_summary as log_summary
+from crc.oci.spot_vm.terminate import terminate_instance, with_checked_volumes
 
 
 class SpotVmCleaner:
@@ -100,7 +85,15 @@ class SpotVmCleaner:
                     if isinstance(decision, Skipped):
                         skipped.append(decision)
                     else:
-                        candidates.append(self._checked(clients, decision, context.dry_run))
+                        candidates.append(
+                            with_checked_volumes(
+                                clients,
+                                decision,
+                                self._settings,
+                                self._pager,
+                                dry_run=context.dry_run,
+                            )
+                        )
                 except Exception as e:
                     log_instance_error(getattr(instance, "display_name", "?"), e)
                     _logger.record_failure(region, getattr(instance, "id", "?"), e)
@@ -121,22 +114,7 @@ class SpotVmCleaner:
         names = [c.name for c in plan.candidates]
         if context.dry_run:
             volumes = [v for c in plan.candidates for v in c.extra["volumes"]]
-            for candidate in plan.candidates:
-                _logger.record_action(
-                    Operation.DELETE,
-                    dry_run=True,
-                    region=candidate.region,
-                    resource_id=candidate.id,
-                    name=candidate.name,
-                )
-                for volume_id in candidate.extra["volumes"]:
-                    _logger.record_action(
-                        Operation.DELETE,
-                        dry_run=True,
-                        region=candidate.region,
-                        resource_id=volume_id,
-                        name=None,
-                    )
+            record_dry_run(plan)
             return Result(succeeded=tuple(names), related={VOLUMES_LABEL: tuple(volumes)})
         done: list[str] = []
         deleted: list[str] = []
@@ -208,68 +186,7 @@ class SpotVmCleaner:
         deleted: list[str],
     ) -> None:
         """Terminate one planned instance, wait for it, and delete its leftover volumes."""
-        leftover: Sequence[str] = candidate.extra["leftover"]
-        clients.compute.terminate_instance(candidate.id, preserve_boot_volume=False)
-        logging.info("Terminating OCI preemptible instance %s", candidate.name)
-        if leftover and not leftovers.wait_terminated(
-            clients.compute, candidate.id, self._settings, candidate.region
-        ):
-            logging.error(
-                "Instance %s not TERMINATED yet; attempting leftover volume deletes anyway",
-                candidate.name,
-            )
-        done.append(candidate.name)
-        _logger.record_action(
-            Operation.DELETE,
-            dry_run=False,
-            region=candidate.region,
-            resource_id=candidate.id,
-            name=candidate.name,
-        )
-        owner = self._owner(clients, candidate)
-        for volume_id in leftover:
-            if leftovers.volume_passes_tag_check(
-                clients.block, volume_id, self._settings, candidate.region, owner
-            ):
-                before = len(deleted)
-                leftovers.delete_leftover(clients.block, volume_id, deleted, candidate.region)
-                if len(deleted) > before:
-                    _logger.record_action(
-                        Operation.DELETE,
-                        dry_run=False,
-                        region=candidate.region,
-                        resource_id=volume_id,
-                        name=None,
-                    )
-
-    def _owner(self, clients: RegionClients, candidate: Candidate) -> leftovers.VolumeOwner:
-        return leftovers.VolumeOwner(
-            clients.compute.list_volume_attachments,
-            clients.compartment_id,
-            candidate.id,
-            candidate.launch_time,
-            self._pager,
-        )
-
-    def _checked(self, clients: RegionClients, candidate: Candidate, dry_run: bool) -> Candidate:
-        if not dry_run:
-            return candidate
-        volumes = leftovers.checked_volumes(
-            clients.block,
-            candidate.extra["leftover"],
-            self._settings,
-            candidate.region,
-            self._owner(clients, candidate),
-        )
-        return Candidate(
-            id=candidate.id,
-            name=candidate.name,
-            region=candidate.region,
-            state=candidate.state,
-            launch_time=candidate.launch_time,
-            tags=candidate.tags,
-            extra={"leftover": candidate.extra["leftover"], "volumes": tuple(volumes)},
-        )
+        terminate_instance(clients, candidate, self._settings, self._pager, done, deleted)
 
     def _clients_of(self, region: str) -> RegionClients:
         clients = self._clients.get(region)

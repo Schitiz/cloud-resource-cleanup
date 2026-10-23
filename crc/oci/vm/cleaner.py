@@ -7,10 +7,7 @@ every region and decides on them, `apply()` terminates (delete) or stops them. `
 (`crc.oci.vm.adapter`) is the legacy class `crc.py` uses.
 """
 
-import datetime
 import logging
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
 from typing import cast
 
 from crc.core import age as core_age
@@ -28,76 +25,32 @@ from crc.core.cleaner import (
 from crc.core.registry import register
 from crc.oci import _logger
 from crc.oci._base import Base
+from crc.oci._common import group_by_region
 from crc.oci.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
 from crc.oci.disk.api import RegionLister, regions_of
 from crc.oci.vm.client import ApiFactory, ComputeApi, SdkInstance, compute_api_for
+from crc.oci.vm.settings import (
+    DEFAULT_INSTANCE_STATES,
+    EVALUATION_FAILED,
+    SKIP_KEYS,
+    Clock,
+    TagSpec,
+    VmSettings,
+    log_for,
+    log_summary,
+)
 
-DEFAULT_INSTANCE_STATES = ("RUNNING",)
+_log_summary = log_summary
 
-TagSpec = Mapping[str, Sequence[str]]
-SKIP_KEYS = {
-    "state is not allowed": "state",
-    "OKE or instance pool member": "managed",
-    "matches exception_tags or notags": "exception_tag",
-    "does not match filter_tags": "filter_mismatch",
-    "not older than age": "too_young",
-}
-EVALUATION_FAILED = "evaluation failed"
-Clock = Callable[[], datetime.datetime]
-
-
-@dataclass(frozen=True, slots=True)
-class VmSettings:
-    """Filters and thresholds of one run."""
-
-    filter_tags: TagSpec = field(default_factory=dict)
-    exception_tags: TagSpec = field(default_factory=dict)
-    notags: TagSpec = field(default_factory=dict)
-    age: core_age.AgeSpec = field(default_factory=dict)
-    custom_age_tag_key: str = ""
-    instance_states: Sequence[str] = DEFAULT_INSTANCE_STATES
-
-
-def _log_summary(
-    operation: Operation,
-    deleted: Sequence[str],
-    stopped: Sequence[str],
-    *,
-    dry_run: bool,
-) -> None:
-    """The closing lines of main. Both name lists are passed because main's "nothing to do"
-    warning looks at the two of them, whichever operation runs."""
-    if not deleted and not stopped:
-        logging.warning(f"No OCI instances to {operation}.")
-
-    if operation is Operation.DELETE:
-        if not dry_run:
-            logging.info(f"number of OCI instances deleted: {len(deleted)}")
-            logging.warning(f"List of OCI instances deleted: {list(deleted)}")
-        else:
-            logging.warning(
-                f"List of OCI instances (Total: {len(deleted)}) "
-                f"which will be deleted: {list(deleted)}"
-            )
-
-    if operation is Operation.STOP:
-        if not dry_run:
-            logging.info(f"number of OCI instances stopped: {len(stopped)}")
-            logging.warning(f"List of OCI instances stopped: {list(stopped)}")
-        else:
-            logging.warning(
-                f"List of OCI instances (Total: {len(stopped)}) "
-                f"which will be stopped: {list(stopped)}"
-            )
-
-
-def _log_for(operation: Operation, names: Sequence[str], *, dry_run: bool) -> None:
-    """`_log_summary` for a run that only ever fills one of the two lists."""
-    other: list[str] = []
-    if operation is Operation.DELETE:
-        _log_summary(operation, names, other, dry_run=dry_run)
-    else:
-        _log_summary(operation, other, names, dry_run=dry_run)
+__all__ = [
+    "DEFAULT_INSTANCE_STATES",
+    "Clock",
+    "TagSpec",
+    "VmCleaner",
+    "VmSettings",
+    "_log_summary",
+    "build_vm_cleaner",
+]
 
 
 class VmCleaner:
@@ -144,7 +97,7 @@ class VmCleaner:
                     skipped.append(decision)
             _logger.region_done(region, len(instances), selected, started)
         if context.dry_run:
-            _log_for(context.operation, [c.name for c in candidates], dry_run=True)
+            log_for(context.operation, [c.name for c in candidates], dry_run=True)
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
 
     def apply(self, plan: Plan, context: RunContext) -> Result:
@@ -154,18 +107,15 @@ class VmCleaner:
             for candidate in plan.candidates:
                 self._record(candidate, context.operation, dry_run=True)
             return Result(succeeded=tuple(c.name for c in plan.candidates))
-        by_region: dict[str, list[Candidate]] = {}
-        for candidate in plan.candidates:
-            by_region.setdefault(candidate.region, []).append(candidate)
         done: list[str] = []
         failed: list[Failure] = []
-        for region, items in by_region.items():
+        for region, items in group_by_region(plan.candidates).items():
             api = self._api_factory(region)
             for candidate in items:
                 error = self.act(api, candidate, context.operation, done, dry_run=False)
                 if error is not None:
                     failed.append(error)
-        _log_for(context.operation, done, dry_run=False)
+        log_for(context.operation, done, dry_run=False)
         return Result(succeeded=tuple(done), failed=tuple(failed))
 
     def decide(self, instance: SdkInstance, region: str, clock: Clock) -> Candidate | Skipped:
