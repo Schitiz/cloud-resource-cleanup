@@ -372,10 +372,10 @@ CASES = [
         diverges="BUG-008",
     ),
     Case(
-        "age-tag-tagkey-unparseable-falls-back-to-age",
+        "age-tag-tagkey-unparseable-keeps",
         [key("k1", tags=tag_list({"crc_age": "nope"}), meta=meta(created=MID))],
         age_tag="crc_age",
-        diverges="BUG-008",
+        diverges="BUG-008, BUG-004",
     ),
     Case(
         "age-tag-without-tags",
@@ -682,7 +682,8 @@ FIXED: Mapping[str, tuple[list[str], list[str], list[str]]] = {
     "filter-empty-value-list-key-present": (["k1", "k2", "k3"], ["k1"], ["k1"]),
     "age-tag-never-matches-tagkey-entries": (["k1"], [], ["k1"]),
     "age-tag-tagkey-short-selects-earlier": ([], ["k1"], ["k1"]),
-    "age-tag-tagkey-unparseable-falls-back-to-age": (["k1"], ["k1"], ["k1"]),
+    # BUG-008 reads the TagKey tag; BUG-004 (FIX-CORE-AGE) keeps a key whose tag is unparseable.
+    "age-tag-tagkey-unparseable-keeps": (["k1"], [], ["k1"]),
     "policy-match-then-statement-without-aws-stays-selected": (
         ["k1", "k2"],
         ["k2"],

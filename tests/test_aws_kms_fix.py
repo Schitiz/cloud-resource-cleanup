@@ -128,10 +128,11 @@ def test_bug_008_custom_age_tag_longer_than_age_keeps_the_key() -> None:
     assert selected == []
 
 
-def test_bug_008_bad_custom_age_tag_falls_back_to_age() -> None:
+def test_bug_008_bad_custom_age_tag_keeps_the_key() -> None:
+    # BUG-004 (FIX-CORE-AGE): a present but empty or unparseable age tag keeps the key.
     tags = {"k1": _tags(max_retention_age="nope"), "k2": _tags(max_retention_age="")}
     selected, _ = _plan(tags, age={"days": 1}, custom_age_tag_key="max_retention_age")
-    assert selected == ["k1", "k2"]
+    assert selected == []
 
 
 def test_bug_055_skipped_key_is_never_scheduled() -> None:
