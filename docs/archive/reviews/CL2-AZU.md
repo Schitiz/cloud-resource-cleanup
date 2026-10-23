@@ -70,3 +70,61 @@ Scope reviewed: `git diff 2bd8e67..HEAD` on branch `cl2/azu` (lane `CL2-AZU`). N
 
 VERDICT: APPROVE
 
+
+## Round 2 (Opus)
+
+Scope: `git diff 2bd8e67..HEAD` on `cl2/azu`. Round 1 (Argon) approved and made no code changes, so
+there were no round 1 fixes to check. I re-checked its findings independently. No code changes in
+this round.
+
+### Findings
+
+1. **No legacy CLI code (check 1): OK.** Grepping the four lane files finds no import of
+   `crc.cli.resource_ops`, `vm_ops`, `notify`, `adapter_args`, `report_calls`,
+   `tests.helpers_legacy_handlers` or `tests.test_cli_crc_parity`. The only `delete_*`/`stop_*`
+   calls are in `tests/helpers_cl2_azu.run_oracle_pair`, and they run on `oracle_module().CRC`
+   (`load_legacy_crc`). No `notify_*` calls. The current `crc.cli.runner.CRC` is built only as the
+   context object for `_run_pair` and `route.precheck`. `run_oracle_pair` matches the Azure
+   branches of `main()` in `tests/legacy/crc_main.txt` (lines 1553-1627): the same arguments in the
+   same order for disk, ip, nic, vm delete/stop and spot_instances.
+2. **Comparisons kept, provenance of the frozen data (check 2): OK.**
+   - Still 290 parametrized pair cases plus the 2 route tests (292 before, 300 after with 8 new
+     checks). Every field the old `new == old` compared (result, slack, influx, stdout, logs,
+     ordered, regions, mutations) is still compared field by field, and `set(new) == set(expected)`
+     holds. The `RUN START` / `RESULT` / `ACTION` / Slack / Influx sanity asserts are kept.
+   - Independent provenance check (temporary harness, not committed): I restored the pre-change test
+     (`2bd8e67:tests/test_cli_bridge_azu.py`). For all 290 cases I ran its legacy side (the current
+     `run_legacy_handler`), then compared every field with `_expected(...)` built from `main`'s oracle
+     plus the BUG-marked view, `RUN_LOG` and `FIXED`. All 290 are equal. The only harness
+     normalization was the fake Influx `write_options`: the old fake recorded the `SYNCHRONOUS`
+     object, the new one records its name. So the frozen run log and `FIXED` values are what the
+     former legacy side produces, not derived from the routed side.
+   - Fixed-bug divergences are asserted against the oracle with their ids. `_oracle_view` covers
+     BUG-358 (tag-dict echoes), BUG-356 (leftover-disk lines at DEBUG) and BUG-003 (power off vs
+     deallocate). `FIXED` covers BUG-013/BUG-077 (ip), BUG-113 (nic) and BUG-174 (disk
+     delete_error), and `assert value != view[field]` makes each one a real divergence. Every id has
+     a "fixed in" row in `docs/refactor/BUGS.md`. BUG-174 is "partly fixed"; the part asserted (per
+     disk delete isolation) is the fixed part.
+3. **Not vacuous (check 3): OK.** I tried two cleaners other than round 1's and reverted both.
+   - `crc/azu/ip/cleaner.py`: skipping the delete of the last candidate makes all 10 real-run IP
+     cases fail. The dry runs make no deletes, so they still pass, as they should.
+   - `crc/notify/slack_owners.py`: appending `"!"` to the channel post text makes 105 cases fail.
+4. **Scope (check 4): OK.** Changed files: `tests/test_cli_bridge_azu.py`,
+   `tests/helpers_cli_azu.py`, the new `tests/helpers_cl2_azu.py` and
+   `tests/helpers_cl2_azu_frozen.py`, this review file, and `tests/archtest/test_count_floor.txt`.
+   The floor file is inside `tests/archtest/**`, but the CLEAN-2 contract requires the
+   `make raise-test-floor` bump (44400 to 44408). No `crc/**`, `tests/legacy/*.txt` or hash-locked
+   safety test changed.
+
+### Gates (check 6)
+
+- `pip install -r requirements.txt -r requirements-dev.txt`, then `make check`: green (ruff, mypy,
+  import-linter, pytest, ARCH-008).
+- **44408 passed in 54.41s** (pytest -n auto); `make check` wall time 74s; floor 44408.
+- `tests/test_cli_bridge_azu.py`: 300 passed in ~3.5s.
+
+### New bugs
+
+None.
+
+ROUND 2 VERDICT: APPROVE
