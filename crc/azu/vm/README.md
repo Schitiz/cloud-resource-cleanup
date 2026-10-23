@@ -11,7 +11,10 @@ then removes its `<vm>-NIC` NIC (through `crc/azu/vm_delete_helpers.py`), or dea
 Modules (split by responsibility):
 
 - `client.py`: the Azure SDK calls used, as typed Protocols
-- `cleaner.py`: settings, name tally, summary logging, `VmCleaner` and the registry factory
+- `cleaner.py`: `VmCleaner` and the registry factory
+- `settings.py`: `VmSettings`, `Tally` and the summary logging
+- `helpers.py`: name tally, power-state parsing and the processing-error log
+- `selection.py`: the tag and age selection
 - `adapter.py`: the `VM` class, a thin adapter that drives the cleaner VM by VM
 
 ## Public API
@@ -27,6 +30,11 @@ Modules (split by responsibility):
 - `VmSettings`: frozen filters and thresholds of one run.
 - `Tally`: the VM, stopped VM and NIC names recorded so far.
 - `log_summary()`: the closing log lines of main for an operation.
+- `tally_of()`: the `Tally` of a plan's names for an operation (delete adds the NIC names).
+- `power_state()`: the lower-cased code after the PowerState prefix of the first such status, or None.
+- `log_processing_error()`: logs a swallowed per-VM error.
+- `skip_reason()`: the tag and age skip reason of one VM, or None when selected.
+- `is_old()`: the age check, with the custom age tag and the clock.
 - `VmCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus list_vms, decide, state_skip_reason, process and act used by the adapter).
 - `build_vm_cleaner()`: registry factory behind @register("azure", "vm"); reads resource_group, filter_tags, exception_tags, notags, age, custom_age_tag_key and instance_state from RunContext.options and builds the clients from Base.
 - `VM`: adapter crc.py calls (delete(), stop(), get_deleted, delete_count, get_deleted_nic, nic_delete_count, get_stopped, stopped_count, base); runs the cleaner VM by VM in the order of main.

@@ -5,19 +5,19 @@
 `AzureDiskCleaner` implements the `crc.core.cleaner.Cleaner` contract: `plan()` lists the disks of
 the configured resource group (`disks.list_by_resource_group`) and filters them, `apply()` calls
 `disks.begin_delete` and waits for its poller, disk by disk (an error on one disk is recorded and
-the next disk is still processed). `Disk` is the legacy class
-`crc.py` uses; it keeps its constructor and attributes and runs the cleaner disk by disk, in the
-exact call order of the original (listing is lazy, so paging and deletes interleave).
+the next disk is still processed).
 """
 
 import datetime
 import logging
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Protocol
+from typing import Any
 
 from crc.azu import _logger
 from crc.azu._base import Base
+from crc.azu._common import log_delete_summary, log_would_delete
+from crc.azu.disk.client import AgeSpec, ClientFactory, SdkDisk, TagSpec
 from crc.core import age as core_age
 from crc.core import policy
 from crc.core.cleaner import (
@@ -31,69 +31,8 @@ from crc.core.cleaner import (
     Skipped,
 )
 from crc.core.registry import register
-from crc.service import Service
 
 DEFAULT_DISK_STATES: tuple[str, ...] = ("Unattached",)
-
-TagSpec = Mapping[str, Sequence[str]]
-AgeSpec = dict[str, int]
-
-
-class SdkDisk(Protocol):
-    """The fields of an Azure `Disk` model this cleaner reads."""
-
-    @property
-    def name(self) -> str:
-        """Disk name."""
-        ...
-
-    @property
-    def tags(self) -> dict[str, str] | None:
-        """Resource tags, `None` when the disk has none."""
-        ...
-
-    @property
-    def time_created(self) -> datetime.datetime:
-        """Creation time (timezone aware in the SDK)."""
-        ...
-
-    @property
-    def disk_state(self) -> str:
-        """Disk state, for example `Unattached`."""
-        ...
-
-
-class DeletePoller(Protocol):
-    """The long-running-operation poller `begin_delete` returns."""
-
-    def result(self) -> object:
-        """Block until the deletion finished; raises when Azure reports a failure."""
-        ...
-
-
-class DiskOperations(Protocol):
-    """The two `disks` calls this cleaner uses."""
-
-    def list_by_resource_group(self, resource_group_name: str, /) -> Iterable[SdkDisk]:
-        """List the disks of one resource group (lazy paging)."""
-        ...
-
-    def begin_delete(self, resource_group_name: str, disk_name: str, /) -> DeletePoller:
-        """Start the deletion of one disk (positional arguments)."""
-        ...
-
-
-class DiskComputeClient(Protocol):
-    """The part of the Azure compute client this cleaner uses."""
-
-    @property
-    def disks(self) -> DiskOperations:
-        """Operations on managed disks."""
-        ...
-
-
-ClientFactory = Callable[[], DiskComputeClient]
-Clock = Callable[[], datetime.datetime]
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,15 +45,6 @@ class DiskSettings:
     age: AgeSpec | None = None
     custom_age_tag_key: str | None = None
     disk_states: Sequence[str] = field(default=DEFAULT_DISK_STATES)
-
-
-def _log_summary(deleted: Sequence[str], *, dry_run: bool) -> None:
-    items = list(deleted)
-    if dry_run:
-        logging.warning(f"List of Azure Disks (Total: {len(items)}) which will be deleted: {items}")
-    else:
-        logging.warning(f"number of Azure Disks deleted: {len(items)}")
-        logging.warning(f"List of Azure Disks deleted: {items}")
 
 
 class AzureDiskCleaner:
@@ -151,9 +81,8 @@ class AzureDiskCleaner:
                 skipped.append(Skipped(id=disk.name, reason=reason, name=disk.name))
         _logger.region_done(self._resource_group, scanned, len(candidates), started)
         if context.dry_run:
-            for candidate in candidates:
-                _logger.acted("would_delete", self._resource_group, candidate.id)
-            _log_summary([c.id for c in candidates], dry_run=True)
+            log_would_delete(self._resource_group, candidates)
+            log_delete_summary("Disks", [c.id for c in candidates], dry_run=True)
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
 
     def apply(self, plan: Plan, context: RunContext) -> Result:
@@ -168,7 +97,7 @@ class AzureDiskCleaner:
                 deleted.append(candidate.id)
             else:
                 failed.append(Failure(id=candidate.id, error=error))
-        _log_summary(deleted, dry_run=context.dry_run)
+        log_delete_summary("Disks", deleted, dry_run=context.dry_run)
         return Result(succeeded=tuple(deleted), failed=tuple(failed))
 
     def list_disks(self) -> Iterable[SdkDisk]:
@@ -251,94 +180,3 @@ def build_disk_cleaner(context: RunContext) -> Cleaner:
         custom_age_tag_key=options.get("custom_age_tag_key"),
     )
     return AzureDiskCleaner(base.get_compute_client, base.resource_group, settings)
-
-
-class Disk(Service):
-    """
-    A class for managing Disks on Azure.
-
-    Attributes: `disks_names_to_delete` (names deleted, or listed in a dry run), `base`,
-    `dry_run`, `filter_tags`, `exception_tags`, `age`, `custom_age_tag_key`, `notags`, `clock`.
-    `get_deleted` and `count` read the result.
-    """
-
-    default_disk_state: ClassVar[list[str]] = ["Unattached"]
-    """The default_disk_state variable specifies the default state of disks when querying."""
-
-    def __init__(  # noqa: PLR0913, PLR0917 - the seven parameters are the public signature
-        self,
-        resource_group: str,
-        dry_run: bool,
-        filter_tags: TagSpec | None,
-        exception_tags: TagSpec | None,
-        age: AgeSpec | None,
-        custom_age_tag_key: str | None,
-        notags: TagSpec | None,
-    ) -> None:
-        """
-        Initialize the Disk management class.
-
-        :param dry_run: When True the class only lists the disks that match the filter and
-        exception tags and performs no operation on them.
-        :param filter_tags: A dictionary of tags to filter disks by.
-        :param exception_tags: A dictionary of tags to exclude disks by.
-        :param age: A dictionary specifying the age threshold for deleting disks.
-        :param custom_age_tag_key: Tag name to overwrite the age condition.
-        :param notags: A dictionary of tags to filter resources that do not have the specified tags.
-        """
-        super().__init__()
-        self.disks_names_to_delete: list[str] = []
-        self.base = Base(resource_group)
-        self.dry_run = dry_run
-        self.filter_tags = filter_tags
-        self.exception_tags = exception_tags
-        self.age = age
-        self.custom_age_tag_key = custom_age_tag_key
-        self.notags = notags
-        self.clock: Clock = datetime.datetime.now
-
-    @property
-    def get_deleted(self) -> list[str]:
-        """
-        Returns the list of items in the disks_names_to_delete list (read-only property).
-        """
-        return self.disks_names_to_delete
-
-    @property
-    def count(self) -> int:
-        """
-        Returns the count of items in the disks_names_to_delete list (read-only property).
-        """
-        count = len(self.disks_names_to_delete)
-        logging.info(f"count of items in disks_names_to_delete: {count}")
-        return count
-
-    def _cleaner(self) -> AzureDiskCleaner:
-        settings = DiskSettings(
-            filter_tags=self.filter_tags,
-            exception_tags=self.exception_tags,
-            notags=self.notags,
-            age=self.age,
-            custom_age_tag_key=self.custom_age_tag_key,
-            disk_states=self.default_disk_state,
-        )
-        return AzureDiskCleaner(self.base.get_compute_client, self.base.resource_group, settings)
-
-    def delete(self) -> None:
-        """
-        Deletes disks that match filter_tags, do not match exception_tags or notags, and are
-        older than the age. In dry_run mode it only lists the matching disks.
-        """
-        cleaner = self._cleaner()
-        started = _logger.started()
-        scanned = selected = 0
-        for disk in cleaner.list_disks():
-            scanned += 1
-            candidate, _ = cleaner.decide(disk, self.clock())
-            if candidate is None:
-                continue
-            selected += 1
-            if cleaner.delete_disk(candidate.id, dry_run=self.dry_run) is None:
-                self.disks_names_to_delete.append(candidate.id)
-        _logger.region_done(self.base.resource_group, scanned, selected, started)
-        _log_summary(self.disks_names_to_delete, dry_run=self.dry_run)
