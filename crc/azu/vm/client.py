@@ -48,7 +48,7 @@ class InstanceView(Protocol):
     """The instance view of a VM."""
 
     @property
-    def statuses(self) -> Sequence[InstanceStatus]:
+    def statuses(self) -> Sequence[InstanceStatus] | None:
         """Provisioning and power state statuses; the power state has a `PowerState/` code."""
         ...
 

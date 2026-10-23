@@ -1,11 +1,13 @@
 """FIX-AZU-VM: BUG-002 (list the configured group only), BUG-003 (stop deallocates), BUG-010
 (power state from the `PowerState/` status) and BUG-198 (exact power state match)."""
 
+import logging
 from typing import Any
 
 import pytest
 
 from crc.azu.vm import VM, VmCleaner, VmSettings
+from crc.core import logger
 from crc.core.cleaner import Operation, RunContext
 from tests.helpers_azure_vm import NOW, FakeAzure, vm
 
@@ -99,15 +101,24 @@ def test_bug_003_delete_is_unchanged() -> None:
         pytest.param(("p", None), id="no-code"),
         pytest.param((status("ProvisioningState/failed"),), id="provisioning-only"),
         pytest.param((status("PowerState-running"), status("PowerStateX/running")), id="lookalike"),
+        pytest.param((status("PowerState/"),), id="empty-power-state"),
     ],
 )
-def test_bug_010_no_power_state_keeps_the_vm(statuses: tuple[Any, ...]) -> None:
+def test_bug_010_no_power_state_keeps_the_vm(
+    statuses: tuple[Any, ...], caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
     azure = FakeAzure([vm("a", statuses=statuses), vm("b")])
     cleaner = cleaner_for(azure)
     ctx = RunContext(dry_run=False, operation=Operation.DELETE, options={}, now=NOW)
-    plan = cleaner.plan(ctx)
+    logger.begin("azure", "vm", "delete", False, {})
+    try:
+        plan = cleaner.plan(ctx)
+    finally:
+        logger.finish()
     assert [c.id for c in plan.candidates] == ["b"]
     assert {s.id: s.reason for s in plan.skipped} == {"a": "no_power_state"}
+    assert "SKIPPED cloud=azure resource=vm reason=no_power_state count=1" in caplog.text
     assert calls(azure, *MUTATING, *OFF) == []
 
 

@@ -51,3 +51,52 @@
   `"deallocated"` added to that Jenkins flag. Exists on main: no (consequence of BUG-003 fix).
 - `crc/azu/vm/cleaner.py` `process()` / `plan()` count the VM as "selected" before the action; unchanged,
   exists on main yes (`crc/azu/vm.py:146-157`).
+
+## Round 1 (Argon)
+
+Scope reviewed: `git diff 182466d..HEAD` (`crc/azu/README.md`, `crc/azu/vm/README.md`,
+`crc/azu/vm/adapter.py`, `crc/azu/vm/cleaner.py`, `crc/azu/vm/client.py`,
+`docs/refactor/reviews/FIX-AZU-VM.md`, `tests/helpers_azure_vm.py`, `tests/test_azure_vm.py`,
+`tests/test_azure_vm_fix.py`, `tests/test_azure_vm_parity.py`).
+
+### Checklist verification
+
+1. **Fixed bugs (`BUG-002`, `BUG-003`, `BUG-010`, `BUG-198`):**
+   - `BUG-002` (`crc/azu/vm/cleaner.py:202-207`, `crc/azu/vm/client.py:67-69`): `VmCleaner.list_vms()` calls `virtual_machines.list(self._resource_group)` with `Base.resource_group` instead of `list_all()`, never derives a resource group from the VM's resource ID, and raises `ValueError` before any SDK call when `self._resource_group` is empty. Covered by `test_bug_002_*` in `tests/test_azure_vm_fix.py` and `other-resource-group-ignored` / `test_list_is_the_configured_group_only` in `tests/test_azure_vm_parity.py`.
+   - `BUG-003` (`crc/azu/vm/cleaner.py:263-268`, `crc/azu/vm/client.py:79-81`): stop calls `virtual_machines.begin_deallocate(self._resource_group, vm_name)` instead of `begin_power_off`; delete (`begin_delete_vm_and_wait` + `delete_vm_primary_nic`) is unchanged. Covered by `test_bug_003_*` and `test_stop_deallocates`.
+   - `BUG-010` (`crc/azu/vm/cleaner.py:112-121`, `:219-229`): `_power_state` scans `view.statuses` for the first status with a non-empty `PowerState/<state>` code rather than indexing `statuses[1]`; when none is present, `state_skip_reason` returns `"no_power_state"`, which keeps the VM and records `_logger.skip("no_power_state")` (`SKIPPED cloud=azure resource=vm reason=no_power_state count=...`) and `Skipped(..., reason="no_power_state")`. Covered by `test_bug_010_*` and four `diverges="BUG-010"` parity cases.
+   - `BUG-198` (`crc/azu/vm/cleaner.py:118`, `:226-229`): power state is extracted as `code[len("PowerState/"):].casefold()` and matched by exact equality (`state in states`) instead of substring against `display_status` (`"run"` and `""` no longer match). Covered by `test_bug_198_*` and two `diverges="BUG-198"` parity cases.
+2. **Direction rule and parity tests:**
+   - Frozen oracle `tests/legacy/azu_vm.txt` is untouched.
+   - `BUG-002` and `BUG-198` ("deletes what it should keep") only keep more or fail closed (`ValueError` on empty resource group before any SDK call). All unmarked parity cases assert exact equality with the oracle on SDK calls, order, selections, counts, logs, stdout, and errors; all 7 diverging cases are marked with `BUG-002`, `BUG-010`, or `BUG-198` and assert both the old oracle behaviour and the new outcome across both adapter and `Cleaner` paths.
+3. **Production Jenkins commands:**
+   - All six production `crc.py --cloud azure --resource_group "$RESOURCE_GROUP" --resource vm ...` commands run with identical CLI flags and selection (with the stopped-VM vs deallocated interaction noted under `## New bugs`). No new CLI flags, dependencies, async, or pydantic.
+4. **Fail-closed paths:**
+   - Empty `resource_group` raises `ValueError` in `list_vms()` before `self._compute()` or any SDK call; `instance_view` exceptions and missing `PowerState/` codes keep the VM without mutating calls.
+5. **Protected / out-of-scope files:**
+   - `tests/archtest/safety_lock.json`, all five hash-locked safety test files, `CLEANUP_SAFETY.md`, `docs/refactor/PLAN.md`, `docs/refactor/STATUS.md`, `docs/refactor/BUGS.md`, `AGENTS.md`, `ARCHITECTURE.md`, `.cursor/**`, and `tests/archtest/**` are untouched.
+6. **README sync (`ARCH-002`):**
+   - `crc/azu/README.md` and `crc/azu/vm/README.md` `## Public API` and `## Safety Invariants` are synced and pass `ARCH-002`.
+7. **Owner decision:**
+   - The `instance_state` casing trade-off for `BUG-198` (preserving `["Running"]` as non-matching so the fix never deletes more than `main`) is clearly explained under `## Owner decision`.
+
+### Findings (fixed in review)
+
+- **NIT (fixed, `crc/azu/vm/cleaner.py:112-121`, `crc/azu/vm/client.py:51`):** Guarded `_power_state` against `statuses=None` (`statuses or ()`) and bare `"PowerState/"` codes with an empty suffix (`if state: return state`), so a malformed `"PowerState/"` code is treated as `no_power_state` and can never match `instance_state=[""]`. Added `empty-power-state` case and run-log `SKIPPED ... reason=no_power_state count=1` assertion in `tests/test_azure_vm_fix.py`.
+- **NIT (fixed, `tests/test_azure_vm_parity.py:48-57`, `:115-120`, `:799`):** Tightened `_oracle_shape` to match `("list", group)` against the expected resource group (`case.resource_group or "env-rg"`) rather than any `list` call, and added `Case("other-resource-group-ignored", ..., diverges="BUG-002")` to `CASES` / `OLD_BEHAVIOUR`.
+- **NIT (fixed, `crc/azu/vm/README.md:8`, `:19`, `:30`, `:41`):** Updated remaining prose references from `state_allowed` / `powers the VM off` / `power-off` to `state_skip_reason` / `deallocates the VM` / `deallocate` and listed `code` under `InstanceStatus`.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`:
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed! |
+| `mypy` | Success: no issues found in 229 source files |
+| `lint-imports` | Contracts: 5 kept, 0 broken |
+| `pytest -q` | 42474 passed in 138.30s |
+
+Test count: 42444 at `182466d`, 42470 before review, 42474 after review (+4).
+
+VERDICT: APPROVE

@@ -45,10 +45,10 @@ BUGS = {"BUG-358"}  # log-only divergences of the LOG-AZU rung
 # `test_stop_deallocates` pin the new calls themselves.
 
 
-def _oracle_shape(calls: Sequence[tuple[Any, ...]]) -> list[tuple[Any, ...]]:
+def _oracle_shape(calls: Sequence[tuple[Any, ...]], group: str) -> list[tuple[Any, ...]]:
     shaped: list[tuple[Any, ...]] = []
     for call in calls:
-        if call[0] == "list":
+        if call == ("list", group):
             shaped.append(("list_all",))
         elif call[0] == "begin_deallocate":
             shaped.append(("begin_power_off", *call[1:]))
@@ -112,6 +112,12 @@ CASES = [
     Case("many-dry-run", _many(12), dry_run=True),
     Case("many-stop", _many(12), operation="stop"),
     Case("resource-group-from-env", [vm("vm-a")], resource_group=""),
+    Case(
+        "other-resource-group-ignored",
+        [vm("a", group="other-rg"), vm("b", group="rg-test")],
+        diverges="BUG-002",
+        expect=lambda o: o.deleted == ["b"] and ("instance_view", "rg-test", "a") not in o.calls,
+    ),
     Case("duplicate-names", [vm("vm-a"), vm("vm-a")]),
     # filters
     Case(
@@ -495,7 +501,7 @@ def _run(
     caplog.clear()
     counts = [service.delete_count, service.nic_delete_count, service.stopped_count]
     return Outcome(
-        _oracle_shape(azure.calls),
+        _oracle_shape(azure.calls, case.resource_group or "env-rg"),
         list(service.get_deleted),
         list(service.get_deleted_nic),
         list(service.get_stopped),
@@ -573,7 +579,7 @@ def _run_cleaner(
     except Exception as e:
         error = (type(e).__name__, str(e))
     return Outcome(
-        _oracle_shape(azure.calls),
+        _oracle_shape(azure.calls, case.resource_group or "env-rg"),
         deleted,
         nics,
         stopped,
@@ -790,6 +796,7 @@ def test_stop_deallocates(
 
 DIVERGING = [c for c in CASES if c.diverges]
 OLD_BEHAVIOUR: Mapping[str, Callable[[Outcome], bool]] = {
+    "other-resource-group-ignored": lambda o: o.deleted == ["a", "b"],
     "status-state-is-substring": lambda o: o.deleted == ["a"],
     "status-empty-string-state-matches-all": lambda o: o.deleted == ["a"],
     "status-single-entry-index-error": lambda o: (
@@ -835,7 +842,7 @@ def test_repeated_delete_accumulates_like_main(
         service.delete()
         results.append(
             (
-                _oracle_shape(azure.calls),
+                _oracle_shape(azure.calls, case.resource_group),
                 service.get_deleted,
                 service.get_deleted_nic,
                 [(r.levelno, r.getMessage()) for r in caplog.records],
@@ -863,7 +870,7 @@ def test_stop_then_empty_delete_shares_name_lists_like_main(
         service.delete(["deallocated"])
         results.append(
             (
-                _oracle_shape(azure.calls),
+                _oracle_shape(azure.calls, case.resource_group),
                 service.get_deleted,
                 service.get_stopped,
                 [(r.levelno, r.getMessage()) for r in caplog.records],

@@ -109,13 +109,15 @@ def _tally_of(operation: Operation, candidates: Iterable[str]) -> Tally:
     return Tally(stopped=names)
 
 
-def _power_state(statuses: Sequence[InstanceStatus]) -> str | None:
+def _power_state(statuses: Sequence[InstanceStatus] | None) -> str | None:
     """The power state of an instance view: the code after `PowerState/` of the first status
     with such a code, lower-cased, or None when there is none."""
-    for status in statuses:
+    for status in statuses or ():
         code = getattr(status, "code", None)
         if isinstance(code, str) and code.startswith(POWER_STATE_PREFIX):
-            return code[len(POWER_STATE_PREFIX) :].casefold()
+            state = code[len(POWER_STATE_PREFIX) :].casefold()
+            if state:
+                return state
     return None
 
 
