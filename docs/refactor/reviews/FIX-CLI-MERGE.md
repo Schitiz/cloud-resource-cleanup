@@ -25,6 +25,49 @@ Rung FIX-CLI-MERGE (wave FIX-1): merge `origin/fix/cli-route` (FIX-CLI-ROUTE: BU
 
 Optional, `CLEANUP_SAFETY.md` (CLI invariants): "Before any cleaner runs, `dispatch.validate_targets` checks every (cloud, resource) pair. An unsupported pair (`keypair`, `kms` off AWS; `nic` off Azure; `ip` on OCI; `snapshot`, `vpc` off AWS) of an explicit cloud raises `ValueError`; under `--cloud all` it is skipped with a warning only when no supported pair follows it, otherwise it raises. `--cloud all --resource disk|all` raises. An empty or blank `--scan_tag` raises `ValueError`."
 
+## Owner decision
+
+- All five bugs in scope (`BUG-017`, `BUG-018`, `BUG-009` routing, `BUG-084` routing, `BUG-344`) are fixed in `crc/cli/`.
+- As documented in `docs/refactor/reviews/FIX-CLI-ROUTE.md`, two non-routing clauses of `BUG-009` and `BUG-084` remain open by design under the direction and production-command rules:
+  - `BUG-009` hard-coded `age_days=90`: honouring `--age` would delete more for any `--age` below 90 days.
+  - `BUG-009` / `BUG-084` missing Slack and InfluxDB notifications (`BUG-040` shape): adding notifications would alter Slack text and InfluxDB points for the production `--cloud aws --resource snapshot` command.
+- As documented in `docs/refactor/reviews/FIX-CLI-ALL.md`, `crc/core/selection.py` (`build_selection`) is outside `crc/cli/` scope and still lists unsupported pairs as selected; `tests/test_core_selection.py` pins the difference until a selection rung updates `build_selection`.
+
 ## New bugs
 
 - `crc/core/selection.py` `build_selection` still models `main` (lists unsupported pairs as selected). Exists on main: yes. Not fixed (outside this rung); `tests/test_core_selection.py` pins the difference.
+
+## Round 1 (Argon)
+
+Reviewed `git diff 2bf120a..HEAD` (and the merge with `origin/fix/cli-route` at `57d9f63`) against the `FIX-CLI-MERGE` task, `.cursor/skills/crc-python-refactor/BEHAVIOUR_FIX.md`, and the wave `FIX-1` overrides.
+
+### Findings
+
+- **BLOCKING:** none.
+- **NIT (fixed):** Added an explicit `## Owner decision` section to `docs/refactor/reviews/FIX-CLI-MERGE.md` summarizing the non-routing clauses of `BUG-009` / `BUG-084` and the out-of-scope `crc/core/selection.py` follow-up so the merge review record is self-contained.
+
+### Verification
+
+1. **Both sets of bug fixes hold under one rule set (`BUG-017`, `BUG-018`, `BUG-009`, `BUG-084`, `BUG-344`):**
+   - `crc/cli/dispatch.py` unifies `FIX-CLI-ALL` and `FIX-CLI-ROUTE` by adding `"snapshot": ("aws",)` and `"vpc": ("aws",)` to `SUPPORTED_CLOUDS` and formatting their single-cloud error via `_unsupported_message` (`--resource <r> is AWS-only; use --cloud aws (got --cloud <c>)`), removing the duplicate `check_aws_only_resources` / `_skip_non_aws` mechanism.
+   - `crc/cli/main.py` calls `check_scan_tag(options)` (`BUG-344`) and, when `options.scan_tag is None`, `validate_targets(targets)` before `set_max_age(options.max_age)`, so every fail-closed path raises `ValueError` before `MAX_AGE` is mutated and before any `CRC`, `Snapshot`, or `VPC` cleaner is constructed. `run_dispatch` also calls `validate_targets(targets)` at entry for direct callers.
+   - Under `--cloud all`, `snapshot` and `vpc` run once for `aws` and skip `azure`, `gcp`, and `oci` without constructing `CRC` for the skipped clouds, logging `<r> is not supported on <cloud>; skipped under --cloud all` and `SKIPPED ... reason=unsupported_cloud_resource count=1`. `--cloud all --resource nic` still fails closed (`BUG-017`), and `--cloud all --resource disk|all` still raises `AWS_DISK_OPT_IN_MESSAGE` up front (`BUG-018`).
+   - Verified in a detached worktree at `2bf120a` that `tests/test_cli_route_fix.py` and `tests/test_cli_merge_fix.py` fail on `2bf120a` (28 failed, 8 passed for the unchanged production/scan/nic baselines) and pass on `HEAD` (36 passed across both files, plus 18 passed in `tests/test_cli_dispatch_fix.py`).
+2. **Direction rule & parity (`tests/test_cli_main_parity.py`, `tests/test_core_selection.py`, `tests/legacy/crc_main.txt`):**
+   - Nothing is deleted, stopped, or released that was kept before; all changes either fail closed earlier or skip non-AWS clouds under `--cloud all`.
+   - `tests/legacy/crc_main.txt` is untouched. `tests/test_cli_main_parity.py` keeps both `diverges` / `expected_fixed` (`BUG-009`, `BUG-084`, `BUG-344`) and `diverging_outcome` (`BUG-017`, `BUG-018`), reconciled for the shared pre-`set_max_age` check (`without_reset`) and the unified `--cloud all` skip behaviour (`fixed_all`). Both `test_every_fixed_bug_has_diverging_cases` and `test_diverging_cases_exist_and_differ_from_the_oracle` pass, and all unmarked cases assert full equality with the oracle.
+3. **Production commands:**
+   - `crc.py --cloud aws --resource vm --scan_tag autoclean=false --dry_run`, `crc.py --cloud aws --resource snapshot --age '{"days": 90}' ...`, and every supported single-cloud `(cloud, resource)` pair run unchanged (`tests/test_cli_merge_fix.py`, `tests/test_cli_route_fix.py`, `tests/test_cli_dispatch_fix.py`).
+4. **Guardrails & documentation:**
+   - No locked safety test, `tests/archtest/safety_lock.json`, `docs/refactor/PLAN.md`, `docs/refactor/STATUS.md`, `docs/refactor/BUGS.md`, `CLEANUP_SAFETY.md`, `AGENTS.md`, `ARCHITECTURE.md`, or `.cursor/**` was edited.
+   - `crc/cli/README.md` `## Public API` and `## Safety Invariants` are updated and pass `ARCH-002`.
+
+### Gates
+
+Ran `pip install -r requirements.txt -r requirements-dev.txt && make check`:
+- `ruff check .`: All checks passed!
+- `mypy`: Success: no issues found in 231 source files
+- `lint-imports`: Contracts: 5 kept, 0 broken
+- `pytest -q`: **42513 passed** (42479 at `2bf120a`, +34; 42444 at `182466d`, +69)
+
+VERDICT: APPROVE
