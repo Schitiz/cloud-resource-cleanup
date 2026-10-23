@@ -102,6 +102,25 @@ levels only; their contract (formats, levels, parity-test rule) is in `docs/refa
 | LOG-OCI | BUG-353 (tag dict level only), BUG-358, BUG-361, BUG-362 | no |
 | LOG-FIX | BUG-363 (run log must not run `basicConfig`; owner-approved 2026-10-22); REGION at DEBUG when nothing selected; `--scan_tag` run header and result (operation=scan) | no |
 | LOG-FIX2 | BUG-364 (`RUN START` printed when logging is initialised, not on the next run-log line), BUG-365 (`FAILED` line always one line); owner-approved 2026-10-23 | no |
+| FIX-AZU-VM | --cloud azure .*--resource vm (wave FIX-1, owner-approved 2026-10-23; crc/azu/vm.py (and crc/azu/vm/* helpers if split)) | no (proposals go to the review file) |
+| FIX-AZU-IP | --cloud azure .*--resource ip (wave FIX-1, owner-approved 2026-10-23; crc/azu/ip.py) | no (proposals go to the review file) |
+| FIX-AZU-NIC | --cloud azure .*--resource nic (wave FIX-1, owner-approved 2026-10-23; crc/azu/nic.py) | no (proposals go to the review file) |
+| FIX-AZU-DISK | --cloud azure .*--resource disk (wave FIX-1, owner-approved 2026-10-23; crc/azu/disk.py) | no (proposals go to the review file) |
+| FIX-GCP-IP | --cloud gcp .*--resource ip (wave FIX-1, owner-approved 2026-10-23; crc/gcp/ip.py) | no (proposals go to the review file) |
+| FIX-GCP-DISK | --cloud gcp .*--resource disk (wave FIX-1, owner-approved 2026-10-23; crc/gcp/disk.py) | no (proposals go to the review file) |
+| FIX-GCP-VM | --cloud gcp .*--resource vm (wave FIX-1, owner-approved 2026-10-23; crc/gcp/vm.py) | no (proposals go to the review file) |
+| FIX-AWS-KMS | --cloud aws .*--resource kms (wave FIX-1, owner-approved 2026-10-23; crc/aws/kms.py) | no (proposals go to the review file) |
+| FIX-AWS-EIP | --cloud aws .*--resource ip (wave FIX-1, owner-approved 2026-10-23; crc/aws/elastic_ips.py) | no (proposals go to the review file) |
+| FIX-AWS-VPC | --resource vpc (wave FIX-1, owner-approved 2026-10-23; crc/aws/vpc.py) | no (proposals go to the review file) |
+| FIX-AWS-SNAP | --cloud aws .*--resource snapshot (wave FIX-1, owner-approved 2026-10-23; crc/aws/snapshot.py) | no (proposals go to the review file) |
+| FIX-CLI-ROUTE | --scan_tag|--resource snapshot (wave FIX-1, owner-approved 2026-10-23; crc/cli/* (dispatch, validation, scan)) | no (proposals go to the review file) |
+| FIX-CLI-ALL | --cloud all (wave FIX-1, owner-approved 2026-10-23; crc/cli/* (dispatch, validation)) | no (proposals go to the review file) |
+| FIX-CORE-AGE | --custom_age_tag_key (wave FIX-1, owner-approved 2026-10-23; crc/core/age.py (and crc/service.py delegation)) | no (proposals go to the review file) |
+| FIX-OCI-DISK | --cloud oci .*--resource disk (wave FIX-1, owner-approved 2026-10-23; crc/oci/disk.py) | no (proposals go to the review file) |
+| FIX-OCI-VM | --cloud oci .*--resource vm (wave FIX-1, owner-approved 2026-10-23; crc/oci/vm.py) | no (proposals go to the review file) |
+| FIX-OCI-SPOT | --cloud oci .*spot (wave FIX-1, owner-approved 2026-10-23; crc/oci/spot_vm.py) | no (proposals go to the review file) |
+| FIX-GCP-SPOT | --cloud gcp .*spot (wave FIX-1, owner-approved 2026-10-23; crc/gcp/spot_vm.py) | no (proposals go to the review file) |
+| FIX-AWS-DISK | --cloud aws .*--resource disk (wave FIX-1, owner-approved 2026-10-23; crc/aws/disk.py) | no (proposals go to the review file) |
 
 Progress is logged in `docs/refactor/STATUS.md`. Reviews go to
 `docs/refactor/reviews/<rung>.md`.
