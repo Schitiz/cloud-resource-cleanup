@@ -2,8 +2,10 @@
 
 """Azure managed disk cleaner.
 
-`AzureDiskCleaner` implements the `crc.core.cleaner.Cleaner` contract: `plan()` lists the disks
-(`disks.list`) and filters them, `apply()` calls `disks.begin_delete`. `Disk` is the legacy class
+`AzureDiskCleaner` implements the `crc.core.cleaner.Cleaner` contract: `plan()` lists the disks of
+the configured resource group (`disks.list_by_resource_group`) and filters them, `apply()` calls
+`disks.begin_delete` and waits for its poller, disk by disk (an error on one disk is recorded and
+the next disk is still processed). `Disk` is the legacy class
 `crc.py` uses; it keeps its constructor and attributes and runs the cleaner disk by disk, in the
 exact call order of the original (listing is lazy, so paging and deletes interleave).
 """
@@ -21,6 +23,7 @@ from crc.core import policy
 from crc.core.cleaner import (
     Candidate,
     Cleaner,
+    Failure,
     Operation,
     Plan,
     Result,
@@ -60,15 +63,23 @@ class SdkDisk(Protocol):
         ...
 
 
+class DeletePoller(Protocol):
+    """The long-running-operation poller `begin_delete` returns."""
+
+    def result(self) -> object:
+        """Block until the deletion finished; raises when Azure reports a failure."""
+        ...
+
+
 class DiskOperations(Protocol):
     """The two `disks` calls this cleaner uses."""
 
-    def list(self) -> Iterable[SdkDisk]:
-        """List the disks of the whole subscription (lazy paging)."""
+    def list_by_resource_group(self, resource_group_name: str, /) -> Iterable[SdkDisk]:
+        """List the disks of one resource group (lazy paging)."""
         ...
 
-    def begin_delete(self, resource_group_name: str, disk_name: str, /) -> object:
-        """Start the deletion of one disk (positional arguments, result is not awaited)."""
+    def begin_delete(self, resource_group_name: str, disk_name: str, /) -> DeletePoller:
+        """Start the deletion of one disk (positional arguments)."""
         ...
 
 
@@ -126,7 +137,7 @@ class AzureDiskCleaner:
         return operation is Operation.DELETE
 
     def plan(self, context: RunContext) -> Plan:
-        """List every disk of the subscription and filter. Makes no mutating call."""
+        """List every disk of the configured resource group and filter. Makes no mutating call."""
         candidates: list[Candidate] = []
         skipped: list[Skipped] = []
         started = _logger.started()
@@ -148,27 +159,42 @@ class AzureDiskCleaner:
     def apply(self, plan: Plan, context: RunContext) -> Result:
         """Delete the planned disks in plan order (nothing is deleted in a dry run)."""
         deleted: list[str] = []
+        failed: list[Failure] = []
         for candidate in plan.candidates:
-            self.delete_disk(candidate.id, dry_run=context.dry_run, record=not context.dry_run)
-            deleted.append(candidate.id)
+            error = self.delete_disk(
+                candidate.id, dry_run=context.dry_run, record=not context.dry_run
+            )
+            if error is None:
+                deleted.append(candidate.id)
+            else:
+                failed.append(Failure(id=candidate.id, error=error))
         _log_summary(deleted, dry_run=context.dry_run)
-        return Result(succeeded=tuple(deleted))
+        return Result(succeeded=tuple(deleted), failed=tuple(failed))
 
     def list_disks(self) -> Iterable[SdkDisk]:
-        """The (lazy) subscription-wide listing."""
-        return self._client_factory().disks.list()
+        """The (lazy) listing of the configured resource group only (BUG-172)."""
+        return self._client_factory().disks.list_by_resource_group(self._resource_group)
 
-    def delete_disk(self, disk_name: str, *, dry_run: bool, record: bool = True) -> None:
-        """Start the deletion of one disk and log it; a dry run does nothing.
+    def delete_disk(self, disk_name: str, *, dry_run: bool, record: bool = True) -> str | None:
+        """Delete one disk (start the deletion, wait for it) and log it; a dry run does nothing.
 
-        `record` False leaves the ACTION line to the caller (`plan()` logs it in a dry run).
+        Returns None once the disk is deleted (always in a dry run), else the error text. An
+        error is logged and recorded for the end-of-run list, not raised (BUG-174), so the caller
+        goes on with the next disk. `record` False leaves the ACTION line to the caller
+        (`plan()` logs it in a dry run).
         """
-        if not dry_run:
-            self._client_factory().disks.begin_delete(self._resource_group, disk_name)
-            logging.info("Deleted disk: " + disk_name)
-        if record:
-            kind = "would_delete" if dry_run else "deleted"
-            _logger.acted(kind, self._resource_group, disk_name)
+        try:
+            if not dry_run:
+                self._client_factory().disks.begin_delete(self._resource_group, disk_name).result()
+                logging.info("Deleted disk: " + disk_name)
+            if record:
+                kind = "would_delete" if dry_run else "deleted"
+                _logger.acted(kind, self._resource_group, disk_name)
+        except Exception as e:
+            logging.error(f"Error occurred while deleting disk {disk_name}: {e}")
+            _logger.failed(self._resource_group, str(disk_name), e)
+            return str(e)
+        return None
 
     def decide(self, disk: SdkDisk, now: datetime.datetime) -> tuple[Candidate | None, str]:
         """Select one SDK disk: the candidate, or None with the reason it was kept."""
@@ -312,7 +338,7 @@ class Disk(Service):
             if candidate is None:
                 continue
             selected += 1
-            cleaner.delete_disk(candidate.id, dry_run=self.dry_run)
-            self.disks_names_to_delete.append(candidate.id)
+            if cleaner.delete_disk(candidate.id, dry_run=self.dry_run) is None:
+                self.disks_names_to_delete.append(candidate.id)
         _logger.region_done(self.base.resource_group, scanned, selected, started)
         _log_summary(self.disks_names_to_delete, dry_run=self.dry_run)

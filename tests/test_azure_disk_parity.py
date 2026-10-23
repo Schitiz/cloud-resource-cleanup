@@ -8,6 +8,14 @@ a `RunContext`, `plan()` then `apply()` unless dry run) is compared on results, 
 list/delete calls and log records (decision logs, "Deleted disk" logs and summary lines are
 compared as three ordered groups, because `plan()` decides every disk before `apply()` deletes).
 The module lists no regions, so there is no region fallback or region auth error to cover.
+
+Two bugs are fixed on purpose (FIX-AZU-DISK), so the oracle differs from the new code:
+BUG-172 (the listing is `disks.list_by_resource_group(<configured group>)` instead of the
+subscription-wide `disks.list()`; the fake yields the same disks for both, so every case still
+compares equal once the oracle's `("list",)` call is mapped to the new call) and BUG-174 (each
+delete is isolated and its poller is awaited). Cases that trigger BUG-174 carry
+`diverges="BUG-174"`: the test asserts the oracle shows the old outcome and the new code the
+exact new outcome in `DIVERGING`; every other case still equals the oracle.
 """
 
 import datetime
@@ -32,6 +40,7 @@ _ADDRESS = re.compile(r"0x[0-9a-f]+")
 ORACLE = Path(__file__).parent / "legacy" / "azu_disk.txt"
 
 BUGS = {"BUG-358"}  # log-only divergences of the LOG-AZU rung
+ENV_RESOURCE_GROUP = "env-rg"
 
 
 class _FrozenDatetime(datetime.datetime):
@@ -59,6 +68,8 @@ class Case:
     begin_script: Mapping[str, Sequence[Exception | None]] = field(default_factory=dict)
     max_age: str | None = None
     error_phase: str | None = None
+    result_script: Mapping[str, Sequence[Exception | None]] = field(default_factory=dict)
+    diverges: str | None = None
 
 
 def _boom(text: str = "boom") -> Exception:
@@ -247,19 +258,33 @@ CASES = [
         error_phase="plan",
     ),
     Case("name-none-dry-run-ok", [disk(None)], dry_run=True),
-    Case("name-none-delete-error", [disk(None)], error_phase="apply"),
+    Case("name-none-delete-error", [disk(None)], error_phase="apply", diverges="BUG-174"),
+    Case(
+        "poller-error-not-deleted",
+        [disk("a"), disk("b"), disk("c")],
+        result_script={"b": [_boom("poller failed")]},
+        diverges="BUG-174",
+    ),
+    Case(
+        "begin-delete-error-every-disk",
+        [disk("a"), disk("b")],
+        begin_script={"a": [_boom("a failed")], "b": [_boom("b failed")]},
+        diverges="BUG-174",
+    ),
     Case("missing-attribute-error", [types.SimpleNamespace(name="a")], error_phase="plan"),
     Case(
         "begin-delete-error-propagates",
         [disk("a"), disk("b"), disk("c")],
         begin_script={"b": [_boom("delete failed")]},
         error_phase="apply",
+        diverges="BUG-174",
     ),
     Case(
         "begin-delete-error-first",
         [disk("a"), disk("b")],
         begin_script={"a": [_boom()]},
         error_phase="apply",
+        diverges="BUG-174",
     ),
     Case(
         "begin-delete-error-ignored-in-dry-run",
@@ -292,6 +317,7 @@ class Outcome:
     count_logs: list[tuple[str, int, str]]
     stdout: str
     error: tuple[str, str] | None
+    waited: list[str] = field(default_factory=list)
 
 
 def _load_oracle() -> Any:
@@ -329,7 +355,7 @@ def _setup(
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],
 ) -> FakeAzure:
-    azure = FakeAzure(case.disks, case.list_error, case.begin_script)
+    azure = FakeAzure(case.disks, case.list_error, case.begin_script, case.result_script)
     azure.install(monkeypatch)
     if case.max_age is not None:
         monkeypatch.setenv("MAX_AGE", case.max_age)
@@ -361,7 +387,7 @@ def _run(
     stdout = capsys.readouterr().out
     caplog.clear()
     count = cleaner.count
-    return Outcome(azure.calls, deleted, count, logs, _records(caplog), stdout, error)
+    return Outcome(azure.calls, deleted, count, logs, _records(caplog), stdout, error, azure.waited)
 
 
 @pytest.fixture
@@ -379,7 +405,10 @@ def test_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run(_new, case, monkeypatch, caplog, capsys)
-    assert new.calls == old.calls
+    if case.diverges:
+        _assert_diverges(case, old, new)
+        return
+    assert new.calls == _fix_172(case, old.calls)
     assert new.error == old.error
     assert new.deleted == old.deleted
     assert new.count == old.count
@@ -421,7 +450,14 @@ def _run_cleaner(
     except Exception as e:
         error = (type(e).__name__, str(e))
     return Outcome(
-        azure.calls, deleted, len(deleted), _records(caplog), [], capsys.readouterr().out, error
+        azure.calls,
+        deleted,
+        len(deleted),
+        _records(caplog),
+        [],
+        capsys.readouterr().out,
+        error,
+        azure.waited,
     )
 
 
@@ -448,10 +484,16 @@ def test_cleaner_protocol_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run_cleaner(case, monkeypatch, caplog, capsys)
+    if case.diverges:
+        _assert_cleaner_diverges(case, old, new)
+        return
     assert new.error == old.error
     assert new.stdout == old.stdout
     assert _only(new.calls, "client")[:1] == _only(old.calls, "client")[:1]
-    assert _only(new.calls, "list") == _only(old.calls, "list")
+    assert _only(new.calls, "list_by_resource_group") == _only(
+        _fix_172(case, old.calls), "list_by_resource_group"
+    )
+    assert _only(new.calls, "list") == []
     if case.error_phase == "plan":
         assert _only(new.calls, "begin_delete") == []
         assert _groups(new.logs)[1:] == ([], [])
@@ -467,6 +509,107 @@ def test_cleaner_protocol_matches_main(
 
 def _find(case_id: str) -> Case:
     return next(c for c in CASES if c.id == case_id)
+
+
+def _group(case: Case) -> str:
+    return case.resource_group or ENV_RESOURCE_GROUP
+
+
+def _fix_172(case: Case, calls: Sequence[tuple[Any, ...]]) -> list[tuple[Any, ...]]:
+    """BUG-172: the oracle's subscription-wide `list` is a list of the configured group."""
+    return [("list_by_resource_group", _group(case)) if c == ("list",) else c for c in calls]
+
+
+@dataclass(frozen=True)
+class Fixed:
+    """The exact new outcome of a case that triggers BUG-174 (the oracle shows the old one)."""
+
+    deleted: list[str]
+    waited: list[Any]
+    errors: list[str]
+    old_error: str | None = None
+
+
+DIVERGING: dict[str, Fixed] = {
+    "begin-delete-error-propagates": Fixed(
+        ["a", "c"],
+        ["a", "c"],
+        ["Error occurred while deleting disk b: delete failed"],
+        old_error="delete failed",
+    ),
+    "begin-delete-error-first": Fixed(
+        ["b"], ["b"], ["Error occurred while deleting disk a: boom"], old_error="boom"
+    ),
+    "name-none-delete-error": Fixed(
+        [],
+        [None],
+        [
+            "Error occurred while deleting disk None: "
+            'can only concatenate str (not "NoneType") to str'
+        ],
+        old_error='can only concatenate str (not "NoneType") to str',
+    ),
+    "poller-error-not-deleted": Fixed(
+        ["a", "c"], ["a", "b", "c"], ["Error occurred while deleting disk b: poller failed"]
+    ),
+    "begin-delete-error-every-disk": Fixed(
+        [],
+        [],
+        [
+            "Error occurred while deleting disk a: a failed",
+            "Error occurred while deleting disk b: b failed",
+        ],
+        old_error="a failed",
+    ),
+}
+
+
+def _errors(logs: Sequence[tuple[str, int, str]]) -> list[str]:
+    return [r[2] for r in logs if r[1] == logging.ERROR]
+
+
+def _begin_deletes(calls: Sequence[tuple[Any, ...]], case: Case, names: Sequence[Any]) -> list[Any]:
+    return [("begin_delete", _group(case), n) for n in names]
+
+
+def _assert_diverges(case: Case, old: Outcome, new: Outcome) -> None:
+    fixed = DIVERGING[case.id]
+    assert case.diverges == "BUG-174"
+    assert (old.error[1] if old.error else None) == fixed.old_error, "oracle changed"
+    assert (old.error, old.deleted) != (new.error, new.deleted)
+    assert new.error is None
+    assert new.deleted == fixed.deleted
+    assert new.count == len(fixed.deleted)
+    assert new.waited == fixed.waited
+    assert _errors(new.logs) == fixed.errors
+    assert [r[2] for r in new.logs if r[2].startswith("Deleted disk: ")] == [
+        f"Deleted disk: {n}" for n in fixed.deleted
+    ]
+    assert [r[2] for r in new.logs if "Azure Disks" in r[2]] == [
+        f"number of Azure Disks deleted: {len(fixed.deleted)}",
+        f"List of Azure Disks deleted: {fixed.deleted}",
+    ]
+    listed = [c for c in new.calls if c[0] in ("list", "list_by_resource_group")]
+    assert listed == [("list_by_resource_group", _group(case))]
+    assert [c for c in new.calls if c[0] == "begin_delete"] == _begin_deletes(
+        new.calls, case, [d.name for d in case.disks if not isinstance(d, Exception)]
+    )
+    assert new.stdout == old.stdout
+
+
+def _assert_cleaner_diverges(case: Case, old: Outcome, new: Outcome) -> None:
+    fixed = DIVERGING[case.id]
+    assert (old.error, old.deleted) != (new.error, new.deleted)
+    assert new.error is None
+    assert new.deleted == fixed.deleted
+    assert new.waited == fixed.waited
+    assert _errors(new.logs) == fixed.errors
+    assert [r[2] for r in new.logs if "Azure Disks" in r[2]] == [
+        f"number of Azure Disks deleted: {len(fixed.deleted)}",
+        f"List of Azure Disks deleted: {fixed.deleted}",
+    ]
+    assert _only(new.calls, "list") == []
+    assert _only(new.calls, "list_by_resource_group") == [("list_by_resource_group", _group(case))]
 
 
 QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
@@ -503,11 +646,6 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
         "iteration-error-mid-listing",
         lambda o: o.error == ("RuntimeError", "page failed") and o.deleted == ["a"],
     ),
-    (
-        "begin-delete-error-propagates",
-        lambda o: o.error == ("RuntimeError", "delete failed") and o.deleted == ["a"],
-    ),
-    ("name-none-delete-error", lambda o: o.error is not None and o.error[0] == "TypeError"),
     ("resource-group-from-env", lambda o: ("begin_delete", "env-rg", "a") in o.calls),
     (
         "begin-delete-error-ignored-in-dry-run",
@@ -540,7 +678,7 @@ def test_delete_is_interleaved_with_paging_like_main(
     case = _find("delete")
     expected = [
         ("client", "sub-1"),
-        ("list",),
+        ("list_by_resource_group", "rg-test"),
         ("yield", "a"),
         ("begin_delete", "rg-test", "a"),
         ("yield", "b"),
@@ -550,7 +688,7 @@ def test_delete_is_interleaved_with_paging_like_main(
     for build in (_legacy, _new):
         azure = _setup(case, monkeypatch, caplog, capsys)
         build(case).delete()
-        assert azure.calls == expected
+        assert _fix_172(case, azure.calls) == expected
 
 
 def test_repeated_delete_accumulates_like_main(
@@ -574,7 +712,8 @@ def test_repeated_delete_accumulates_like_main(
             )
         )
     old, new = results
-    assert new[:2] == old[:2]
+    assert new[0] == _fix_172(case, old[0])
+    assert new[1] == old[1]
     assert new[2] == expected_logs(old[2], BUGS, RULES)
     assert new[2] != old[2]
     assert new[1] == ["a", "c", "a", "c"]
