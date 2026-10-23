@@ -26,7 +26,6 @@ from tests.log_fix_aws_compute import RULES
 
 FIXED_BUGS = {"BUG-356"}
 
-
 @dataclass(frozen=True)
 class Divergence:
     bug: str
@@ -1181,8 +1180,7 @@ FIXED_QUIRKS: Sequence[FixedQuirk] = [
         lambda o: (
             o.deleted == ["us-west-2/a yb_task=itest"]
             and "Skipping volume b: detach time unknown and CreateTime younger than "
-            "age plus detach_age"
-            in _flatten(o)
+            "age plus detach_age" in _flatten(o)
         ),
     ),
 ]

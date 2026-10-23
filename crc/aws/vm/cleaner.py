@@ -136,7 +136,8 @@ class VmCleaner:
             names = dry_run_names(operation, candidates)
             summarise(operation, True, names)
             candidates = [
-                dataclasses.replace(c, id=name) for c, name in zip(candidates, names, strict=True)
+                dataclasses.replace(c, id=name)
+                for c, name in zip(candidates, names, strict=True)
             ]
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
 

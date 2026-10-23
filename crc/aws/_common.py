@@ -45,4 +45,6 @@ def log_deleted_summary(label: str, deleted: Sequence[str], *, dry_run: bool) ->
         logging.warning(f"number of AWS {label} deleted: {len(items)}")
         logging.warning(f"List of AWS {label} deleted: {items}")
     else:
-        logging.warning(f"List of AWS {label} (Total: {len(items)}) which will be deleted: {items}")
+        logging.warning(
+            f"List of AWS {label} (Total: {len(items)}) which will be deleted: {items}"
+        )

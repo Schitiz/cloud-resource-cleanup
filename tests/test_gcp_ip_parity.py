@@ -262,7 +262,8 @@ def _expected_diverging_logs(
                 logs.append(("root", logging.INFO, f"Deleting IP address: {address}"))
     if case.dry_run:
         msg = (
-            f"List of GCP IPs (Total: {len(fixed.deleted)}) which will be deleted: {fixed.deleted}"
+            f"List of GCP IPs (Total: {len(fixed.deleted)}) "
+            f"which will be deleted: {fixed.deleted}"
         )
         logs.append(("root", logging.WARNING, msg))
     else:
@@ -639,11 +640,9 @@ FIXED_QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool], Callable[[Outcome],
     (
         "delete-operation-error",
         lambda o: o.error is None and o.deleted == ["ip-a", "ip-b", "keep-c"] and o.awaited == [],
-        lambda o: (
-            o.error is None
-            and o.deleted == ["ip-b", "keep-c"]
-            and o.awaited == [(_EAST, "ip-a"), (_EAST, "ip-b"), (_EAST, "keep-c")]
-        ),
+        lambda o: o.error is None
+        and o.deleted == ["ip-b", "keep-c"]
+        and o.awaited == [(_EAST, "ip-a"), (_EAST, "ip-b"), (_EAST, "keep-c")],
     ),
 ]
 
