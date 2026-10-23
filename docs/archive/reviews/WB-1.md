@@ -95,3 +95,73 @@ None found.
 
 VERDICT: APPROVE
 
+
+## Round 2 (Opus)
+
+### Round 1 fixes and findings
+
+- Round 1's only code change (dropping the unread report-label constants from
+  `crc/cli/constants.py`, the `pairs.py` docstring) is correct: nothing in `crc/`, `tests/` or
+  `crc.py` reads `DELETED`, `STOPPED`, `NICS`, `DISKS`, `VMS`, `IPS`, `KEYPAIRS`, `KMS`,
+  `SPOT_INSTANCE_REQUEST` or `OPERATIONS`; the oracle keeps its own copies
+  (`test_all_expansion_order_follows_crc_py` reads `CLOUDS` / `RESOURCES` from `load_legacy_crc`).
+- The coder reported 7 `import-untyped` mypy errors (`google.cloud`, `azure.*`) as a VM issue.
+  They come from a stale `.mypy_cache` written before the SDKs were installed: with the cache
+  removed, mypy is clean on HEAD (372 files) and on `7b1f9d4` (379 files; the 7 extra are the 6
+  deleted `crc/cli` modules and `tests/helpers_legacy_handlers.py`). Round 1's "mypy passed" holds.
+
+### Independent checks
+
+1. **Production paths kept.** `python3 crc.py --help` is byte-identical on `7b1f9d4` and HEAD.
+   A dry-run `main()` of six production commands (aws vm with filter tags and Slack channel,
+   azure vm, oci vm, aws snapshot, `--cloud all --resource all`, aws `--scan_tag`), with
+   `tests.helpers_cli_routes.FakeCleaners` in place of the registry and no cloud calls, gives the
+   same stdout, exit code or exception, and the same (cloud, kind, options) at each fake cleaner on
+   both commits. `crc.cli.runner.CRC` keeps the constructor of the deleted `CRCBase` unchanged
+   (GCP `project_id` check, BUG-030 conditional `influxdb_bucket` / `resource_suffix`) and
+   `get_msg` unchanged; those are the only things `bridge.py`, `crc.notify` and the routes read
+   (`slack_client`, `slack_channel`, `influxdb_client`, `influxdb_bucket`, `resource_suffix`,
+   `dry_run`, `cloud`, `get_msg`). `crc.cli.scan.scan_instances_with_tag` / `_scan_vm` match the old
+   `VmOps._get_vm` + `vm_arguments` + `scan_instances_with_tag` exactly (class choice, positional
+   order per cloud, ValueError and NotImplementedError texts). The scan and every route table are
+   imported and run by the suite (`test_cli_scan_parity.py` 961 cases green).
+2. **Tests and oracle.** No `def test_` or test class was removed (diff of `tests/`). The scan
+   parity test is not vacuous: `helpers_wa2_scan` patches `__init__` / `find_instances_with_tag`
+   on the real VM classes in place, so the aliases imported by `scan.py` reach the fakes, and
+   `routed_case` keeps the original tag arguments (`auto_clean=false`, `k=v` for the unsupported
+   cases). `test_cli_main_parity.py`, `test_cli_route_fix.py` and `test_cli_logger.py` patch
+   `crc.cli.scan.scan_instances_with_tag` with a forwarder to the fake `CRC`, so the same
+   `scan_instances_with_tag` events are compared with the oracle; the real function is covered by
+   `test_cli_scan_parity.py`. `test_crc_py_reexports_the_names_the_contract_needs` still checks
+   every name `crc.py` exports on both modules. No oracle comparison was dropped.
+3. **Deleted names gone.** `rg` for `resource_ops`, `adapter_args`, `report_calls`, `vm_ops`,
+   `crc.cli.notify`, `crc.cli.base`, `CRCBase`, `VmOps`, `ResourceOps`, `NotifyMixin`,
+   `vm_arguments`, `DiskArgs`, `report_result`, `helpers_legacy_handlers` over `crc/`, `tests/`,
+   `crc.py`: only a local variable `vm_ops` in `tests/test_azure_vm_delete_helpers_parity.py` and
+   the docstring of `tests/test_notify_crc_parity.py`, which names `crc.cli.notify` of `main` as
+   the oracle side (history, correct). No `from crc import` / `crc.<re-export>` user outside
+   `docs/archive`, and no Jenkinsfile in the repo (Jenkins runs `python crc.py <flags>`).
+   `crc/cli/README.md` and `crc/cli/routes/README.md` have no HANDLERS / legacy handler / legacy
+   path / CRC method / rung wording; the only "legacy" hits are the oracle path
+   `tests/legacy/crc_main.txt`. The Public API lists `scan_instances_with_tag` and the `CRC` context.
+4. **Behaviour and locked files.** No change to `tests/legacy/*`, `tests/archtest/**`, the five
+   hash-locked test files, BUGS.md, CLEANUP_SAFETY.md, AGENTS.md, ARCHITECTURE.md, pyproject,
+   Makefile or requirements. Help text, dry-run output, exit codes and exceptions identical (check 1);
+   the bridge, routes and notifiers are not in the diff, so Slack text, Influx points and run-log
+   lines are unchanged, and the parity suites that compare them with the oracle are green.
+5. **Size.** No file in `crc/` or `crc.py` over 250 lines, no function over 60 (AST scan).
+   `crc/` Python lines 19,279 before, 18,548 after; `crc.py` 102 -> 31.
+6. **Gates** (after `pip install -r requirements.txt -r requirements-dev.txt`, clean mypy cache):
+   ruff green; mypy `Success: no issues found in 372 source files`; lint-imports 5 kept, 0 broken;
+   `make check` exit 0 in 1m00s wall: `pytest -q -n auto` **44415 passed in 53.21s**; ARCH-008
+   44415 tests, floor 44415.
+
+### Changes in round 2
+
+None to code or tests; this section only.
+
+## New bugs (round 2)
+
+None found.
+
+ROUND 2 VERDICT: APPROVE
