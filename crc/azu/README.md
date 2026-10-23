@@ -4,7 +4,7 @@
 
 Azure cleaners (azure-mgmt SDK). They delete or stop leftover VMs, disks, IPs and NICs in one resource group.
 
-**Refactored.** Every module is strict-checked and none is in the legacy ratchet: `ip.py` (rung AZ-1), `nic.py` (rung AZ-2), `disk.py` (rung AZ-3), `vm/` (rung AZ-4) and `spot_vm/` (rung AZ-5) are refactored into registered `Cleaner`s; `vm_delete_helpers.py` and `__init__.py` (rung PL-AZ) are strict-typed plumbing with the same behaviour as on `main`. `_base.py` is strict-clean too; its `os.environ` credential read is an owner-approved ARCH-003 allowlist entry (`tests/archtest/bans.py`), so the credentials are still read when an Azure cleaner is built, as on `main`. Any change must follow `ARCHITECTURE.md`; a behaviour change needs a behaviour-fix rung in `docs/refactor/PLAN.md` (`.cursor/skills/crc-python-refactor/BEHAVIOUR_FIX.md`), with `make check` green.
+**Refactored.** Every module is strict-checked and none is in the legacy ratchet: `ip/` (rung AZ-1), `nic/` (rung AZ-2), `disk/` (rung AZ-3), `vm/` (rung AZ-4) and `spot_vm/` (rung AZ-5) are refactored into registered `Cleaner`s; `vm_delete_helpers.py` and `__init__.py` (rung PL-AZ) are strict-typed plumbing with the same behaviour as on `main`. `_base.py` is strict-clean too; its `os.environ` credential read is an owner-approved ARCH-003 allowlist entry (`tests/archtest/bans.py`), so the credentials are still read when an Azure cleaner is built, as on `main`. Any change must follow `ARCHITECTURE.md`; a behaviour change needs a behaviour-fix rung in `docs/refactor/PLAN.md` (`.cursor/skills/crc-python-refactor/BEHAVIOUR_FIX.md`), with `make check` green.
 
 Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.md`):
 
@@ -51,6 +51,6 @@ copyright comment and declares no export list.
    separate rungs (`docs/refactor/PLAN.md`).
 2. New resources go in a new module with the `Cleaner` contract (`ARCHITECTURE.md`, "Add a resource
    cleaner"): a `Cleaner` registered with `@register("azure", ...)`.
-3. A new or refactored module follows `ip.py`, `nic.py`, `disk.py`, `vm/` and `spot_vm/`: a Cleaner with an injected client Protocol, `@register("azure", ...)`, a parity test against a frozen oracle in `tests/legacy/`. No module of this package is in the legacy ratchet (`pyproject.toml` lists only five hash-locked safety test files); never add one. Update this README and its symbol list with any public change.
+3. A new or refactored module follows `ip/`, `nic/`, `disk/`, `vm/` and `spot_vm/`: a Cleaner with an injected client Protocol, `@register("azure", ...)`, a parity test against a frozen oracle in `tests/legacy/`. No module of this package is in the legacy ratchet (`pyproject.toml` lists only five hash-locked safety test files); never add one. Update this README and its symbol list with any public change.
 4. Keep `Base`, the delete helpers and their call order, environment variables, log lines and swallowed errors as they are; a cleaner narrows the `Any` clients with its own Protocol instead of changing the plumbing's return types.
 5. Record every new bug or quirk in `docs/refactor/BUGS.md` with its `main` file:line.

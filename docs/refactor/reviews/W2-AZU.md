@@ -37,3 +37,49 @@ No new behavioural bugs. Quirks seen, recorded as-is and not fixed:
 - `crc/azu/nic/cleaner.py:146`: `list_nics` issues the list call twice and discards the first (documented BUG-111 behaviour kept on purpose).
 - `crc/azu/disk/adapter.py:30`: `Disk.default_disk_state` duplicates `DEFAULT_DISK_STATES` (`crc/azu/disk/cleaner.py`); two sources for one default.
 - `crc/azu/spot_vm/config.py:35`: `log_summary` logs "No Azure Spot VMs ... to delete." and then still logs the three empty "List of ..." lines.
+
+## Round 1 (Argon)
+
+Scope reviewed: `git diff cea0a8a..HEAD` (`crc/azu/_common.py`, `crc/azu/ip/**`, `crc/azu/nic/**`, `crc/azu/disk/**`, `crc/azu/spot_vm/{cleaner,config,README}`, `crc/azu/vm/{cleaner,settings,helpers,selection,README}`, `crc/azu/README.md`, `docs/refactor/reviews/W2-AZU.md`).
+
+### Verification
+
+1. **No behaviour change (`git diff --color-moved=zebra cea0a8a..HEAD`)**:
+   - `crc/azu/ip.py` (265) -> `crc/azu/ip/{__init__.py (15), client.py (32), cleaner.py (144), adapter.py (95)}`: `PublicIpOperations`, `IpNetworkClient`, `ClientFactory`, `TagSpec` moved verbatim to `client.py`; `_OPTIONAL_IN_USE_FIELDS`, `_in_use`, `AzureIpCleaner`, `build_ip_cleaner` moved to `cleaner.py`; `IP(Service)` moved verbatim to `adapter.py`.
+   - `crc/azu/nic.py` (342) -> `crc/azu/nic/{__init__.py (17), client.py (40), cleaner.py (216), adapter.py (97)}`: `DeletePoller`, `NicOperations`, `NicNetworkClient`, `ClientFactory` moved verbatim to `client.py`; `DELETE_ATTEMPTS`, `_compile`, `log_none_to_delete`, `AzureNicCleaner`, `build_nic_cleaner` moved to `cleaner.py`; `NIC(Service)` moved verbatim to `adapter.py`.
+   - `crc/azu/disk.py` (344) -> `crc/azu/disk/{__init__.py (29), client.py (67), cleaner.py (182), adapter.py (109)}`: `TagSpec`, `AgeSpec`, `SdkDisk`, `DeletePoller`, `DiskOperations`, `DiskComputeClient`, `ClientFactory`, `Clock` moved verbatim to `client.py`; `DEFAULT_DISK_STATES`, `DiskSettings`, `AzureDiskCleaner`, `build_disk_cleaner` moved to `cleaner.py`; `Disk(Service)` moved verbatim to `adapter.py`.
+   - `crc/azu/_common.py` (35): deduplicates `kept(reason)` (formerly `_kept` in `AzureIpCleaner` and `AzureNicCleaner`), `log_would_delete(resource_group, candidates)` (the dry-run `_logger.acted("would_delete", ...)` loop in `ip`, `nic`, and `disk` `plan()`), and `log_delete_summary(noun, deleted, *, dry_run, number_word="number")` (produces the exact closing `logging.warning` lines of `ip`, `disk`, and `nic` with `number_word="Number"`).
+   - `crc/azu/spot_vm/cleaner.py` (278 -> 248) + `crc/azu/spot_vm/config.py` (61): `STOPPED_POWER_STATES`, `TagSpec`, `SpotVmConfig`, `log_summary`, and `old_enough` (formerly `AzureSpotVmCleaner._old_enough`) moved verbatim to `config.py` and re-exported in `cleaner.py`.
+   - `crc/azu/vm/cleaner.py` (327 -> 234) + `settings.py` (75) + `helpers.py` (39) + `selection.py` (37): `DEFAULT_INSTANCE_STATES`, `TagSpec`, `Clock`, `VmSettings`, `Tally`, `_log_deleted`, `_log_stopped`, `log_summary` moved verbatim to `settings.py`; constants, `tally_of`, `power_state`, `log_processing_error` moved verbatim to `helpers.py`; `skip_reason` and `is_old` moved verbatim to `selection.py`; public symbols re-exported via `crc/azu/vm/cleaner.py` `__all__`.
+   - Every condition, default, SDK call order, exception handling path, and log message is unchanged.
+2. **Import paths and mock/monkeypatch targets**:
+   - Every import from `crc.azu.ip`, `crc.azu.nic`, `crc.azu.disk`, `crc.azu.spot_vm`, `crc.azu.spot_vm.cleaner`, `crc.azu.vm`, and `crc.azu.vm.cleaner` across `crc/` (`crc/cli/resource_ops.py`, `crc/cli/vm_ops.py`) and `tests/` resolves unchanged; importing `crc.azu.ip|nic|disk` imports `cleaner.py` so `@register("azure", ...)` executes at import time as before.
+   - All string `monkeypatch.setattr` and `mock.patch` targets in `tests/` (`crc.azu._base.{ClientSecretCredential,ComputeManagementClient,NetworkManagementClient}`, `crc.azu.vm_delete_helpers.time.sleep`, `crc.azu.spot_vm.{Base,begin_delete_vm_and_wait,delete_vm_primary_nic}`) still hit the real code.
+3. **Tests and safety locks**:
+   - Zero test files edited; all five hash-locked safety tests (`tests/archtest/safety_lock.json`) and `tests/legacy/*.txt` are untouched.
+4. **Line counts (`wc -l`) and split seams**:
+   - Every owned `.py` file is at 250 lines or fewer (max: `crc/azu/spot_vm/cleaner.py` at 248 lines, `crc/azu/vm/cleaner.py` at 234 lines, `crc/azu/nic/cleaner.py` at 216 lines, `crc/azu/disk/cleaner.py` at 182 lines, `crc/azu/ip/cleaner.py` at 144 lines).
+   - Splits follow clean architectural seams (`client.py` Protocols, `cleaner.py` Cleaner + `@register` factory, `adapter.py` legacy `Service` subclass for one-move deletion later, `settings.py`/`config.py`/`helpers.py`/`selection.py`), and `crc/azu/_common.py` holds helpers shared 2-3 times across `ip`, `nic`, and `disk`.
+5. **READMEs and ARCH-002**:
+   - `crc/azu/README.md`, `crc/azu/ip/README.md` (31 lines), `crc/azu/nic/README.md` (34 lines), `crc/azu/disk/README.md` (35 lines), `crc/azu/spot_vm/README.md` (37 lines), and `crc/azu/vm/README.md` (58 lines) are concise and pass `ARCH-002` Public API symbol sync.
+
+### Findings
+
+- **BLOCKING (fixed)**: None.
+- **NIT (fixed)**: `crc/azu/README.md:7,53` still referred to `ip.py`, `nic.py`, `disk.py` in prose under `## Purpose` and `## Extension Rules`; updated to `ip/`, `nic/`, `disk/`.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`:
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed! |
+| `mypy` (`crc`, `tests`) | Success: no issues found in 213 source files |
+| `lint-imports` | Contracts: 5 kept, 0 broken |
+| `pytest -q` (`ARCH-001..005`, `SAF-LOCK`, full suite) | 43010 passed in 197.33s |
+
+Runtime of `make check`: 3m38s (pytest 197.33s).
+Test count: 43010 passed vs 43010 at base `cea0a8a` (+0, unchanged).
+
+VERDICT: APPROVE
