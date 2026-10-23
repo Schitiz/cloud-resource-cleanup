@@ -1,7 +1,7 @@
 # CLEANUP_SAFETY.md — CRC destructive-cleanup behaviour
 
 Maintainer notes on how this Jenkins cleanup tool deletes cloud resources. The
-document describes the code of this branch. Sections marked **Gap** are known
+document describes the code in this repository. Sections marked **Gap** are known
 limits. Update this file in the same PR when those facts change.
 
 Each invariant carries a stable `[SAF-NNN]` tag. IDs are never renumbered or
@@ -51,9 +51,9 @@ reused. `tests/archtest/safety_lock.json` maps IDs to the tests that lock them.
   still raise out of `AWS_Disk.delete`, and `CRC.delete_disks` re-raises them.
 - [SAF-005] Azure `SpotVM.delete` re-raises when the **list** call fails. Per-VM delete
   failures are logged and skipped.
-- Engine path (ENG-0, BUG-388): a cleaner's `plan()` lists every region before `apply()` mutates,
-  so a listing error in a later region now stops the pair before any mutation (fewer deletes,
-  never more) where the old adapter loop deleted region by region.
+- Engine path (BUG-388): a cleaner's `plan()` lists every region before `apply()` mutates,
+  so a listing error in a later region stops the pair before any mutation (fewer deletes,
+  never more); the legacy adapter loop deleted region by region.
 
 ---
 
