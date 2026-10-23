@@ -22,7 +22,7 @@ plain `dict`, as on `main`.
 - `clients.py`: the Slack `WebClient` and `InfluxDBClient` construction (the InfluxDB field check runs right before it) and the `MAX_AGE` environment write with its print, and its reset.
 - `context.py`: `RunContext` (the settings every `CRC` of a run shares) and `make_crc`, the one place that builds `CRC(...)` for `main`.
 - `scan.py`: `run_scan`, the read-only `--scan_tag` path; it wraps each cloud pass in `crc.core.logger.begin()` / `finish()` (`operation=scan`), prints, notifies Slack and always exits with code 0.
-- `dispatch.py`: `run_dispatch`, the cloud and resource loops: one small handler per resource wrapped in `crc.core.logger.begin()` / `finish()` (`try`/`finally`), the AWS disk opt-in circuit breaker, the spot warnings and the `Snapshot` branch.
+- `dispatch.py`: `run_dispatch`, the cloud and resource loops: one small handler per resource wrapped in `crc.core.logger.begin()` / `finish()` (`try`/`finally`), the AWS disk opt-in circuit breaker, the AWS-only check for `snapshot` and `vpc`, the spot warnings and the `Snapshot` branch.
 
 ## Public API
 
@@ -34,6 +34,8 @@ plain `dict`, as on `main`.
 - `Targets`: frozen value of the expanded clouds and resources; `resolve_targets()` builds it.
 - `check_tokens()`: raise OSError when a Slack channel or InfluxDB is set without its token.
 - `check_flag_combinations()`: raise ValueError on stop for non-vm, all without all, user label, KMS flags.
+- `check_scan_tag()`: raise ValueError for an empty or blank scan_tag flag (BUG-344).
+- `check_aws_only_resources()`: raise ValueError when snapshot or vpc is asked for a single non-AWS cloud (BUG-009, BUG-084).
 - `validate_values()`: the list and dict type checks of the flag values.
 - `build_slack_client()`, `build_influxdb_client()`: construct the clients (InfluxDB field check first), or return None.
 - `set_max_age()`, `reset_max_age()`: write and remove the MAX_AGE environment variable, with the prints.
@@ -65,7 +67,9 @@ plain `dict`, as on `main`.
 - `main()` keeps the order of `main` on the main branch: parse flags, read the two tokens, `SLACK_BOT_TOKEN` then `INFLUXDB_TOKEN` errors, stop-only-for-vm, all-needs-all, slack user label, KMS description and user, the list and dict type checks, the Slack client, the InfluxDB field check and client, `MAX_AGE` set, then the scan path (exit) or the loops, then `MAX_AGE` reset. Errors keep their type (`OSError`, which `EnvironmentError` is an alias of) and message.
 - `scan.py` never deletes: it forces `dry_run`, builds `CRC` per cloud and only calls `scan_instances_with_tag`; it always ends in `sys.exit(0)`.
 - The AWS EBS breaker lives in `dispatch._disk`: any `aws` + `disk` pair that is not `--cloud aws --resource disk` raises before a disk call. `CRC`, `Snapshot`, `WebClient`, `InfluxDBClient` and `notify_cleanup` are looked up in `context`, `dispatch`, `clients` and `scan` at call time; `tests/test_cli_main_parity.py` runs the oracle `main()` and this one on recording fakes.
-- Known quirks (kept): `docs/refactor/BUGS.md` rows `BUG-009`, `BUG-028` to `BUG-044`, `BUG-084`, `BUG-333` to `BUG-350`.
+- `snapshot` and `vpc` are AWS-only (BUG-009, BUG-084, fixed in FIX-CLI-ROUTE). `--cloud aws` runs them as before. Any other single cloud raises `ValueError` from `dispatch.check_aws_only_resources` (called in `main()` before `MAX_AGE` is set, so before any `CRC` or `Snapshot` is built; the read-only `--scan_tag` path is not affected). `--cloud all` runs them once, in the `aws` pass, and every other cloud pass logs a warning (`--resource <r> is AWS-only; other clouds are not supported, skipped for <cloud>`) and counts `SKIPPED reason=aws_only_resource`.
+- An empty or blank `--scan_tag` raises `ValueError` from `inputs.check_scan_tag` before `MAX_AGE` is set and before any cleaner runs (BUG-344, fixed in FIX-CLI-ROUTE); it used to be falsy, skip the read-only scan and run the destructive cleanup.
+- Known quirks (kept): `docs/refactor/BUGS.md` rows `BUG-028` to `BUG-044`, `BUG-333` to `BUG-350` except `BUG-344`.
 
 ## Extension Rules
 

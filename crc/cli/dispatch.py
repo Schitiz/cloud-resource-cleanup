@@ -21,6 +21,35 @@ AWS_DISK_OPT_IN_MESSAGE = (
 )
 
 
+AWS_ONLY_RESOURCES = ("snapshot", "vpc")
+
+
+def check_aws_only_resources(targets: Targets) -> None:
+    """Raise before any cleaner runs for an AWS-only resource on another cloud (BUG-009/084)."""
+    if targets.cloud_arg in ("aws", "all"):
+        return
+    for resource in targets.resources:
+        if resource in AWS_ONLY_RESOURCES:
+            raise ValueError(
+                f"--resource {resource} is AWS-only; use --cloud aws "
+                f"(got --cloud {targets.cloud_arg})"
+            )
+
+
+def _skip_non_aws(cloud: Any, resource: str, targets: Targets) -> bool:
+    """True when an AWS-only resource is skipped for `cloud` under `--cloud all` (BUG-009/084)."""
+    if cloud == "aws":
+        return False
+    check_aws_only_resources(targets)
+    _LOG.warning(
+        "--resource %s is AWS-only; other clouds are not supported, skipped for %s",
+        resource,
+        cloud,
+    )
+    logger.current().skip("aws_only_resource")
+    return True
+
+
 def _disk(crc: Any, cloud: Any, options: Options, targets: Targets) -> None:
     """Circuit breaker: AWS EBS is opt-in, so any other aws and disk pair raises."""
     if cloud == "aws" and not targets.aws_disk_opt_in:
@@ -74,6 +103,8 @@ def _vm(crc: Any, cloud: Any, options: Options, targets: Targets) -> None:
 
 
 def _vpc(crc: Any, cloud: Any, options: Options, targets: Targets) -> None:
+    if _skip_non_aws(cloud, "vpc", targets):
+        return
     crc.delete_vpc(options.filter_tags, options.exception_tags)
 
 
@@ -124,6 +155,8 @@ def _spot_instances(crc: Any, cloud: Any, options: Options, targets: Targets) ->
 
 
 def _snapshot(crc: Any, cloud: Any, options: Options, targets: Targets) -> None:
+    if _skip_non_aws(cloud, "snapshot", targets):
+        return
     dry_run = options.dry_run
     snapshot = Snapshot(dry_run=dry_run, age_days=90, exception_tags=options.exception_tags)
     snapshot.delete()

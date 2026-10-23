@@ -543,16 +543,148 @@ def test_table_is_large_and_has_unique_names() -> None:
     assert len(set(names)) == len(names)
 
 
+SCAN_FORMAT_ERROR = "--scan_tag must be in KEY=VALUE format, e.g. auto_clean=false"
+BLANK_SCAN_ERROR = "--scan_tag must not be empty; use KEY=VALUE format, e.g. auto_clean=false"
+AWS_ONLY = ("snapshot", "vpc")
+AWS_ONLY_WARNING = "--resource {} is AWS-only; other clouds are not supported, skipped for {}"
+CLIENT_EVENTS = ("WebClient", "InfluxDBClient")
+
+
+def option_value(case: Case, flag: str) -> str | None:
+    argv = case.argv
+    return argv[argv.index(flag) + 1] if flag in argv else None
+
+
+def diverges(case: Case, expected: Outcome) -> str | None:
+    """The bug ID whose fix changes the outcome of this case against the oracle, if any."""
+    tag = option_value(case, "--scan_tag")
+    if tag is not None:
+        return blank_scan_diverges(tag, expected)
+    if not any(str(event[0]).startswith("CRC") for event in expected.events):
+        return None
+    cloud, resource = option_value(case, "--cloud"), option_value(case, "--resource")
+    if resource in AWS_ONLY and cloud in ("azure", "gcp", "oci"):
+        return "BUG-009" if resource == "snapshot" else "BUG-084"
+    if cloud == "all" and any(event[0] == "Snapshot" for event in expected.events):
+        return "BUG-009"
+    if cloud == "all" and any(event[0] == "crc.delete_vpc" for event in expected.events):
+        return "BUG-084"
+    return None
+
+
+def blank_scan_diverges(tag: str, expected: Outcome) -> str | None:
+    if tag.strip():
+        return None
+    reached = any(str(event[0]).startswith("CRC") for event in expected.events)
+    return "BUG-344" if reached or expected.result[2:] == (SCAN_FORMAT_ERROR,) else None
+
+
+def snapshot_line(case: Case) -> str:
+    if "--dry_run" in case.argv:
+        return "DRY RUN: AWS Snapshots eligible for deletion (>90 days): 3"
+    return "msg:['Snapshot', 'Deleted', ['snap-1']]"
+
+
+def expected_fixed(case: Case, bug: str, oracle: Outcome) -> Outcome:
+    """The outcome the fix must give, derived from the oracle outcome of the same case."""
+    original_max_age = {**DEFAULT_ENV, **case.env}["MAX_AGE"]
+    events = [event for event in oracle.events if event[0] in CLIENT_EVENTS]
+    if bug == "BUG-344":
+        result = ("error", ValueError, BLANK_SCAN_ERROR)
+        return Outcome(events, "", oracle.stderr, original_max_age, [], result)
+    resource = option_value(case, "--resource")
+    if option_value(case, "--cloud") != "all":
+        result = (
+            "error",
+            ValueError,
+            f"--resource {resource} is AWS-only; use --cloud aws "
+            f"(got --cloud {option_value(case, '--cloud')})",
+        )
+        return Outcome(events, "", oracle.stderr, original_max_age, [], result)
+    return fixed_all(case, oracle)
+
+
+def fixed_all(case: Case, oracle: Outcome) -> Outcome:
+    """`--cloud all`: vpc and snapshot run for AWS only, every other pass logs a warning."""
+    events: Events = []
+    seen_snapshot = False
+    drop_delete = False
+    for event in oracle.events:
+        if event[0] == "Snapshot":
+            drop_delete = seen_snapshot
+            seen_snapshot = True
+            if drop_delete:
+                continue
+        if event[0] == "Snapshot.delete" and drop_delete:
+            drop_delete = False
+            continue
+        if event[0] in ("crc.delete_vpc", "crc.get_msg") and event[1] != "aws":
+            continue
+        events.append(event)
+    line = snapshot_line(case)
+    stdout_lines = oracle.stdout.splitlines(keepends=True)
+    kept, seen_line = [], False
+    for text in stdout_lines:
+        if text == line + "\n":
+            if seen_line:
+                continue
+            seen_line = True
+        kept.append(text)
+    return Outcome(events, "".join(kept), oracle.stderr, oracle.max_age, [], oracle.result)
+
+
 @pytest.mark.parametrize("case", ALL_CASES, ids=[case.name for case in ALL_CASES])
 def test_main_matches_oracle(case: Case, monkeypatch: pytest.MonkeyPatch) -> None:
     expected = run_oracle(case, monkeypatch)
     actual = run_new(case, monkeypatch)
-    assert actual.result == expected.result
-    assert actual.events == expected.events
-    assert actual.stdout == expected.stdout
-    assert actual.stderr == expected.stderr
-    assert actual.warnings == expected.warnings
-    assert actual.max_age == expected.max_age
+    bug = diverges(case, expected)
+    if bug is None:
+        assert actual.result == expected.result
+        assert actual.events == expected.events
+        assert actual.stdout == expected.stdout
+        assert actual.stderr == expected.stderr
+        assert actual.warnings == expected.warnings
+        assert actual.max_age == expected.max_age
+        return
+    fixed = expected_fixed(case, bug, expected)
+    assert actual.result == fixed.result, bug
+    assert actual.events == fixed.events, bug
+    assert actual.stdout == fixed.stdout, bug
+    assert actual.stderr == fixed.stderr, bug
+    assert actual.max_age == fixed.max_age, bug
+    assert actual.result != expected.result or actual.events != expected.events, bug
+    if bug == "BUG-344" or option_value(case, "--cloud") != "all":
+        assert actual.warnings == expected.warnings, bug
+        return
+    added = [msg for _, msg in actual.warnings if msg.startswith("--resource ")]
+    assert [rec for rec in actual.warnings if not rec[1].startswith("--resource ")] == (
+        expected.warnings
+    ), bug
+    resources = [str(option_value(case, "--resource"))]
+    assert added == [
+        AWS_ONLY_WARNING.format(resource, cloud)
+        for cloud in ("azure", "gcp", "oci")
+        for resource in resources
+    ], bug
+
+
+def test_every_fixed_bug_has_diverging_cases() -> None:
+    candidates = [
+        case
+        for case in ALL_CASES
+        if option_value(case, "--resource") in AWS_ONLY
+        or not (option_value(case, "--scan_tag") or "x").strip()
+    ]
+    seen: set[str] = set()
+    mp = pytest.MonkeyPatch()
+    try:
+        for case in candidates[:: max(1, len(candidates) // 600)]:
+            bug = diverges(case, run_oracle(case, mp))
+            if bug:
+                seen.add(bug)
+    finally:
+        mp.undo()
+    assert seen == {"BUG-009", "BUG-084", "BUG-344"}
 
 
 def test_table_reaches_every_outcome_and_every_call() -> None:

@@ -1,0 +1,174 @@
+"""FIX-CLI-ROUTE: BUG-009, BUG-084 (AWS-only snapshot and vpc) and BUG-344 (blank --scan_tag)."""
+
+import logging
+import os
+import sys
+from typing import Any, ClassVar
+
+import pytest
+
+from crc.cli import clients as cli_clients
+from crc.cli import context as cli_context
+from crc.cli import dispatch as cli_dispatch
+from crc.cli import scan as cli_scan
+from crc.cli.main import main
+
+PROD_SNAPSHOT = [
+    "--cloud",
+    "aws",
+    "--resource",
+    "snapshot",
+    "--age",
+    '{"days": 90}',
+    "--exception_tags",
+    '{"autoclean": ["false", "False", "FALSE"], "auto_clean": ["false", "False", "FALSE"]}',
+]
+PROD_SCAN = ["--cloud", "aws", "--resource", "vm", "--scan_tag", "autoclean=false", "--dry_run"]
+OTHER_CLOUDS = ("azure", "gcp", "oci")
+SCAN_ERROR = "--scan_tag must not be empty; use KEY=VALUE format, e.g. auto_clean=false"
+
+
+class Recorder:
+    def __init__(self) -> None:
+        self.events: list[tuple[Any, ...]] = []
+
+    def crc_class(self) -> type:
+        recorder = self
+
+        class FakeCRC:
+            def __init__(self, cloud: str, *args: Any) -> None:
+                self.cloud = cloud
+                recorder.events.append(("CRC", cloud))
+
+            def __getattr__(self, name: str) -> Any:
+                def record(*args: Any, **kwargs: Any) -> Any:
+                    recorder.events.append((name, self.cloud))
+                    return "msg" if name == "get_msg" else []
+
+                return record
+
+        return FakeCRC
+
+    def snapshot_class(self) -> type:
+        recorder = self
+
+        class FakeSnapshot:
+            age_days = 90
+            delete_count = 0
+            get_deleted: ClassVar[list[str]] = []
+
+            def __init__(self, **kwargs: Any) -> None:
+                recorder.events.append(("Snapshot", kwargs["age_days"], kwargs["dry_run"]))
+
+            def delete(self) -> None:
+                recorder.events.append(("Snapshot.delete",))
+
+        return FakeSnapshot
+
+
+@pytest.fixture
+def recorder(monkeypatch: pytest.MonkeyPatch) -> Recorder:
+    rec = Recorder()
+    monkeypatch.setattr(cli_context, "CRC", rec.crc_class())
+    monkeypatch.setattr(cli_dispatch, "Snapshot", rec.snapshot_class())
+    monkeypatch.setattr(cli_clients, "WebClient", lambda **_: object())
+    monkeypatch.setattr(cli_scan, "notify_cleanup", lambda *a, **k: None)
+    monkeypatch.delenv("MAX_AGE", raising=False)
+    return rec
+
+
+def run(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> None:
+    monkeypatch.setattr(sys, "argv", ["crc.py", *argv])
+    main()
+
+
+@pytest.mark.parametrize("resource", ["snapshot", "vpc"])
+@pytest.mark.parametrize("cloud", ["azure", "gcp", "oci"])
+def test_single_non_aws_cloud_raises_before_any_cleaner(
+    recorder: Recorder, monkeypatch: pytest.MonkeyPatch, cloud: str, resource: str
+) -> None:
+    with pytest.raises(ValueError, match=f"--resource {resource} is AWS-only; use --cloud aws"):
+        run(monkeypatch, ["--cloud", cloud, "--resource", resource, "--max_age", "5"])
+    assert recorder.events == []
+
+
+@pytest.mark.parametrize("dry", [[], ["--dry_run"]])
+def test_aws_snapshot_runs_as_before(
+    recorder: Recorder, monkeypatch: pytest.MonkeyPatch, dry: list[str]
+) -> None:
+    run(monkeypatch, [*PROD_SNAPSHOT, *dry])
+    assert recorder.events[:3] == [
+        ("CRC", "aws"),
+        ("Snapshot", 90, bool(dry)),
+        ("Snapshot.delete",),
+    ]
+
+
+def test_aws_vpc_runs_as_before(recorder: Recorder, monkeypatch: pytest.MonkeyPatch) -> None:
+    run(monkeypatch, ["--cloud", "aws", "--resource", "vpc"])
+    assert recorder.events == [("CRC", "aws"), ("delete_vpc", "aws")]
+
+
+def test_cloud_all_vpc_runs_once_for_aws_and_warns(
+    recorder: Recorder, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    run(monkeypatch, ["--cloud", "all", "--resource", "vpc"])
+    assert [e for e in recorder.events if e[0] == "delete_vpc"] == [("delete_vpc", "aws")]
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert warnings == [
+        f"--resource vpc is AWS-only; other clouds are not supported, skipped for {cloud}"
+        for cloud in OTHER_CLOUDS
+    ]
+    skipped = [r.getMessage() for r in caplog.records if "SKIPPED" in r.getMessage()]
+    assert len(skipped) == len(OTHER_CLOUDS)
+    assert all("reason=aws_only_resource count=1" in line for line in skipped)
+
+
+def test_cloud_all_snapshot_runs_once_for_aws_and_warns(
+    recorder: Recorder, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.WARNING)
+    run(monkeypatch, ["--cloud", "all", "--resource", "snapshot", "--dry_run"])
+    assert [e for e in recorder.events if e[0] == "Snapshot"] == [("Snapshot", 90, True)]
+    assert [e for e in recorder.events if e[0] == "Snapshot.delete"] == [("Snapshot.delete",)]
+    assert [r.getMessage() for r in caplog.records].count(
+        "--resource snapshot is AWS-only; other clouds are not supported, skipped for azure"
+    ) == 1
+
+
+@pytest.mark.parametrize("tag", ["", " ", "\t \n"])
+@pytest.mark.parametrize("resource", ["vm", "snapshot", "keypair"])
+def test_blank_scan_tag_raises_before_any_cleaner(
+    recorder: Recorder, monkeypatch: pytest.MonkeyPatch, tag: str, resource: str
+) -> None:
+    argv = ["--cloud", "aws", "--resource", resource, "--scan_tag", tag, "--max_age", "5"]
+    with pytest.raises(ValueError, match="must not be empty"):
+        run(monkeypatch, argv)
+    assert recorder.events == []
+    assert "MAX_AGE" not in os.environ
+
+
+def test_blank_scan_tag_message(recorder: Recorder, monkeypatch: pytest.MonkeyPatch) -> None:
+    with pytest.raises(ValueError) as error:
+        run(monkeypatch, ["--cloud", "aws", "--resource", "vm", "--scan_tag", ""])
+    assert str(error.value) == SCAN_ERROR
+
+
+def test_production_scan_still_scans_and_exits_zero(
+    recorder: Recorder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with pytest.raises(SystemExit) as exit_:
+        run(monkeypatch, PROD_SCAN)
+    assert exit_.value.code == 0
+    assert recorder.events == [("CRC", "aws"), ("scan_instances_with_tag", "aws")]
+
+
+def test_scan_with_non_aws_snapshot_stays_read_only_scan(
+    recorder: Recorder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    argv = ["--cloud", "azure", "--resource", "snapshot", "--scan_tag", "k=v"]
+    with pytest.raises(SystemExit) as exit_:
+        run(monkeypatch, argv)
+    assert exit_.value.code == 0
+    assert recorder.events == [("CRC", "azure"), ("scan_instances_with_tag", "azure")]

@@ -107,6 +107,46 @@ def run_crc_main(
     return calls
 
 
+AWS_ONLY = ("snapshot", "vpc")
+
+
+def aws_only_bug(cloud: str, resource: str) -> str | None:
+    """BUG-009 / BUG-084 (FIX-CLI-ROUTE): main() now runs snapshot and vpc for AWS only.
+
+    `build_selection` still lists them for every cloud (`crc/core/selection.py` is outside that
+    rung), so these pairs no longer match `main()` and each one is asserted against the fix.
+    """
+    if resource not in AWS_ONLY or cloud == "aws":
+        return None
+    return "BUG-009" if resource == "snapshot" else "BUG-084"
+
+
+def assert_aws_only_fix(
+    crc_cli: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    cloud: str,
+    resource: str,
+    options: dict[str, Any],
+) -> None:
+    """Assert the FIX-CLI-ROUTE outcome of an AWS-only resource on a non-AWS cloud."""
+    if cloud != "all":
+        with pytest.raises(ValueError, match=f"--resource {resource} is AWS-only"):
+            run_crc_main(crc_cli, monkeypatch, cloud, resource, "delete", options)
+        assert LAST_RECORDED_CALLS == []
+        return
+    with caplog.at_level(logging.WARNING):
+        reached = run_crc_main(crc_cli, monkeypatch, cloud, resource, "delete", options)
+    assert reached == [("aws", resource)]
+    assert [i for i in build_selection(cloud, resource).items if i[0] == "aws"] == reached
+    logged = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert logged == [
+        f"--resource {resource} is AWS-only; other clouds are not supported, skipped for {c}"
+        for c in CLOUDS
+        if c != "aws"
+    ]
+
+
 # (cloud, resource, operation, options, expected items, expected warning substrings)
 OK_CASES: list[tuple[str, str, Operation, SelectionOptions | None, list[tuple[str, str]], int]] = [
     ("aws", "disk", Operation.DELETE, None, [("aws", "disk")], 0),
@@ -166,6 +206,9 @@ def test_build_selection_matches_crc_main(
             "slack_notify_users": options.slack_notify_users,
             "slack_user_label": options.slack_user_label,
         }
+    if aws_only_bug(cloud, resource):
+        assert_aws_only_fix(crc_cli, monkeypatch, caplog, cloud, resource, extra)
+        return
     with caplog.at_level(logging.WARNING):
         reached = run_crc_main(crc_cli, monkeypatch, cloud, resource, operation.value, extra)
     assert reached == expected
@@ -251,9 +294,16 @@ def test_all_expansion_order_follows_crc_py(crc_cli: ModuleType) -> None:
 @pytest.mark.parametrize("cloud", ["aws", "azure", "gcp", "oci"])
 @pytest.mark.parametrize("resource", ["ip", "vm", "nic", "keypair", "snapshot", "vpc"])
 def test_single_pair(
-    crc_cli: ModuleType, monkeypatch: pytest.MonkeyPatch, cloud: str, resource: str
+    crc_cli: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    cloud: str,
+    resource: str,
 ) -> None:
     selection = build_selection(cloud, resource)
+    if aws_only_bug(cloud, resource):
+        assert_aws_only_fix(crc_cli, monkeypatch, caplog, cloud, resource, {})
+        return
     reached = run_crc_main(crc_cli, monkeypatch, cloud, resource, "delete", {})
     assert selection == Selection(tuple(reached))
     assert list(selection.items) == reached
@@ -312,6 +362,9 @@ def test_exhaustive_grid_matches_crc_main(
             run_crc_main(crc_cli, monkeypatch, cloud, resource, operation.value, extra)
         assert str(ours) == str(theirs.value)
         assert LAST_RECORDED_CALLS == []
+        return
+    if aws_only_bug(cloud, resource) and operation is Operation.DELETE:
+        assert_aws_only_fix(crc_cli, monkeypatch, caplog, cloud, resource, extra)
         return
     with caplog.at_level(logging.WARNING):
         reached = run_crc_main(crc_cli, monkeypatch, cloud, resource, operation.value, extra)

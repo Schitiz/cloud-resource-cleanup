@@ -8,9 +8,10 @@ from crc.cli.clients import (
     set_max_age,
 )
 from crc.cli.context import RunContext
-from crc.cli.dispatch import run_dispatch
+from crc.cli.dispatch import check_aws_only_resources, run_dispatch
 from crc.cli.inputs import (
     check_flag_combinations,
+    check_scan_tag,
     check_tokens,
     read_options,
     read_tokens,
@@ -46,6 +47,10 @@ def main() -> None:
         slack_channel=options.slack_channel,
         influxdb=options.influxdb,
     )
+
+    check_scan_tag(options)
+    if options.scan_tag is None:
+        check_aws_only_resources(targets)
 
     set_max_age(options.max_age)
 
