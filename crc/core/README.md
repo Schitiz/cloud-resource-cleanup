@@ -32,7 +32,7 @@ An age spec is a dict with days and/or hours integer values.
 - `get_min_age()`: return the shorter of two age specs; ties return the second.
 - `is_old()`: True when the resource is at least as old as the age; an empty age returns True; the MAX_AGE environment variable can replace a longer age.
 
-Policy (module policy.py). Tags are normalised first; every function takes `Tags`
+Policy (module policy.py, a facade over policy_tags.py, policy_text.py, policy_managed.py and policy_age.py; every policy function keeps its name on the policy module). Tags are normalised first; every function takes `Tags`
 (a str to str dict) and a `TagSpec` (key to list of allowed values; an empty list means the
 key must be present). Functions named for a module are exact copies of that module's behaviour.
 

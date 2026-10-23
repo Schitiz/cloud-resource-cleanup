@@ -16,6 +16,7 @@ the `crc.core.engine.Notifier` protocol (`name`, `fail_open`, `send(report, cont
 Slack (module slack.py):
 
 - `SlackNotifier`: sends a report to the channel, pings owners, looks up users and groups, sends the scan-tag summary; not fail open.
+- `SlackPoster`: the Slack client and channel with the post, user lookup and owner-ping calls (module slack_owners.py); `SlackNotifier` subclasses it. The message splitting is in slack_chunks.py.
 - `notify_cleanup()`: the scan-tag summary, split into as many Slack messages as needed, a failed part is logged and skipped.
 - `send_slack_message()`: chat_postMessage with up to three attempts on a Slack API error.
 - `human_readable_timedelta()`: uptime text such as 3d 04h 12m 05s, a dash when unknown.

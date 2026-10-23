@@ -3,7 +3,6 @@
 The adapter classes are looked up in this module's globals at call time.
 """
 
-from dataclasses import dataclass
 from typing import Any
 
 from crc.aws.disk import Disk as AWS_Disk
@@ -14,28 +13,15 @@ from crc.aws.vpc import VPC
 from crc.azu.disk import Disk
 from crc.azu.ip import IP as AZU_IP
 from crc.azu.nic import NIC
+from crc.cli.adapter_args import DiskArgs, disk_arguments, ip_arguments
 from crc.cli.constants import CLOUDS, DISKS, IPS, KEYPAIRS, KMS, NICS
 from crc.cli.notify import NotifyMixin
+from crc.cli.report_calls import report_result
 from crc.gcp.disk import Disk as GCP_Disk
 from crc.gcp.ip import IP as GCP_IP
 from crc.oci.disk import Disk as OCI_Disk
 
 Tags = dict[str, list[str]]
-
-
-@dataclass(frozen=True)
-class _DiskArgs:
-    """Every argument `delete_disks` receives, so the per-cloud builders take one value."""
-
-    filter_tags: Tags
-    exception_tags: Tags
-    age: Any
-    custom_age_tag_key: Any
-    detach_age: Any
-    name_regex: list[str]
-    exception_regex: list[str]
-    slack_notify_users: bool
-    slack_user_label: Any
 
 
 class ResourceOps(NotifyMixin):
@@ -58,18 +44,16 @@ class ResourceOps(NotifyMixin):
         :return: IP object
         """
         if self.cloud == "aws":
-            return ElasticIPs(self.dry_run, filter_tags, exception_tags, self.notags)
-        if self.cloud == "azure":
-            return AZU_IP(
-                self.resource_group,
-                self.dry_run,
-                filter_tags,
-                exception_tags,
-                self.notags,
-            )
-        if self.cloud == "gcp":
-            return GCP_IP(self.dry_run, self.project_id, name_regex, exception_regex)
-        raise ValueError(f"Invalid cloud provided: {self.cloud}. Supported clouds are {CLOUDS}")
+            ip_class: Any = ElasticIPs
+        elif self.cloud == "azure":
+            ip_class = AZU_IP
+        elif self.cloud == "gcp":
+            ip_class = GCP_IP
+        else:
+            raise ValueError(f"Invalid cloud provided: {self.cloud}. Supported clouds are {CLOUDS}")
+        return ip_class(
+            *ip_arguments(self, filter_tags, exception_tags, name_regex, exception_regex)
+        )
 
     def delete_ip(
         self,
@@ -94,11 +78,7 @@ class ResourceOps(NotifyMixin):
         )
         ip.delete()
 
-        if self.slack_client:
-            self.notify_deleted_ip_via_slack(ip)
-
-        if self.influxdb_client:
-            self.write_influxdb(IPS, ip.get_deleted)
+        report_result(self, ip, self.notify_deleted_ip_via_slack, IPS)
 
     def delete_keypairs(
         self,
@@ -120,11 +100,7 @@ class ResourceOps(NotifyMixin):
         keypair = KeyPairs(self.dry_run, name_regex, exception_regex, age)
         keypair.delete()
 
-        if self.slack_client:
-            self.notify_deleted_keypair_via_slack(keypair)
-
-        if self.influxdb_client:
-            self.write_influxdb(KEYPAIRS, keypair.get_deleted)
+        report_result(self, keypair, self.notify_deleted_keypair_via_slack, KEYPAIRS)
 
     def delete_nic(
         self,
@@ -144,59 +120,14 @@ class ResourceOps(NotifyMixin):
         nic = NIC(self.resource_group, self.dry_run, name_regex, exception_regex)
         nic.delete()
 
-        if self.slack_client:
-            self.notify_deleted_nic_via_slack(nic)
+        report_result(self, nic, self.notify_deleted_nic_via_slack, NICS)
 
-        if self.influxdb_client:
-            self.write_influxdb(NICS, nic.get_deleted)
-
-    def _make_disk(self, args: _DiskArgs) -> Any:
+    def _make_disk(self, args: DiskArgs) -> Any:
         """The disk adapter of `self.cloud`, built with the arguments that cloud takes."""
-        if self.cloud == "aws":
-            return AWS_Disk(
-                self.dry_run,
-                args.filter_tags,
-                args.exception_tags,
-                args.age,
-                args.custom_age_tag_key,
-                self.notags,
-                args.name_regex,
-                args.exception_regex,
-                args.detach_age,
-            )
-        if self.cloud == "oci":
-            return OCI_Disk(
-                self.dry_run,
-                args.filter_tags,
-                args.exception_tags,
-                args.age,
-                args.custom_age_tag_key,
-                self.notags,
-            )
-        if self.cloud == "azure":
-            return Disk(
-                self.resource_group,
-                self.dry_run,
-                args.filter_tags,
-                args.exception_tags,
-                args.age,
-                args.custom_age_tag_key,
-                self.notags,
-            )
-        return GCP_Disk(
-            dry_run=self.dry_run,
-            project_id=self.project_id,
-            filter_labels=args.filter_tags,
-            exception_labels=args.exception_tags,
-            age=args.age,
-            custom_age_tag_key=args.custom_age_tag_key,
-            detach_age=args.detach_age,
-            notags=self.notags,
-            name_regex=args.name_regex,
-            exception_regex=args.exception_regex,
-            slack_notify_users=args.slack_notify_users,
-            slack_user_label=args.slack_user_label,
-        )
+        disk_classes: dict[str, Any] = {"aws": AWS_Disk, "oci": OCI_Disk, "azure": Disk}
+        disk_class = disk_classes.get(self.cloud, GCP_Disk)
+        positional, keywords = disk_arguments(self, args)
+        return disk_class(*positional, **keywords)
 
     def delete_disks(  # noqa: PLR0913, PLR0917 - the nine parameters are the public signature
         self,
@@ -230,7 +161,7 @@ class ResourceOps(NotifyMixin):
                 "Disks operation is supported on AWS, Azure, GCP, and OCI."
             )
         disk = self._make_disk(
-            _DiskArgs(
+            DiskArgs(
                 filter_tags,
                 exception_tags,
                 age,
@@ -251,11 +182,7 @@ class ResourceOps(NotifyMixin):
         except Exception as e:
             delete_error = e
 
-        if self.slack_client:
-            self.notify_deleted_disk_via_slack(disk)
-
-        if self.influxdb_client:
-            self.write_influxdb(DISKS, disk.get_deleted)
+        report_result(self, disk, self.notify_deleted_disk_via_slack, DISKS)
 
         if delete_error is not None:
             raise delete_error
@@ -307,8 +234,4 @@ class ResourceOps(NotifyMixin):
         )
         kms.delete()
 
-        if self.slack_client:
-            self.notify_deleted_kms_via_slack(kms)
-
-        if self.influxdb_client:
-            self.write_influxdb(KMS, kms.get_deleted)
+        report_result(self, kms, self.notify_deleted_kms_via_slack, KMS)
