@@ -223,6 +223,25 @@ def test_project_listing_error_raises_the_same_error_after_the_same_report(
     assert bool(old.slack) == (case == "disk")
 
 
+def test_owner_pings_with_a_project_listing_error_differ_known(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Known difference (see ENG-GCP "New bugs"): `_ReportThenRaise` rebuilds a plan without
+    owner groups, so with `--slack_notify_users` the error path posts an empty disk list where
+    `delete_disks` only looked up the user groups. The error and the Influx point count agree."""
+
+    def prepare(client: FakeGcp) -> None:
+        client.fail_zones = True
+
+    old, new = run_both(
+        monkeypatch, caplog, "disk-owners", dry_run=False, slack=True, influx=True, prepare=prepare
+    )
+    assert new.error == old.error
+    assert old.slack == [("usergroups_list",)]
+    assert [call[0] for call in new.slack] == ["chat_postMessage"]
+    assert new.influx[0][3]["count"] == old.influx[0][3]["count"] == 0
+
+
 @pytest.mark.parametrize("case", ["ip", "disk", "vm-delete"])
 def test_later_listing_error_deletes_fewer_never_more(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, case: str

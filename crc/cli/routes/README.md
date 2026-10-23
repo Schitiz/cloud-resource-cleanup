@@ -18,7 +18,7 @@ edits only its own table and `crc/<cloud>/**`.
 
 ## Safety Invariants
 
-- A kind that is not in a table keeps its legacy handler; nothing is routed implicitly. `aws.py` routes `disk`, `ip`, `keypair`, `kms`, `snapshot`, `spot_instance_requests`, `vm` and `vpc`; the other clouds keep the legacy handlers.
+- A kind that is not in a table keeps its legacy handler; nothing is routed implicitly. `aws.py` routes `disk`, `ip`, `keypair`, `kms`, `snapshot`, `spot_instance_requests`, `vm` and `vpc`; `gcp.py` routes `disk` (report then re-raise), `ip` and `vm` (delete and stop) and leaves `spot_instances` on the legacy handler, because the handler skips the pair under `--cloud all` and a `Route` can neither skip a pair nor run between the pair check and the cleaner; the other clouds keep the legacy handlers.
 - The table module imports the cleaner package of its cloud, which registers the cleaner; the registry decides what runs, the route only maps flags to options and says whether to notify.
 - Option values are the raw flag values the legacy handler passed (`None` stays `None`); the cleaner factory normalises them.
 
