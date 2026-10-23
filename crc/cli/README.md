@@ -9,12 +9,15 @@ back under the same names (and keeps `if __name__ == "__main__": main()`), so th
 `crc.py` by path and `python crc.py <flags>` in Jenkins keep working. The parsed arguments stay a
 plain `dict`, as on `main`.
 
-- `args.py`: `get_argparser()`, split into one private `_add_*_args` function per group of flags; the flag order is the order of `main`, which fixes the `--help` text and the key order of the returned dict. JSON and Python-literal values (`--age '{"days": 1}'`, `--filter_tags "{'k': ['v']}"`) go through `ast.literal_eval`.
+- `args.py` and `args_run.py`: `get_argparser()`, split into one private `_add_*_args` function per group of flags (selection and filter flags in `args.py`, age, notify and resource flags in `args_run.py`); the flag order is the order of `main`, which fixes the `--help` text and the key order of the returned dict. JSON and Python-literal values (`--age '{"days": 1}'`, `--filter_tags "{'k': ['v']}"`) go through `ast.literal_eval`.
 - `validate.py`: the type validators and the InfluxDB field checks.
 - `constants.py`: `CLOUDS`, `RESOURCES`, the report labels (`DELETED`, `VMS`, ...) and the operation map.
 - `base.py`: `CRCBase`, the constructor and the run settings every operation reads.
 - `notify.py`: `NotifyMixin`, the Slack and InfluxDB methods (`notify_*`, `get_msg`, `ping_on_slack`, `write_influxdb`).
 - `vm_ops.py`: `VmOps`, the VM, spot VM, spot instance request and stop operations; it holds the VM and spot adapter imports.
+- `adapter_args.py`: the constructor arguments of the adapter classes per cloud (`vm_arguments`, `ip_arguments`, `disk_arguments`); the classes themselves stay looked up in `vm_ops` and `resource_ops`.
+- `report_calls.py`: `report_result`, the Slack then Influx call every operation ends with.
+- `pairs.py`: the supported (cloud, resource) pairs and the unsupported-pair message; `dispatch.py` re-exports them.
 - `resource_ops.py`: `ResourceOps`, the IP, keypair, NIC, disk, VPC and KMS operations; it holds those adapter imports.
 - `runner.py`: `CRC`, composed from `VmOps` and `ResourceOps`.
 - `main.py`: `main()`, which composes the modules below in the order of `main` on the main branch.
@@ -47,6 +50,9 @@ plain `dict`, as on `main`.
 - `is_valid_dict()`: no value or a dict passes, anything else raises ValueError.
 - `are_values_of_dict_lists()`: no value or a dict whose values are all lists passes, anything else raises ValueError.
 - `validate_influxdb_inputs()`: require url, org and bucket in the InfluxDB dict, else raise ValueError.
+- `DiskArgs`: frozen value of the nine delete_disks arguments (module adapter_args.py).
+- `vm_arguments()`, `ip_arguments()`, `disk_arguments()`: positional (and for GCP disks keyword) adapter arguments of the cloud of a `CRC`.
+- `report_result()`: Slack when a client is set, then Influx of the result attribute when a client is set.
 - `CRC`: the cleanup object built per cloud (module runner.py); every public method of the run keeps its name, signature and call order.
 - `CRCBase`: constructor and run settings (cloud, dry run, notags, the Slack and Influx clients).
 - `NotifyMixin`: Slack and Influx methods of `CRC`.

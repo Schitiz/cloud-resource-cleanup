@@ -9,8 +9,10 @@ from crc.aws.spot_instance_requests import SpotInstanceRequests
 from crc.aws.vm import VM as AWS_VM
 from crc.azu.spot_vm import SpotVM as AZU_SpotVM
 from crc.azu.vm import VM as AZU_VM
+from crc.cli.adapter_args import vm_arguments
 from crc.cli.constants import CLOUDS, DELETED, DISKS, NICS, VMS
 from crc.cli.notify import NotifyMixin
+from crc.cli.report_calls import report_result
 from crc.gcp.spot_vm import SpotVM as GCP_SpotVM
 from crc.gcp.vm import VM as GCP_VM
 from crc.oci.spot_vm import SpotVM as OCI_SpotVM
@@ -51,44 +53,16 @@ class VmOps(NotifyMixin):
         :return: VM object
         """
         if self.cloud == "aws":
-            return AWS_VM(
-                self.dry_run,
-                filter_tags,
-                exception_tags,
-                age,
-                custom_age_tag_key,
-                self.notags,
-            )
-        if self.cloud == "azure":
-            return AZU_VM(
-                self.resource_group,
-                self.dry_run,
-                filter_tags,
-                exception_tags,
-                age,
-                custom_age_tag_key,
-                self.notags,
-            )
-        if self.cloud == "gcp":
-            return GCP_VM(
-                self.dry_run,
-                self.project_id,
-                filter_tags,
-                exception_tags,
-                age,
-                custom_age_tag_key,
-                self.notags,
-            )
-        if self.cloud == "oci":
-            return OCI_VM(
-                self.dry_run,
-                filter_tags,
-                exception_tags,
-                age,
-                custom_age_tag_key,
-                self.notags,
-            )
-        raise ValueError(f"Invalid cloud provided: {self.cloud}. Supported clouds are {CLOUDS}")
+            vm_class: Any = AWS_VM
+        elif self.cloud == "azure":
+            vm_class = AZU_VM
+        elif self.cloud == "gcp":
+            vm_class = GCP_VM
+        elif self.cloud == "oci":
+            vm_class = OCI_VM
+        else:
+            raise ValueError(f"Invalid cloud provided: {self.cloud}. Supported clouds are {CLOUDS}")
+        return vm_class(*vm_arguments(self, filter_tags, exception_tags, age, custom_age_tag_key))
 
     def scan_instances_with_tag(self, tag_key: str, tag_value: str) -> Any:
         vm = self._get_vm(filter_tags={}, exception_tags={}, age={}, custom_age_tag_key=None)
@@ -116,13 +90,9 @@ class VmOps(NotifyMixin):
         vm = self._get_vm(filter_tags, exception_tags, age, custom_age_tag_key)
         self._delete_vm(vm, instance_state)
 
-        if self.slack_client:
-            self.notify_deleted_vm_via_slack(vm)
-
-        if self.influxdb_client:
-            self.write_influxdb(VMS, vm.get_deleted)
-            if self.cloud == "azure":
-                self.write_influxdb(NICS, vm.get_deleted_nic)
+        report_result(self, vm, self.notify_deleted_vm_via_slack, VMS)
+        if self.influxdb_client and self.cloud == "azure":
+            self.write_influxdb(NICS, vm.get_deleted_nic)
 
     def _send_spot_disk_message(self, disks: list[str]) -> None:
         if not disks:
@@ -147,53 +117,21 @@ class VmOps(NotifyMixin):
                 self.write_influxdb(NICS, spot_vm.get_deleted_nic)
             self.write_influxdb(DISKS, getattr(spot_vm, disks_attr))
 
-    def _delete_azure_spot(
-        self, filter_tags: Tags, exception_tags: Tags, age: Any, custom_age_tag_key: Any
+    def _delete_spot(  # noqa: PLR0913, PLR0917 - the spot adapter class and its report shape
+        self,
+        spot_class: Any,
+        filter_tags: Tags,
+        exception_tags: Tags,
+        age: Any,
+        custom_age_tag_key: Any,
+        disks_attr: str,
+        with_nics: bool,
     ) -> None:
-        if not self.resource_group:
-            raise ValueError("resource_group is required for Azure Spot VM cleanup")
-        spot_vm = AZU_SpotVM(
-            self.resource_group,
-            self.dry_run,
-            filter_tags,
-            exception_tags,
-            age,
-            custom_age_tag_key,
-            self.notags,
+        spot_vm = spot_class(
+            *vm_arguments(self, filter_tags, exception_tags, age, custom_age_tag_key)
         )
         spot_vm.delete()
-        self._report_spot_delete(spot_vm, "get_deleted_disks", True)
-
-    def _delete_gcp_spot(
-        self, filter_tags: Tags, exception_tags: Tags, age: Any, custom_age_tag_key: Any
-    ) -> None:
-        if not self.project_id:
-            raise ValueError("project_id is required for GCP Spot VM cleanup")
-        spot_vm = GCP_SpotVM(
-            self.dry_run,
-            self.project_id,
-            filter_tags,
-            exception_tags,
-            age,
-            custom_age_tag_key,
-            self.notags,
-        )
-        spot_vm.delete()
-        self._report_spot_delete(spot_vm, "get_deleted_disks", False)
-
-    def _delete_oci_spot(
-        self, filter_tags: Tags, exception_tags: Tags, age: Any, custom_age_tag_key: Any
-    ) -> None:
-        spot_vm = OCI_SpotVM(
-            self.dry_run,
-            filter_tags,
-            exception_tags,
-            age,
-            custom_age_tag_key,
-            self.notags,
-        )
-        spot_vm.delete()
-        self._report_spot_delete(spot_vm, "get_deleted_volumes", False)
+        self._report_spot_delete(spot_vm, disks_attr, with_nics)
 
     def delete_spot_instances(
         self,
@@ -212,12 +150,17 @@ class VmOps(NotifyMixin):
         AWS spot cleanup uses ``delete_spot_instance_requests`` instead (cancel
         request first, then terminate — required for Type=persistent).
         """
+        args = (filter_tags, exception_tags, age, custom_age_tag_key)
         if self.cloud == "azure":
-            self._delete_azure_spot(filter_tags, exception_tags, age, custom_age_tag_key)
+            if not self.resource_group:
+                raise ValueError("resource_group is required for Azure Spot VM cleanup")
+            self._delete_spot(AZU_SpotVM, *args, "get_deleted_disks", True)
         elif self.cloud == "gcp":
-            self._delete_gcp_spot(filter_tags, exception_tags, age, custom_age_tag_key)
+            if not self.project_id:
+                raise ValueError("project_id is required for GCP Spot VM cleanup")
+            self._delete_spot(GCP_SpotVM, *args, "get_deleted_disks", False)
         elif self.cloud == "oci":
-            self._delete_oci_spot(filter_tags, exception_tags, age, custom_age_tag_key)
+            self._delete_spot(OCI_SpotVM, *args, "get_deleted_volumes", False)
         else:
             raise ValueError(
                 "spot_instances is supported on azure, gcp, and oci. "
@@ -267,11 +210,8 @@ class VmOps(NotifyMixin):
         )
         spot_instance_requests.delete()
 
-        if self.slack_client:
-            self.notify_deleted_spot_request_via_slack(spot_instance_requests)
-
+        report_result(self, spot_instance_requests, self.notify_deleted_spot_request_via_slack, VMS)
         if self.influxdb_client:
-            self.write_influxdb(VMS, spot_instance_requests.get_deleted)
             self.write_influxdb(DISKS, spot_instance_requests.volumes_to_delete)
 
     def stop_vm(
@@ -292,8 +232,4 @@ class VmOps(NotifyMixin):
         vm = self._get_vm(filter_tags, exception_tags, age, custom_age_tag_key)
         vm.stop()
 
-        if self.slack_client:
-            self.notify_stopped_vm_via_slack(vm)
-
-        if self.influxdb_client:
-            self.write_influxdb(VMS, vm.get_stopped)
+        report_result(self, vm, self.notify_stopped_vm_via_slack, VMS, "get_stopped")
