@@ -1,4 +1,4 @@
-"""Parity: `init_logging` of `main` (frozen oracle) against the refactored `crc.utils`.
+"""Parity: `init_logging` of `main` (frozen oracle) against `crc.utils`.
 
 `tests/legacy/crc_utils.txt` is the exact output of `git show main:crc/utils.py`. Both versions
 run against a temporary log directory with the root logger saved and restored; the printed text,

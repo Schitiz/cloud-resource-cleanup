@@ -1,4 +1,4 @@
-"""Parity: `Service` of `main` (frozen oracle) against the refactored `crc.service.Service`.
+"""Parity: `Service` of `main` (frozen oracle) against `crc.service.Service`.
 
 `tests/legacy/crc_service.txt` is the exact output of `git show main:crc/service.py`. The same
 inputs, environment and clock run through both classes; return values, raised errors, log

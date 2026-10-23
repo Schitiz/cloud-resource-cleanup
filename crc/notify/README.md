@@ -29,8 +29,8 @@ InfluxDB (module influx.py):
 
 ## Safety Invariants
 
-- Behaviour equals the frozen oracle: tests compare a frozen copy of the original methods
-  (`tests/legacy_crc_notify_reference.txt`) with the notifiers on the same fake clients.
+- Behaviour equals the frozen oracle: tests compare the frozen `main` `CRC` methods
+  (`tests/legacy/crc_main.txt`, via `load_legacy_crc()`) with the notifiers on the same fake clients.
 - Quirks are kept and covered by tests, not fixed here (`docs/refactor/BUGS.md`): the `##name`
   channel prefix (`BUG-034`), `ping_on_slack` wording (`BUG-029`), the missing Influx settings
   without `influxdb_conn` (`BUG-030`), disks that are neither list nor dict send nothing

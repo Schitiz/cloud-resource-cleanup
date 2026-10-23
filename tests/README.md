@@ -8,14 +8,14 @@ credentials; SDK clients are mocked. Layout:
 - `test_core_*.py`: pure tests of `crc/core` (age, policy, cleaner, registry, report, selection, engine, logger).
   Some compare against the frozen `main` oracle in `legacy/crc_main.txt`, or run `crc.py` by path.
 - `test_notify_slack.py`, `test_notify_influx.py`: `crc/notify` with fake clients asserting the exact calls.
-  `test_notify_parity.py` runs the same inputs through `legacy_crc_notify_reference.txt` (a frozen
-  copy of the old `crc.py` Slack and Influx methods, not a Python module) and the
-  notifiers.
+  `test_notify_parity.py` and `test_notify_crc_parity.py` (with `helpers_cl2_notify.py` and
+  `helpers_wa1_notify.py`) run the same inputs through `legacy/crc_main.txt` (`load_legacy_crc()`)
+  and the notifiers.
 - `helpers_oracle.py` (tested by `test_helpers_oracle.py`): loads `legacy/crc_main.txt` with its adapter
   imports bound to the module oracles (`legacy/<cloud>_<kind>.txt`), so a parity test's legacy side never
   needs a current adapter class.
-- `test_cli_args_parity.py`, `test_cli_crc_parity.py`, `test_cli_bridge_parity.py`, `test_cli_main_parity.py`, `test_cli_logger.py`, `test_cli_logging_init.py` (with `helpers_cli_routes.py`): `crc/cli` (flags, the
-  `CRC` run context, `bridge` to `crc.core.engine`, `main()`, the `logger` header/footer and BUG-363 root handler initialisation) against `legacy/crc_main.txt`, on recording fakes.
+- `test_cli_args_parity.py`, `test_cli_crc_parity.py`, `test_cli_runner_parity.py`, `test_cli_scan_parity.py`, `test_cli_bridge_parity.py`, `test_cli_bridge_<cloud>.py` (`aws`, `azu`, `gcp`, `oci`), `test_cli_main_parity.py`, `test_cli_logger.py`, `test_cli_logging_init.py` (with `helpers_cli_routes.py`): `crc/cli` (flags, the
+  `CRC` run context, `--scan_tag`, `bridge` to `crc.core.engine`, `main()`, the `logger` header/footer and BUG-363 root handler initialisation) against `legacy/crc_main.txt`, on recording fakes.
 - `test_crc_service_parity.py`, `test_crc_service_is_old_parity.py` (with `helpers_crc_service.py`),
   `helpers_log_fix.py`, `test_log_fix_helpers.py` and `test_crc_utils_parity.py`, `test_crc_utils.py`:
   `crc/service.py` and `crc/utils.py` against `legacy/crc_service.txt` and `legacy/crc_utils.txt`, plus the
@@ -41,9 +41,10 @@ credentials; SDK clients are mocked. Layout:
   Azure tests.
 - Five test files are the hash-locked safety tests (the only entries left in the legacy ratchet, so ruff
   and mypy skip them): `test_aws_disk.py`, `test_aws_spot_instance_requests.py`, `test_azu_spot_vm.py`,
-  `test_gcp_spot_vm.py`, `test_oci_spot_vm.py`. They build the adapter classes directly.
-- `legacy/`: the frozen `main` oracles (see `legacy/README.md`). `legacy_crc_notify_reference.txt` is the
-  Slack and Influx oracle outside that directory.
+  `test_gcp_spot_vm.py`, `test_oci_spot_vm.py`. They build the adapter classes directly; each has a
+  Cleaner-based companion `test_<name>_engine.py`.
+- `legacy/`: the frozen `main` oracles (see `legacy/README.md`). `legacy_crc_notify_reference.txt` is a
+  frozen copy of the old `crc.py` Slack and Influx methods outside that directory.
 - `archtest/`: mechanical architecture checks (see `tests/archtest/README.md`).
 
 ## Public API
