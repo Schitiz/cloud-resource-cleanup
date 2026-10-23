@@ -8,7 +8,8 @@ Slack calls, the Influx calls, the printed output and the return value or raised
 equal. A pair no route reaches (`route_for` is None) can only be rejected up front by
 `dispatch.validate_targets` or `argparse`; the case asserts that. A skip-only route
 (`skips.no_options`) must send nothing. The constructor and the Slack helpers (`get_msg`,
-lookups, `ping_on_slack`, `write_influxdb`) are still compared on the `CRC` context object.
+lookups, `ping_on_slack`, `write_influxdb`) moved to `tests/test_notify_crc_parity.py`. Only the
+constructor and `scan_instances_with_tag` still run on the current `CRC` object.
 """
 
 import itertools
@@ -25,7 +26,6 @@ from crc.cli.inputs import Targets
 from crc.cli.routes import skips
 from crc.cli.runner import CRC as NewCRC
 from crc.notify.influx import InfluxNotifier
-from crc.notify.slack import SlackNotifier
 from tests.helpers_cl2_crc import (
     ADAPTERS,
     DATA,
@@ -180,7 +180,8 @@ def compare(oracle_module: ModuleType, case: Case) -> Recorded:
         return compare_notify(oracle_module, case, case.routed.removeprefix("notify:"))
     spec = ROUTED.get(case.routed or "")
     if spec is None:
-        # Only the CRC context object itself (constructor, get_msg, scan) may run on NewCRC.
+        # Only the CRC context object itself (constructor, scan, the two `*_none` notify cases)
+        # may run on NewCRC.
         assert case.routed in (None, "scan", "scan_unsupported"), f"{case.name}: no routed spec"
         new = execute(NewCRC, [sys.modules[NewCRC.scan_instances_with_tag.__module__]], case)
         for key in old:
@@ -347,26 +348,11 @@ NOTIFY_SPECS.update(
 )
 
 
-def _slack_notifier(c: Any) -> SlackNotifier:
-    return SlackNotifier(c.slack_client, c.slack_channel)
-
-
 def _influx_notifier(c: Any) -> InfluxNotifier:
     return InfluxNotifier(c.influxdb_client, c)
 
 
 DIRECT_ACTIONS: dict[str, Callable[[Any], Any]] = {
-    "lookup_known": lambda c: _slack_notifier(c).lookup_user_by_email("alice@yugabyte.com"),
-    "lookup_unknown": lambda c: _slack_notifier(c).lookup_user_by_email("zed@yugabyte.com"),
-    "groups": lambda c: _slack_notifier(c).user_groups(),
-    "nic_none": lambda c: c.get_msg("NIC", "Deleted", None),
-    "vm_none": lambda c: c.get_msg("VM", "Deleted", None),
-    "write_list": lambda c: _influx_notifier(c).write(c.cloud, "VM", ["a", "b"]),
-    "write_empty": lambda c: _influx_notifier(c).write(c.cloud, "Disk", []),
-    "write_dict": lambda c: _influx_notifier(c).write(c.cloud, "Disk", {"a": ["x"]}),
-    "write_none": lambda c: _influx_notifier(c).write(c.cloud, "VM", None),  # type: ignore[arg-type]
-    "ping_list": lambda c: ping_owners_raw(c, ["a"]),
-    "ping_no_len": lambda c: ping_owners_raw(c, {"alice": 3}),
     # BUG-031: notify_deleted_disk_via_slack checks exact `type(...) is list` / `dict`, so
     # non-list/non-dict values (`("d1",)`, `None`, `"d1"`) send nothing.
     "disk_4": lambda c: None,
@@ -377,13 +363,6 @@ DIRECT_ACTIONS: dict[str, Callable[[Any], Any]] = {
 
 
 DIRECT: list[tuple[str, str, Callable[[Any], Any]]] = [
-    ("get_msg_list", "aws", lambda c: c.get_msg("VM", "Deleted", ["a"])),
-    ("get_msg_empty", "gcp", lambda c: c.get_msg("Disk", "Stopped", [])),
-    ("get_msg_none", "aws", lambda c: c.get_msg("VM", "Deleted", None)),
-    ("get_msg_bad_operation", "aws", lambda c: c.get_msg("VM", "Gone", ["a"])),
-    ("lookup_known", "aws", lambda c: c.slack_lookup_user_by_email("alice@yugabyte.com")),
-    ("lookup_unknown", "aws", lambda c: c.slack_lookup_user_by_email("zed@yugabyte.com")),
-    ("groups", "aws", lambda c: c.get_user_groups_list()),
     ("nic", "azure", lambda c: c.notify_deleted_nic_via_slack(obj(get_deleted=["n"]))),
     ("nic_none", "azure", lambda c: c.notify_deleted_nic_via_slack(obj(get_deleted=None))),
     ("vm_aws", "aws", lambda c: c.notify_deleted_vm_via_slack(obj(get_deleted=["v"]))),
@@ -419,18 +398,6 @@ DIRECT: list[tuple[str, str, Callable[[Any], Any]]] = [
     ("keypair", "aws", lambda c: c.notify_deleted_keypair_via_slack(obj(get_deleted=["k"]))),
     ("kms", "aws", lambda c: c.notify_deleted_kms_via_slack(obj(get_deleted=["k"]))),
     ("kms_empty", "aws", lambda c: c.notify_deleted_kms_via_slack(obj(get_deleted=[]))),
-    ("write_list", "aws", lambda c: c.write_influxdb("VM", ["a", "b"])),
-    ("write_empty", "gcp", lambda c: c.write_influxdb("Disk", [])),
-    ("write_dict", "aws", lambda c: c.write_influxdb("Disk", {"a": ["x"]})),
-    ("write_none", "aws", lambda c: c.write_influxdb("VM", None)),
-    (
-        "ping_dict",
-        "aws",
-        lambda c: c.ping_on_slack("Disk", "Deleted", {"alice": ["d"], "team": ["e"], "z": ["f"]}),
-    ),
-    ("ping_empty", "aws", lambda c: c.ping_on_slack("Disk", "Deleted", {})),
-    ("ping_list", "aws", lambda c: c.ping_on_slack("Disk", "Deleted", ["a"])),
-    ("ping_no_len", "aws", lambda c: c.ping_on_slack("Disk", "Deleted", {"alice": 3})),
 ]
 
 
