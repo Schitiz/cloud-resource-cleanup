@@ -8,7 +8,8 @@ constructor and attributes and drives the cleaner region by region, VPC by VPC, 
 call order of the original implementation. The old import path `crc.aws.vpc` keeps working.
 """
 
-from crc.aws.vpc.cleaner import VPC, VpcCleaner, VpcRuntime, build_vpc_cleaner
+from crc.aws.vpc.adapter import VPC
+from crc.aws.vpc.cleaner import VpcCleaner, build_vpc_cleaner
 from crc.aws.vpc.client import (
     Collection,
     Deletable,
@@ -25,6 +26,7 @@ from crc.aws.vpc.client import (
     Vpc,
     VpcCollection,
 )
+from crc.aws.vpc.runtime import VpcRuntime
 
 __all__ = [
     "VPC",

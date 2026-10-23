@@ -6,7 +6,9 @@ AWS VPC cleaner (AWS-1, subpackage since ST-AWS-VPC). Tears down and deletes the
 
 Modules:
 
-- `cleaner.py`: `VpcCleaner` (`plan()` lists and decides protection, `apply()` tears down and deletes), its registry factory, the runtime dataclass and the `VPC` adapter.
+- `cleaner.py`: `VpcCleaner` (`plan()` lists and decides protection, `apply()` tears down and deletes) and its registry factory.
+- `adapter.py`: the legacy `VPC` class `crc.py` uses.
+- `runtime.py`: `VpcRuntime`, constants, default client, resource and region factories, skip and summary logging.
 - `teardown.py`: `tear_down()`, the detach and delete steps of everything a VPC owns, in the order of `main` without the instance termination, and `has_instances()` (the read-only instance scan).
 - `delete.py`: `delete_vpc_with_retries()`, `delete_vpc` retried on `DependencyViolation` only.
 - `client.py`: typed Protocols of the boto3 EC2 client, resource and resource objects the VPC teardown walks.
@@ -15,8 +17,10 @@ Modules:
 
 - `VPC`: adapter that crc.py calls (delete(), get_deleted, delete_count, vpc_ids_to_delete, get_vpc_ids); runs the cleaner region by region, VPC by VPC, in the order of main.
 - `VpcCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus require_filter_tags, build_filter, list_vpcs, plan_region, apply_region, is_default, is_protected, should_skip and delete_vpc used by the adapter; apply_region and delete_vpc report which VPCs were kept; it also holds the injected sleep between delete retries).
-- `VpcRuntime`: frozen dataclass with the injected client factory, resource factory and region lister of VPC (and the sleep between delete retries; no clock: the module has no age gate).
+- `VpcRuntime`: (runtime.py) frozen dataclass with the injected client factory, resource factory and region lister of VPC (and the sleep between delete retries; no clock: the module has no age gate).
 - `build_vpc_cleaner()`: registry factory behind @register("aws", "vpc"); reads filter_tags, exception_tags and notags from RunContext.options.
+- `boto3_client()`, `boto3_resource()`, `all_regions()`: (runtime.py) default client, resource and region factories of the VPC cleaner.
+- `skip_region()`, `log_summary()`: (runtime.py) region skipped for a connectivity error, closing warnings of a run.
 - `has_instances()`: (teardown.py) read-only scan, True when a subnet of the VPC has an instance; the VPC is then kept (BUG-088).
 - `delete_vpc_with_retries()`: (delete.py) delete_vpc retried on DependencyViolation only, other errors recorded and the VPC skipped (BUG-087).
 - `tear_down()`: (teardown.py) detaches and deletes the gateways, route tables, endpoints, security groups, peering connections, network ACLs, subnets and interfaces of one VPC, in the order of the original implementation; called by the VPC cleaner before it deletes the VPC.
@@ -39,4 +43,4 @@ Modules:
 2. Keep filtering in `crc.core.policy`; no clock or environment reads here (ARCH-003).
 3. Keep every mutating call in `apply()` / `apply_region()` / `VpcCleaner.delete_vpc()`; `plan()` and what it calls stay read-only (ARCH-005).
 4. Changes need `tests/test_aws_vpc_parity.py` (oracle `tests/legacy/aws_vpc.txt`, a frozen copy of `main`, never edit it) and `tests/test_aws_vpc.py` to stay green.
-5. Every file stays under 400 lines; split by responsibility and keep this README in sync with the public names.
+5. Every file stays at most 250 lines (wave W2 target; ARCH-004 limit is 400); split by responsibility and keep this README in sync with the public names.
