@@ -32,8 +32,6 @@ UTC = datetime.UTC
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=UTC)
 PROJECT = "proj-1"
 BUGS = {"BUG-358"}
-OLD_NOTAGS = {"env": ["qa"]}
-OLD_NAME_REGEX = ["never-matches"]
 TWO = 2
 THREE = 3
 DAY = {"days": 1}
@@ -91,8 +89,8 @@ class Case:
     disks_ctor_error: Exception | None = None
     fails_in_plan: bool = False
     diverges: str = ""
-    notags: Any = None
-    name_regex: Any = None
+    notags: Any = field(default_factory=dict)
+    name_regex: Any = field(default_factory=list)
 
 
 def owned(name: str, owner: str | None = "alice", **kw: Any) -> Any:
@@ -275,6 +273,12 @@ def _label_cases() -> list[Case]:
         Case(
             "exception-label-on-attached-ignored",
             {"z": [disk("a", users=["vm"], labels={"env": "qa"})]},
+        ),
+        Case(
+            "notags-skips-matching-label",
+            labelled,
+            notags={"env": ["qa"]},
+            diverges="BUG-005",
         ),
     ]
 
@@ -653,15 +657,7 @@ def _load_oracle() -> Any:
     return module
 
 
-def _args(case: Case, *, fixed: bool = False) -> dict[str, Any]:
-    """Arguments of `Disk`. The oracle ignores `notags` and `name_regex`; the fixed code applies
-    them, so unmarked cases hand it the empty values and marked cases the case's own."""
-    notags = case.notags if case.notags is not None else OLD_NOTAGS
-    name_regex = case.name_regex if case.name_regex is not None else OLD_NAME_REGEX
-    if fixed and case.notags is None:
-        notags = {}
-    if fixed and case.name_regex is None:
-        name_regex = []
+def _args(case: Case) -> dict[str, Any]:
     return {
         "dry_run": case.dry_run,
         "project_id": PROJECT,
@@ -670,8 +666,8 @@ def _args(case: Case, *, fixed: bool = False) -> dict[str, Any]:
         "age": {"days": 999},
         "custom_age_tag_key": case.custom_age_tag_key,
         "detach_age": case.detach_age,
-        "notags": notags,
-        "name_regex": name_regex,
+        "notags": case.notags,
+        "name_regex": case.name_regex,
         "exception_regex": case.exception_regex,
         "slack_notify_users": case.slack,
         "slack_user_label": case.slack_label,
@@ -683,7 +679,7 @@ def _legacy(case: Case) -> Any:
 
 
 def _new(case: Case) -> Any:
-    return Disk(**_args(case, fixed=True), clock=lambda: NOW)
+    return Disk(**_args(case), clock=lambda: NOW)
 
 
 def _setup(
@@ -850,6 +846,7 @@ def _listed_disks(case: Case) -> int:
 
 
 DIVERGING: dict[str, tuple[list[str], int]] = {
+    "notags-skips-matching-label": (["b", "c", "u"], 0),
     "ignored-age-notags-name-regex": (["old-a"], 0),
     "disk-without-users-attribute": ([], 1),
     "disk-without-labels-attribute": ([], 1),
@@ -881,6 +878,11 @@ def _assert_fixed(case: Case, old: Outcome, new: Outcome) -> None:
     assert (new.error, new.deleted) != (old.error, old.deleted)
     assert new.error is None
     assert new.deleted == deleted
+    assert new.count == len(deleted)
+    assert new.stdout == old.stdout
+    expected_deletes = [] if case.dry_run else deleted
+    assert [c[3] for c in new.calls if c[0] == "disks.delete.execute"] == expected_deletes
+    assert new.calls[-1] == ("close",)
     assert len(_errors(new)) == failures
     if case.diverges == "BUG-127":
         assert old.error is not None
@@ -924,6 +926,7 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
     ("untagged-with-filter-excluded", lambda o: o.deleted == []),
     ("untagged-without-filter-included", lambda o: o.deleted == ["u"]),
     ("exception-label-any-key", lambda o: o.deleted == ["a", "b", "u"]),
+    ("notags-skips-matching-label", lambda o: o.deleted == ["a", "b", "c", "u"]),
     ("regex-match-anchored", lambda o: o.deleted == ["x-tmp-b", "keep"]),
     ("regex-match-not-search", lambda o: o.deleted == ["tmp-a", "keep", "tmp(c"]),
     ("regex-invalid-raises", lambda o: o.error is not None and o.error[0] == "error"),

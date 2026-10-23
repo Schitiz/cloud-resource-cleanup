@@ -215,7 +215,7 @@ def test_bug_006_exception_regex_still_wins() -> None:
     assert planned == ["itest-1"]
 
 
-@pytest.mark.parametrize("bad", [["tmp("], ["ok", "["], "itest"])
+@pytest.mark.parametrize("bad", [["tmp("], ["ok", "["], "itest", "", {"a": "b"}, [1], 123])
 def test_bug_006_invalid_name_regex_fails_closed_before_any_call(bad: Any) -> None:
     client = FakeClient({"z": [disk("itest-1")]})
     with pytest.raises(ValueError, match="name_regex"):
@@ -422,3 +422,66 @@ def test_default_wait_bounds_match_the_spot_cleaner() -> None:
     assert (plain.wait_sec, plain.poll_sec) == (DEFAULT_WAIT_SEC, 5)
     assert plain.notags is None
     assert plain.name_regex is None
+
+
+def test_production_jenkins_flags_selection_unchanged() -> None:
+    filter_tags = {
+        "yb_task": [
+            "bug_bash_22_9_2023",
+            "uitest",
+            "itest",
+            "itests",
+            "itest-system",
+            "db-cross-functional",
+            "dev-itest",
+            "dev-uitest",
+            "itest-keep-universe",
+            "itest-system-keep-universe",
+            "db-cross-functional-keep-universe",
+            "uitest-keep-universe",
+            "dev-itest-keep-universe",
+            "dev-uitest-keep-universe",
+        ]
+    }
+    exception_tags = {
+        "autoclean": ["false", "False", "FALSE"],
+        "auto_clean": ["false", "False", "FALSE"],
+        "crc": ["gke"],
+    }
+    client = FakeClient(
+        {
+            "us-west1-a": [
+                disk("itest-ok", {"yb_task": "itest"}),
+                disk("itest-gke", {"yb_task": "itest", "crc": "gke"}),
+                disk("itest-keep", {"yb_task": "itest", "autoclean": "FALSE"}),
+                disk("itest-retention", {"yb_task": "itest", "max_retention_age": "{'days': 10}"}),
+                disk("unmatched", {"yb_task": "other"}),
+            ]
+        }
+    )
+    adapter = Disk(
+        False,
+        "yugabyte",
+        filter_tags,
+        exception_tags,
+        None,  # type: ignore[arg-type]
+        "max_retention_age",
+        None,  # type: ignore[arg-type]
+        None,  # type: ignore[arg-type]
+        None,  # type: ignore[arg-type]
+        None,  # type: ignore[arg-type]
+        False,
+        "",
+        client,
+        lambda: NOW,
+    )
+    adapter.delete()
+    assert adapter.get_deleted == ["itest-ok"]
+    assert client.calls == [
+        ("list_zones",),
+        ("list_disks", "us-west1-a"),
+        ("delete_disk", "us-west1-a", "itest-ok"),
+        ("get_operation", "zone", "us-west1-a", "op-itest-ok"),
+        ("close",),
+    ]
+

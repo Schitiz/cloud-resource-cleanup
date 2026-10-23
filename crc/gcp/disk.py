@@ -56,10 +56,12 @@ class DiskSettings:
 
 def _name_patterns(name_regex: Sequence[str] | None) -> tuple[str, ...]:
     """The `name_regex` patterns; a bad value raises `ValueError` before any call is made."""
+    if name_regex is None:
+        return ()
+    if not isinstance(name_regex, list | tuple) or not all(isinstance(p, str) for p in name_regex):
+        raise ValueError(f"Invalid name_regex {name_regex!r}: expected a list of patterns")
     if not name_regex:
         return ()
-    if isinstance(name_regex, str):
-        raise ValueError(f"Invalid name_regex {name_regex!r}: expected a list of patterns")
     patterns = tuple(name_regex)
     policy.compile_patterns(patterns, "name_regex")
     return patterns
@@ -250,13 +252,11 @@ class DiskCleaner:
             patterns = [f"{p}" for p in settings.exception_regex]
             if policy.exception_regex_match_matches(patterns, disk.name):
                 return "exception_regex"
-        if settings.exception_labels:
+        if settings.exception_labels or settings.notags:
             tags = policy.normalize_tags(disk.labels)
-            if policy.exception_tags_any(tags, settings.exception_labels):
-                return "exception_tag"
-        if settings.notags:
-            tags = policy.normalize_tags(disk.labels)
-            if policy.notags_all(tags, settings.notags):
+            if policy.should_skip_by_tags(
+                tags, settings.exception_labels or {}, settings.notags or {}
+            ):
                 return "exception_tag"
         return None
 
