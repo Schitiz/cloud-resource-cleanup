@@ -411,10 +411,11 @@ Related: `docs/refactor/FILTER_VARIANTS.md` (how each module filters, section 7 
 | BUG-380 | Azure Spot VM summary logs "No Azure Spot VMs (stopped/deallocated) to delete." and then still logs the empty "List of ..." lines | `crc/azu/spot_vm.py:404`; refactor `crc/azu/spot_vm/config.py` `log_summary` | yes | cosmetic | low | W2-AZU | open |
 | BUG-381 | The Slack owner lookup builds the e-mail as `<tag value>@yugabyte.com`: the domain is hard coded, so owners outside that domain are never pinged and fall back to the user groups | `crc.py:255`; refactor `crc/notify/slack_owners.py` | yes | cosmetic | low | W2-CLI | open |
 | BUG-382 | An empty `--resource_states` list (`[]`) is treated like no flag: `_delete_vm` calls `vm.delete()` with the cleaner's default states instead of matching nothing | `crc.py:108-111`; refactor `crc/cli/vm_ops.py` `_delete_vm` | yes | deletes what it should keep | low | W2-CLI | open |
+| BUG-383 | The adapter loop listed and deleted region by region, so a listing error in a later region still left earlier regions deleted; through the engine `plan()` lists every region before `apply()` mutates and the pair stops before any mutation (fewer deletes, never more) | `crc.py` adapter loop (`KeyPairs.delete`; the same shape in the other adapters) | yes | stops earlier than main | low | ENG-0 | fixed in ENG-0 |
 
 ## Counts
 
-382 rows: critical 5, high 27, medium 64, low 286. 57 fixed and 5 partly fixed (the LOG rungs and wave FIX-1); the others are open. BUG-366 to BUG-379 were found by the FIX-1 reviews, BUG-380 to BUG-382 by the W2 reviews.
+383 rows: critical 5, high 27, medium 64, low 287. 58 fixed and 5 partly fixed (the LOG rungs and wave FIX-1); the others are open. BUG-366 to BUG-379 were found by the FIX-1 reviews, BUG-380 to BUG-382 by the W2 reviews.
 
 ## Notes
 

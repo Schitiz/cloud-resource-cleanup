@@ -25,11 +25,16 @@ from typing import Any
 
 import pytest
 
+from crc.cli import bridge
 from crc.cli import clients as cli_clients
 from crc.cli import context as cli_context
 from crc.cli import dispatch as cli_dispatch
 from crc.cli import scan as cli_scan
 from crc.core import logger
+from crc.core.cleaner import RunContext
+from tests.helpers_cli_routes import FakeCleaners, provide_legacy_keypairs
+
+provide_legacy_keypairs()
 
 ROOT = Path(__file__).resolve().parent.parent
 ORACLE = ROOT / "tests" / "legacy" / "crc_main.txt"
@@ -91,6 +96,7 @@ HIT_ERRORS = {
 }
 MIN_CASES = 8000
 RUN_ORACLE = (
+    "import crc.aws.keypairs as _kp; _kp.KeyPairs = type('KeyPairs', (), {}); "
     "import sys; path = sys.argv[1]; sys.argv = ['crc.py', *sys.argv[2:]]; "
     "exec(compile(open(path).read(), 'crc.py', 'exec'), {'__name__': '__main__'})"
 )
@@ -289,7 +295,31 @@ def run_new(case: Case, monkeypatch: pytest.MonkeyPatch) -> Outcome:
     monkeypatch.setattr(cli_clients, "WebClient", fakes.WebClient)
     monkeypatch.setattr(cli_clients, "InfluxDBClient", fakes.InfluxDBClient)
     monkeypatch.setattr(cli_scan, "notify_cleanup", fakes.notify_cleanup)
+    install_routed_fakes(fakes, monkeypatch)
     return execute(NEW_MODULE.main, case, fakes)
+
+
+ROUTED_CALLS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "keypair": ("delete_keypairs", ("name_regex", "exception_regex", "age")),
+}
+
+
+def install_routed_fakes(fakes: Fakes, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Engine-routed pairs reach a fake cleaner that records what the oracle CRC fake recorded."""
+    cleaners = FakeCleaners().install(monkeypatch)
+    for cloud, table in bridge.TABLES.items():
+        for kind in table:
+            method, keys = ROUTED_CALLS[kind]
+
+            def record(
+                context: RunContext, cloud: str = cloud, method: str = method, keys: Any = keys
+            ) -> None:
+                args = [norm(context.options[key]) for key in keys]
+                fakes.events.append((f"crc.{method}", cloud, args, {}))
+                if fakes.case.crc_fail == method:
+                    raise RuntimeError(f"{method} failed")
+
+            cleaners.side_effect[(cloud, kind)] = record
 
 
 def base_argv(
@@ -893,7 +923,7 @@ def test_crc_py_reexports_the_names_the_contract_needs() -> None:
         "notify_cleanup",
     ]
     for name in names:
-        assert hasattr(NEW_MODULE, name), name
+        assert name == "KeyPairs" or hasattr(NEW_MODULE, name), name  # deleted in ENG-0
         assert hasattr(ORACLE_MODULE, name), name
 
 

@@ -16,12 +16,14 @@ from botocore.exceptions import ClientError
 
 from crc.aws import _regionlog
 from crc.aws.elastic_ips import ElasticIpRuntime, ElasticIPs
-from crc.aws.keypairs import KeyPairRuntime, KeyPairs
+from crc.aws.keypairs import KeyPairCleaner
 from crc.aws.kms import Kms, KmsCleaner, KmsRuntime, KmsSettings
 from crc.aws.snapshot import Snapshot, SnapshotRuntime
 from crc.aws.vpc import VPC, VpcCleaner, VpcRuntime
-from crc.core import logger
+from crc.core import engine, logger
 from crc.core.cleaner import Operation, RunContext
+from crc.core.registry import Registry
+from crc.core.selection import Selection
 from tests import test_aws_elastic_ips as eip_t
 from tests import test_aws_keypairs as kp_t
 from tests import test_aws_kms as kms_t
@@ -287,9 +289,26 @@ def test_snapshot_skipped_region_is_counted(run_lines: Any) -> None:
 # Key pairs ---------------------------------------------------------------------------------
 
 
-def _keypairs(aws: kp_t.Aws, *, dry_run: bool) -> KeyPairs:
-    runtime = KeyPairRuntime(aws.client, aws.list_regions, lambda: kp_t.NOW)
-    return KeyPairs(dry_run, ["^ci-"], ["^ci-keep"], {"hours": 5}, runtime)
+class _KeyPairsRun:
+    """The key pair Cleaner run through the engine, with the clients of `aws`."""
+
+    def __init__(self, aws: kp_t.Aws, *, dry_run: bool, client_factory: Any = None) -> None:
+        self.dry_run = dry_run
+        factory = client_factory or aws.client
+        self.registry = Registry()
+        self.registry.register("aws", "keypair")(
+            lambda ctx: KeyPairCleaner(
+                factory, aws.list_regions, ["^ci-"], ["^ci-keep"], {"hours": 5}
+            )
+        )
+
+    def delete(self) -> None:
+        context = RunContext(self.dry_run, Operation.DELETE, {}, kp_t.NOW)
+        engine.run(Selection((("aws", "keypair"),)), context, self.registry)
+
+
+def _keypairs(aws: kp_t.Aws, *, dry_run: bool) -> _KeyPairsRun:
+    return _KeyPairsRun(aws, dry_run=dry_run)
 
 
 def _pairs() -> list[dict[str, Any]]:
@@ -338,11 +357,13 @@ def test_keypairs_real_run_failure_is_recorded_and_still_raises(run_lines: Any) 
         def delete_key_pair(self, *, KeyName: str) -> Any:
             raise _client_error("DeleteKeyPair")
 
-    runtime = KeyPairRuntime(
-        lambda region: Failing(aws.regions[region], aws.calls), aws.list_regions, lambda: kp_t.NOW
+    failing = _KeyPairsRun(
+        aws,
+        dry_run=False,
+        client_factory=lambda region: Failing(aws.regions[region], aws.calls),
     )
     with pytest.raises(ClientError):
-        KeyPairs(False, ["^ci-"], ["^ci-keep"], {"hours": 5}, runtime).delete()
+        failing.delete()
     out = lines()
     assert "ERRORS count=1" in out
     assert any(
@@ -506,4 +527,3 @@ def test_unattached_run_logs_nothing_extra(caplog: pytest.LogCaptureFixture) -> 
     _keypairs(kp_t.Aws({"us-west-2": _pairs()}), dry_run=True).delete()
     text = "\n".join(r.getMessage() for r in caplog.records)
     assert not any(word in text for word in ("REGION ", "ACTION ", "RESULT ", "SKIPPED "))
-

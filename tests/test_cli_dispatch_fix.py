@@ -44,7 +44,13 @@ class Recorder:
 
             return run
 
+        def routed(
+            crc: Any, cloud: Any, kind: Any, options: Options, targets: Targets, route: Any
+        ) -> None:
+            recorder.calls.append((kind, cloud))
+
         monkeypatch.setattr(dispatch, "make_crc", lambda context, cloud: FakeCRC(cloud))
+        monkeypatch.setattr(dispatch, "run_routed", routed)
         monkeypatch.setattr(
             dispatch, "HANDLERS", {name: handler(name) for name in dispatch.HANDLERS}
         )
@@ -123,7 +129,6 @@ def test_bug_017_cloud_all_skips_unsupported_pairs_with_a_warning(
 @pytest.mark.parametrize(
     ("resource", "adapter_attr", "expected_cloud"),
     [
-        ("keypair", "KeyPairs", "aws"),
         ("kms", "Kms", "aws"),
     ],
 )

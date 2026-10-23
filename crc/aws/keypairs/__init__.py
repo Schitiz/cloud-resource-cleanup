@@ -2,19 +2,15 @@
 
 """AWS EC2 key pair cleaner package.
 
-`KeyPairCleaner` (`cleaner.py`) is the registered `aws` / `keypair` Cleaner; `KeyPairs`
-(`adapter.py`) is the legacy class `crc.py` uses. The old import path `crc.aws.keypairs`
-keeps working.
+`KeyPairCleaner` (`cleaner.py`) is the registered `aws` / `keypair` Cleaner; `crc/cli` runs it
+through `crc.core.engine` (the `KeyPairs` adapter is gone, ENG-0).
 """
 
-from .adapter import KeyPairs
 from .cleaner import KeyPairCleaner, build_keypair_cleaner
-from .client import KeyPairClient, KeyPairRuntime
+from .client import KeyPairClient
 
 __all__ = [
     "KeyPairCleaner",
     "KeyPairClient",
-    "KeyPairRuntime",
-    "KeyPairs",
     "build_keypair_cleaner",
 ]

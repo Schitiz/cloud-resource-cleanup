@@ -1,5 +1,6 @@
 """build_selection: every branch, compared with what `crc.py main()` runs and raises."""
 
+import functools
 import importlib.util
 import logging
 import sys
@@ -10,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from crc.cli import bridge
 from crc.cli import context as cli_context
 from crc.cli import dispatch as cli_dispatch
 from crc.cli import main as cli_main
@@ -22,6 +24,7 @@ from crc.core.selection import (
     SelectionOptions,
     build_selection,
 )
+from tests.helpers_cli_routes import FakeCleaners
 
 ROOT = Path(__file__).resolve().parent.parent
 KMS_OPTIONS = SelectionOptions(kms_key_description="desc", kms_user="arn:user")
@@ -120,6 +123,12 @@ def run_crc_main(
     args.update(options)
     monkeypatch.setattr(cli_main, "get_argparser", lambda: args)
     monkeypatch.setattr(cli_context, "CRC", FakeCRC)
+    fakes = FakeCleaners().install(monkeypatch)
+    for routed_cloud, table in bridge.TABLES.items():
+        for routed_kind in table:
+            fakes.side_effect[(routed_cloud, routed_kind)] = functools.partial(
+                lambda pair, ctx: calls.append(pair), (routed_cloud, routed_kind)
+            )
     monkeypatch.setattr(cli_dispatch, "Snapshot", FakeSnapshot)
     crc_cli.main()
     return calls

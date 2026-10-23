@@ -7,14 +7,13 @@ from typing import Any
 
 from crc.aws.disk import Disk as AWS_Disk
 from crc.aws.elastic_ips import ElasticIPs
-from crc.aws.keypairs import KeyPairs
 from crc.aws.kms import Kms
 from crc.aws.vpc import VPC
 from crc.azu.disk import Disk
 from crc.azu.ip import IP as AZU_IP
 from crc.azu.nic import NIC
 from crc.cli.adapter_args import DiskArgs, disk_arguments, ip_arguments
-from crc.cli.constants import CLOUDS, DISKS, IPS, KEYPAIRS, KMS, NICS
+from crc.cli.constants import CLOUDS, DISKS, IPS, KMS, NICS
 from crc.cli.notify import NotifyMixin
 from crc.cli.report_calls import report_result
 from crc.gcp.disk import Disk as GCP_Disk
@@ -79,28 +78,6 @@ class ResourceOps(NotifyMixin):
         ip.delete()
 
         report_result(self, ip, self.notify_deleted_ip_via_slack, IPS)
-
-    def delete_keypairs(
-        self,
-        name_regex: list[str],
-        exception_regex: list[str],
-        age: Any,
-    ) -> None:
-        """
-        Delete KeyPairs that match the specified criteria.
-        This method is only supported on AWS.
-
-        :param name_regex: List of regex patterns to filter the keypairs.
-        :param exception_regex: List of regex patterns to exclude the keypairs.
-        :param age: Dictionary of age conditions to filter the keypairs.
-        """
-        if self.cloud != "aws":
-            raise ValueError("Keypair operation is only supported on AWS.")
-
-        keypair = KeyPairs(self.dry_run, name_regex, exception_regex, age)
-        keypair.delete()
-
-        report_result(self, keypair, self.notify_deleted_keypair_via_slack, KEYPAIRS)
 
     def delete_nic(
         self,

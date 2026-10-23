@@ -10,6 +10,7 @@ from crc.cli import dispatch, scan
 from crc.cli.context import RunContext
 from crc.cli.inputs import Options, Targets
 from crc.core import logger
+from tests.helpers_cli_routes import FakeCleaners
 
 _FIELDS = {name: None for name in Options.__dataclass_fields__}
 
@@ -79,10 +80,15 @@ def test_dry_run_and_stop_are_reported(caplog: pytest.LogCaptureFixture) -> None
 
 
 def test_result_is_logged_and_the_error_propagates_when_the_cleaner_raises(
-    caplog: pytest.LogCaptureFixture, _fake_crc: Mock
+    caplog: pytest.LogCaptureFixture, _fake_crc: Mock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     caplog.set_level(logging.INFO)
-    _fake_crc.delete_keypairs.side_effect = RuntimeError("boom")
+    fakes = FakeCleaners().install(monkeypatch)
+
+    def boom(context: Any) -> None:
+        raise RuntimeError("boom")
+
+    fakes.side_effect[("aws", "keypair")] = boom
     with pytest.raises(RuntimeError, match="boom"):
         dispatch.run_dispatch(Mock(), _options(), _targets(["aws"], ["keypair", "ip"]))
     lines = _run_lines(caplog)
@@ -99,9 +105,10 @@ def test_aws_disk_opt_in_refusal_still_closes_the_run(caplog: pytest.LogCaptureF
 
 
 def test_cleaner_run_lines_land_between_header_and_result(
-    caplog: pytest.LogCaptureFixture, _fake_crc: Mock
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     caplog.set_level(logging.INFO)
+    fakes = FakeCleaners().install(monkeypatch)
 
     def cleaner(*args: Any) -> None:
         run = logger.current()
@@ -110,7 +117,7 @@ def test_cleaner_run_lines_land_between_header_and_result(
         run.skip("too_young")
         run.fail("us-east-1", "kp-2", ValueError("bad"))
 
-    _fake_crc.delete_keypairs.side_effect = cleaner
+    fakes.side_effect[("aws", "keypair")] = cleaner
     dispatch.run_dispatch(Mock(), _options(), _targets(["aws"], ["keypair"]))
     messages = caplog.messages
     assert [m.split()[0] for m in messages] == [
