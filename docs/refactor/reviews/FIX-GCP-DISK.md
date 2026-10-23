@@ -122,3 +122,81 @@
 
 VERDICT: APPROVE
 
+## Round 2 (Opus)
+
+### Round 1 fixes checked
+
+- `_name_patterns` now accepts only `None` or a list/tuple of `str` and raises `ValueError` naming
+  `name_regex` otherwise, before any SDK call (`DiskCleaner.__init__`, and `Disk.delete()` builds the
+  cleaner before `list_zones`). The CLI already rejects a non-list `--name_regex`
+  (`crc/cli/inputs.py:153`), so the extra check only covers the registry path. Correct.
+- `_exception_reason` uses `policy.should_skip_by_tags` as `crc/gcp/vm.py:255` does. With `notags`
+  empty it reduces to `exception_tags_any`, so the production selection is unchanged. Correct.
+- Parity `_args(case)` now gives the oracle and the new code the same inputs. The
+  `notags-skips-matching-label` (BUG-005) case was added. Correct.
+
+### Independent checks
+
+1. **Bugs fixed, with tests that fail on `182466d`:** I copied `tests/test_gcp_disk_fix.py` into a
+   worktree at `182466d`, and all 45 tests fail there (`45 failed`). The BUG-005/006/126/127 tests
+   fail on behaviour. The production-flags and zones-listing tests fail there only because
+   `DiskSettings`/`get_operation` do not exist yet, which is expected. The fixes match the BUGS.md rows:
+   - BUG-005: `notags_all` is used, as in the VM cleaner.
+   - BUG-006: `re.search` is used.
+   - BUG-126: `wait_operation` (spot helper, `zoneOperations().get`) runs before `_record`. A missing
+     name, an operation error, a poll error or a timeout causes a `fail()` and the disk is not recorded.
+   - BUG-127: an error evaluating one disk is caught in `_evaluate`. An error listing or iterating a
+     zone is caught in `plan_zone`, and a `zone <name>` failure is recorded.
+2. **Direction and parity:** `tests/legacy/gcp_disk.txt` is untouched. The 18 diverging cases all
+   carry an in-scope ID: 16 × BUG-127, 1 × BUG-005 and 1 × BUG-006. Each one asserts the exact new
+   `deleted` list, the delete calls, the error count, the stdout and `close()`. For unmarked cases,
+   only the `zoneOperations*` polls are filtered out of the comparison. Those polls are pinned
+   separately by `test_bug_126_every_accepted_delete_is_followed_by_one_operation_poll`, so the
+   comparison is not loosened in general. One direction note follows under "Owner decision (proposed)".
+3. **Production command:** the CLI passes `notags=None` and `name_regex=None` (no defaults in
+   `crc/cli/args.py`), so `_name_patterns` returns `()` and `should_skip_by_tags(..., {})` equals the
+   old `exception_tags_any`. The selection is unchanged.
+   `test_production_jenkins_flags_selection_unchanged` covers the exact Jenkins labels. The flags
+   are the same as before.
+4. **Fail closed:** an invalid or non-list `name_regex` raises `ValueError` in `DiskCleaner.__init__`,
+   before `list_zones`, `list_disks` or `delete_disk`.
+5. **Protected files:** `git diff 182466d..HEAD --name-only` shows no locked test, no
+   `safety_lock.json`, and no change to PLAN/STATUS/BUGS or `CLEANUP_SAFETY.md`.
+   `tests/test_gcp_spot_vm.py` passes.
+6. **README (ARCH-002):** Safety Invariants, the module list, `GcpDiskClient`, `DiskSettings` and
+   `Disk` were updated. **Fixed in round 2:** the `build_disk_cleaner()` Public API entry still
+   listed the options without `notags` and `name_regex`. It now names both, plus the `ValueError`
+   for `name_regex`.
+7. **Unfixed bugs:** none of the four are left unfixed. BUG-124 is untouched.
+
+### Owner decision (proposed, not blocking)
+
+- BUG-127 makes the run go on after an error. So for the inputs BUG-127 covers, disks in later
+  zones, or later in the same zone, are now deleted, where `main` aborted before reaching them. The
+  parity case `disks-list-first-zone-error` pins this: the oracle deletes nothing and the new code
+  deletes `a` in `z2`. Every such disk passes every filter and age gate, so no disk is selected
+  that the filters keep. But this is more deletes per run than the aborted run made. The rung's task
+  notes ask for exactly this ("the loop continues", "the zone skipped"), so I accept it. The owner
+  should confirm that this note overrides the literal direction rule ("never delete more than
+  today") for BUG-127. The alternative would be to stop deleting for the rest of the run after the
+  first error, which does not match the task.
+
+### NITs (not fixed)
+
+- `crc/gcp/disk.py:171-174`: a failed zone listing records `fail(zone, "zone <name>")` and still
+  emits a `REGION` line through `scan.finish()`. The spot cleaner instead calls `region_skipped()`
+  and emits no `REGION` line. Both are allowed by LOGGING.md, and the task asks for "recorded", so
+  I left it.
+- `crc/gcp/disk.py:233-242`: a `SpotSettings` is built for each delete only to pass `wait_sec` and
+  `poll_sec`. It could be built once in `__init__`. This is cosmetic.
+
+### Gates
+
+- `pip install -r requirements.txt -r requirements-dev.txt`: OK.
+- `make check`: green. `ruff` passed, `mypy` reported no issues in 230 source files, and
+  `lint-imports` reported 5 contracts kept and 0 broken.
+- Test count: **42587 passed**. After the README edit I reran `tests/archtest` and
+  `tests/test_gcp_disk*.py`: 549 passed.
+
+ROUND 2 VERDICT: APPROVE
+
