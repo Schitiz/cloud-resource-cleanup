@@ -6,7 +6,10 @@ AWS EC2 VM cleaner (rung AWS-3, moved into a subpackage by ST-AWS-VM). `VmCleane
 
 Modules, one per responsibility:
 
-- `cleaner.py`: settings, default factories, summary logging, `VmCleaner` and the registry factory.
+- `cleaner.py`: `VmCleaner` (plan/apply) and the registry factory; re-exports the names of the modules below.
+- `settings.py`: `VmSettings`, constants, default client and region factories, `settings_from_options()`.
+- `judge.py`: `InstanceJudge`, the read-only decision on each instance (tags, Name tag, age).
+- `reporting.py`: region, dry-run and summary logging.
 - `client.py`: typed Protocols of the boto3 EC2 calls used by the cleaner and the tag scan.
 - `scan.py`: the read-only scan of instances by tag across regions.
 - `adapter.py`: the `VM` class and its `VmRuntime`, a thin adapter that drives the cleaner region by region.
@@ -15,7 +18,10 @@ Modules, one per responsibility:
 
 - `VM`: adapter crc.py calls (delete(), stop(), get_deleted, get_stopped, delete_count, stopped_count, find_instances_with_tag(), instance_names_to_delete, instance_names_to_stop); runs the cleaner region by region in the order of main; tests replace its runtime attribute with fakes.
 - `VmRuntime`: frozen dataclass with the injected client factory, region lister, clock (now, UTC), scan client factory and session factory of VM.
-- `VmCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus build_filters, filter_instances, apply_region and should_skip used by the adapter).
+- `VmCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus build_filters, filter_instances, apply_region and should_skip used by the adapter; the decisions are delegated to InstanceJudge).
+- `InstanceJudge`: (judge.py) read-only decision per instance: should_skip, filter_instances.
+- `settings_from_options()`: (settings.py) builds VmSettings from RunContext.options.
+- `summarise()`: (reporting.py) closing summary of a run from the deleted or stopped names.
 - `VmSettings`: frozen dataclass with the filters and thresholds of one run (filter_tags, exception_tags, notags, age, custom_age_tag_key, instance_state).
 - `build_vm_cleaner()`: registry factory behind @register("aws", "vm"); reads filter_tags, exception_tags, notags, age, custom_age_tag_key and instance_state from RunContext.options.
 - `boto3_client()`: default client factory of the VM cleaner (boto3.client("ec2", region_name=...)).
@@ -50,4 +56,4 @@ Modules, one per responsibility:
 2. Keep filtering in `crc.core.policy` and age in `crc.core.age`; no `re`, clock reads or environment reads here (ARCH-003): `now` comes from `RunContext` (or the adapter clock).
 3. Keep every mutating call in `apply_region()`; `plan()` and what it calls stay read-only (ARCH-005).
 4. Changes need `tests/test_aws_vm_parity.py` (oracle `tests/legacy/aws_vm.txt`, a frozen copy of `main`, never edit it) and `tests/test_aws_vm.py` to stay green.
-5. Every file stays under 400 lines; split by responsibility and re-export every public name in `__init__.py` (and `__all__`).
+5. Every file stays at most 250 lines (wave W2 target; ARCH-004 limit is 400); split by responsibility and re-export every public name in `__init__.py` (and `__all__`).
