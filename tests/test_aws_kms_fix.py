@@ -1,4 +1,4 @@
-"""FIX-AWS-KMS: BUG-007, BUG-008, BUG-014, BUG-015 and BUG-055 on `crc.aws.kms`."""
+"""FIX-AWS-KMS: BUG-007, BUG-008, BUG-014 and BUG-055 on `crc.aws.kms` (BUG-015 left open)."""
 
 import datetime
 import json
@@ -95,17 +95,20 @@ def test_bug_007_matches_the_vm_semantics() -> None:
         assert bool(selected) == policy.filter_tags_all_keys(present, spec)
 
 
-def test_bug_015_exception_tag_keeps_the_key_before_describe() -> None:
+def test_bug_015_left_open_any_tagged_key_is_skipped_with_exception_tags() -> None:
     tags = {"k1": _tags(autoclean="false"), "k2": _tags(crc="gke"), "k3": _tags(crc="x"), "k4": []}
     exceptions = {"autoclean": ["false", "False"], "crc": ["gke"]}
     selected, fake = _plan(tags, exception_tags=exceptions)
-    assert selected == ["k3", "k4"]
-    assert [c[1] for c in fake.calls if c[0] == "describe_key"] == ["k3", "k4"]
+    assert selected == ["k4"]
+    assert [c[1] for c in fake.calls if c[0] == "describe_key"] == ["k4"]
 
 
-def test_bug_015_exception_key_without_values_keeps_any_value() -> None:
-    selected, _ = _plan({"k1": _tags(a="x"), "k2": _tags(b="x")}, exception_tags={"a": []})
-    assert selected == ["k2"]
+def test_bug_008_custom_age_tag_is_not_reached_when_exception_tags_skip() -> None:
+    tags = {"k1": _tags(max_retention_age="{'hours': 1}")}
+    selected, _ = _plan(
+        tags, age={"days": 5}, custom_age_tag_key="max_retention_age", exception_tags={"a": []}
+    )
+    assert selected == []
 
 
 def test_bug_008_custom_age_tag_is_read_from_tagkey() -> None:
@@ -165,4 +168,4 @@ def test_production_command_shape_selects_untagged_old_key() -> None:
         custom_age_tag_key="max_retention_age",
         kms_key_description="ci",
     )
-    assert selected == ["k2", "k3"]
+    assert selected == ["k3"]

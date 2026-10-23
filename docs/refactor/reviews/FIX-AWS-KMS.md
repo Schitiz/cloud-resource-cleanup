@@ -2,7 +2,7 @@
 
 Rung FIX-AWS-KMS (wave FIX-1, branch `fix/aws-kms`): behaviour fix in `crc/aws/kms.py`.
 
-- **Bugs fixed.** BUG-007, BUG-008, BUG-014, BUG-015, BUG-055. None left.
+- **Bugs fixed.** BUG-007, BUG-008, BUG-014, BUG-015, BUG-055. None left. (Round 2: BUG-015 reverted to `main` behaviour, see `## Owner decision`.)
   - BUG-014: a filter key with several values matches when the key's tag value is any of them (every filter key is still required).
   - BUG-007: a filter key with an empty value list matches only keys that carry that tag key (any value). Same semantics as `policy.filter_tags_all_keys` / `crc/aws/vm` (`_key_matches`: key present and, for a non-empty list, value in the list); the check goes through `policy.matches_any_key` per (TagKey, TagValue) pair.
   - BUG-015: `exception_tags` are read from `TagKey` / `TagValue`; a key with an exception tag is kept before `describe_key` (production `autoclean`, `auto_clean` and `crc` exception tags now work).
@@ -17,7 +17,9 @@ Rung FIX-AWS-KMS (wave FIX-1, branch `fix/aws-kms`): behaviour fix in `crc/aws/k
 
 ## Owner decision
 
-None.
+- **BUG-015 not fixed (round 2).** The task notes say "Production passes no filter_tags or exception_tags", but both Jenkins commands pass `--exception_tags '{"autoclean": [...], "auto_clean": [...], "crc": ["gke"]}'`, and `crc/cli/dispatch.py` `_kms` hands them to `Kms`. On `main` (`tests/legacy/aws_kms.txt:89-91`, `:147`, `:181`) any key with at least one tag raises `KeyError` in `_should_skip_kms` and is skipped, so the production job only ever schedules **untagged** keys. Reading `TagKey` / `TagValue` makes every tagged key without an exception tag (for example `crc=other`, `owner=qa`) old enough and owned by `kms_user` newly scheduled for deletion in production (parity case `exception-production-tags`: `main` deletes `["untagged"]`, the round 1 code deleted `["other", "untagged"]`). That breaks "never delete more than today" and "same production selection except where the notes say", and there is no keep-more-only variant: the only behaviour change a BUG-015 fix can make is deleting more. Code, tests and README are back to `main` behaviour for `exception_tags`.
+  Proposed owner decision: approve the production selection change explicitly, then a follow-up rung replaces `KmsCleaner._should_skip` with `return any(policy.exception_tags_any({k: v}, exception_tags) for k, v in _tag_pairs(tags))` (as in commit `bc3585f`), re-marks the six `exception-*` parity cases `diverges="BUG-015"` with the `FIXED` rows of `bc3585f`, and reports how many tagged "Yugabyte Master Key" keys in `us-west-2` the Jenkins user owns (a dry run of both production commands) before it ships.
+- **BUG-008 production effect.** With BUG-015 left open, a tagged key is skipped before the age check whenever `exception_tags` is set, so the `max_retention_age` tag has no effect on the production commands; BUG-008 changes the selection only for runs without `--exception_tags`.
 
 ## New bugs
 
@@ -53,3 +55,25 @@ Gates (`pip install -r requirements.txt -r requirements-dev.txt && make check`):
 - `pytest -q`: `42463 passed` (up from `42444 passed` on `182466d`)
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 182466d..HEAD` (`bc3585f`, round 1 `859d1c3`) plus the round 2 change below. The verdict is for the branch with the round 2 change; BUG-015 waits for the owner.
+
+Round 1 fixes checked: the `FIXED` table now pins `old.deleted` and `assert_fixed` compares stdout; `test_cleaner_protocol_matches_main` covers the diverging cases too. Correct. Round 1 missed the production impact of BUG-015 (it says "selection changes only where BUG-008, BUG-015, BUG-055 specify", but the notes only sanction BUG-055/BUG-008 for production, on a premise that production passes no `exception_tags`, which is false).
+
+Findings:
+
+- **BLOCKING, fixed in round 2: BUG-015 deletes more in production.** `crc/aws/kms.py` `_should_skip` (round 1 `:282-287`). Production passes `--exception_tags`; on `main` every tagged key is skipped by the `KeyError`, after the fix every tagged key without an exception tag is scheduled (parity `exception-production-tags`: `["untagged"]` became `["other", "untagged"]`; `tests/test_aws_kms_fix.py::test_production_command_shape_selects_untagged_old_key` asserted `["k2", "k3"]` where `main` gives `["k3"]`). Reverted `_should_skip` to the `main` code (`tag["Key"]` / `tag["Value"]`), removed `_has_exception_tag`, un-marked the six BUG-015 parity cases (they now assert oracle equality again; the two new cases `exception-multi-value-hit-keeps` and `exception-production-tags` stay as unmarked equality cases), removed their `FIXED` rows, restored the two BUG-015 quirk checks and plain oracle equality in `test_should_skip_kms_matches_main`, restored `test_plan_exception_tags_skip_the_key_through_keyerror`, replaced the two BUG-015 tests in `tests/test_aws_kms_fix.py` with `main`-behaviour checks, set the production-shape test to `["k3"]`, and updated the `crc/aws/README.md` KMS invariant. Explained under `## Owner decision` with the proposed follow-up.
+- (1) Fixed bugs: BUG-007, BUG-008, BUG-014, BUG-055 each have a test in `tests/test_aws_kms_fix.py` that fails on `182466d` (7 of 12 fail there; the 5 that pass assert unchanged behaviour) and passes now, plus marked parity cases. BUG-007 matches `policy.filter_tags_all_keys` ("key present, any value"), which is the owner's stated `crc/aws/vm` semantics (vm sends `{"Name": "tag:<key>", "Values": []}` to EC2 server-side, `crc/aws/vm/cleaner.py:175-177`). BUG-008: **this may select a key earlier when its custom age tag is shorter than `--age`: that is the documented custom-age-tag behaviour of every other cleaner and is allowed for BUG-008 only.** BUG-055: matches are collected in `found` and added after the last statement, so a `KEY SKIPPED` key is never selected.
+- (2) Direction rule: BUG-007 and BUG-055 select a subset of `main`; BUG-014 selects more only with a multi-value `filter_tags` (owner-specified, not used by production); BUG-008 as above. Oracle `tests/legacy/aws_kms.txt` untouched; every remaining divergence is marked BUG-007/008/014/055 and asserts the exact new outcome; no global loosening.
+- (3) Production commands: same flags; with BUG-015 left open their selection differs from `main` only by BUG-055 (a key whose policy names `kms_user` and also has a statement without `Principal.AWS` is no longer scheduled). BUG-008 is unreachable for them (tagged keys are skipped before the age check).
+- (4) Fail closed: every per-key error still skips the key during `plan()`, before any `schedule_key_deletion`.
+- (5) No locked safety test, `safety_lock.json`, oracle, `PLAN.md`, `STATUS.md`, `BUGS.md` or `CLEANUP_SAFETY.md` edited (`git diff 182466d --stat` on those paths is empty).
+- (6) `crc/aws/README.md` KMS Safety Invariants updated; Public API unchanged (no new public names; `_has_exception_tag` was private and is removed).
+- (7) BUG-015 explained under `## Owner decision`.
+- NIT (not fixed, existed before): `policy.normalize_tags` (`crc/core/policy.py:58`) reads `Key` / `Value` when an entry has both `Key` and `TagKey`, so for such a (non-AWS-shaped) KMS tag entry the custom age tag comes from `Key`. Not reachable with real `list_resource_tags` output.
+
+Gates (`pip install -r requirements.txt -r requirements-dev.txt && make check`): before round 2 (HEAD `859d1c3`) 42463 passed; after round 2: `ruff check .` all checks passed, `mypy` no issues in 229 source files, `lint-imports` 5 kept 0 broken, `pytest` **42465 passed**.
+
+ROUND 2 VERDICT: APPROVE

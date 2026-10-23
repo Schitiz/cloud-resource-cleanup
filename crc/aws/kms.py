@@ -138,16 +138,10 @@ def _matches_filter(pairs: set[tuple[str, str]], spec: TagSpec | None) -> bool:
     )
 
 
-def _has_exception_tag(pairs: set[tuple[str, str]], spec: TagSpec) -> bool:
-    """BUG-015: a key that has any exception tag (TagKey / TagValue) is kept."""
-    return any(policy.exception_tags_any({key: value}, spec) for key, value in pairs)
-
-
 class KmsCleaner:
     """Schedules deletion of enabled keys whose description contains `kms_key_description`,
-    that are old enough, match `filter_tags` (every key present with any of its values), have no
-    exception tag and whose default key policy names `kms_user`. Works in `us-west-2` only, as on
-    `main`."""
+    that are old enough, match `filter_tags` (every key present with any of its values) and
+    whose default key policy names `kms_user`. Works in `us-west-2` only, as on `main`."""
 
     cloud = "aws"
     kind = "kms"
@@ -284,7 +278,13 @@ class KmsCleaner:
         if not exception_tags:
             logging.warning("Exception tags and not present")
             return False
-        return _has_exception_tag(_tag_pairs(tags), exception_tags)
+        for tag in tags:
+            # BUG-015 (owner decision): main reads `Key` / `Value`, but KMS tags carry `TagKey` /
+            # `TagValue`, so every tagged key raises KeyError and is skipped.
+            pair = {tag["Key"]: tag["Value"]}
+            if policy.exception_tags_any(pair, exception_tags):
+                return True
+        return False
 
 
 @register("aws", "kms")

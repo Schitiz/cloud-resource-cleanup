@@ -231,7 +231,7 @@ CASES = [
         "list-resource-tags-error-on-one-key",
         [key("k1"), key("k2", tags=client_error("ListResourceTags")), key("k3")],
     ),
-    # exception_tags (BUG-015)
+    # exception_tags (BUG-015, owner decision: unchanged)
     Case(
         "exception-set-untagged-key-proceeds",
         [key("k1")],
@@ -241,19 +241,16 @@ CASES = [
         "exception-set-tagged-key-keyerror-skips",
         [key("k1", tags=tag_list({"a": "1"})), key("k2")],
         exception_tags={"a": []},
-        diverges="BUG-015",
     ),
     Case(
         "exception-set-value-list",
         [key("k1", tags=tag_list({"b": "1"}))],
         exception_tags={"a": ["1"]},
-        diverges="BUG-015",
     ),
     Case(
         "exception-with-key-and-tagkey-entries",
         [key("k1", tags=[{"TagKey": "t", "TagValue": "v", "Key": "a", "Value": "1"}])],
         exception_tags={"a": ["1"]},
-        diverges="BUG-015",
     ),
     Case(
         "exception-with-key-and-tagkey-entries-no-hit",
@@ -264,13 +261,11 @@ CASES = [
         "exception-with-key-only-key-list",
         [key("k1", tags=[{"TagKey": "t", "TagValue": "v", "Key": "a", "Value": "2"}])],
         exception_tags={"a": []},
-        diverges="BUG-015",
     ),
     Case(
         "exception-multi-value-hit-keeps",
         [key("k1", tags=tag_list({"a": "2"})), key("k2", tags=tag_list({"a": "3"}))],
         exception_tags={"a": ["1", "2"]},
-        diverges="BUG-015",
     ),
     Case(
         "exception-production-tags",
@@ -285,7 +280,6 @@ CASES = [
             "auto_clean": ["false", "False", "FALSE"],
             "crc": ["gke"],
         },
-        diverges="BUG-015",
     ),
     Case(
         "exception-none-warns-per-key",
@@ -686,12 +680,6 @@ FIXED: Mapping[str, tuple[list[str], list[str], list[str]]] = {
     "filter-multi-value-never-matches": ([], ["k1", "k2"], ["k1", "k2"]),
     "filter-empty-value-list-adds-no-constraint": (["k1", "k2"], [], []),
     "filter-empty-value-list-key-present": (["k1", "k2", "k3"], ["k1"], ["k1"]),
-    "exception-set-tagged-key-keyerror-skips": (["k2"], ["k2"], ["k2"]),
-    "exception-set-value-list": ([], ["k1"], ["k1"]),
-    "exception-with-key-and-tagkey-entries": ([], ["k1"], ["k1"]),
-    "exception-with-key-only-key-list": ([], ["k1"], ["k1"]),
-    "exception-multi-value-hit-keeps": ([], ["k2"], ["k2"]),
-    "exception-production-tags": (["untagged"], ["other", "untagged"], ["other", "untagged"]),
     "age-tag-never-matches-tagkey-entries": (["k1"], [], ["k1"]),
     "age-tag-tagkey-short-selects-earlier": ([], ["k1"], ["k1"]),
     "age-tag-tagkey-unparseable-falls-back-to-age": (["k1"], ["k1"], ["k1"]),
@@ -828,7 +816,12 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
         lambda o: o.deleted == [] and ("KEY SKIPPED k1" in [m for _, _, m in o.logs]),
     ),
     ("filter-string-value-iterates-characters", lambda o: o.deleted == ["k1"]),
+    ("exception-set-tagged-key-keyerror-skips", lambda o: o.deleted == ["k2"]),
     ("exception-set-untagged-key-proceeds", lambda o: o.deleted == ["k1"]),
+    (
+        "exception-with-key-and-tagkey-entries",
+        lambda o: o.deleted == [] and ("describe_key", "k1") not in o.calls,
+    ),
     (
         "exception-none-warns-per-key",
         lambda o: [m for _, _, m in o.logs].count("Exception tags and not present") == TWO_KEYS,
@@ -930,16 +923,6 @@ def _skip_outcome(obj: Any, tag_items: Any) -> tuple[str, Any]:
         return (type(e).__name__, str(e))
 
 
-def _expected_skip(spec: Any, tag_items: Any) -> tuple[str, Any]:
-    if any("TagKey" not in tag or "TagValue" not in tag for tag in tag_items):
-        return ("KeyError", "'TagKey'" if "TagKey" not in tag_items[0] else "'TagValue'")
-    hit = any(
-        t["TagKey"] in spec and (not spec[t["TagKey"]] or t["TagValue"] in spec[t["TagKey"]])
-        for t in tag_items
-    )
-    return ("ok", hit)
-
-
 @pytest.mark.parametrize("tag_items", SKIP_TAGS, ids=range(len(SKIP_TAGS)))
 @pytest.mark.parametrize("spec", SKIP_SPECS, ids=range(len(SKIP_SPECS)))
 def test_should_skip_kms_matches_main(
@@ -949,10 +932,6 @@ def test_should_skip_kms_matches_main(
     args: tuple[Any, ...] = (False, {}, spec, DESC, USER, 7, {"days": 1}, "")
     old = _load_oracle().Kms(*args)
     new = Kms(*args)
-    if spec and tag_items:
-        # BUG-015: main reads `Key` / `Value`, the new code reads `TagKey` / `TagValue`.
-        assert _skip_outcome(new, tag_items) == _expected_skip(spec, tag_items)
-        return
     assert _skip_outcome(new, tag_items) == _skip_outcome(old, tag_items)
 
 
