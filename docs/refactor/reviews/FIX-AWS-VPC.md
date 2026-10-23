@@ -52,3 +52,28 @@ Owner actions: none (CLEANUP_SAFETY.md does not mention VPCs).
 - (8) `make check` (`ruff check .`, `mypy`, `lint-imports`, `pytest -q`) green: **42450 passed** (up from 42444 at `182466d`).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Round 1 fixes checked: the parity comparison now uses `new.calls == _expected_calls(case, old.calls)`, which only moves the read-only instance scan (`subnets.all` plus one `subnet.instances.all` per subnet) in front of `DhcpOptions`. Nothing else is dropped, so the parity check is not loosened. The extra `DIVERGING` case and the logging test hold. I agree with the round 1 findings.
+
+### Independent checks
+
+- (1) Each bug is fixed for the inputs its BUGS.md row describes. BUG-012: the tags decide protection, a real run no longer raises, and protected VPCs are not torn down. BUG-083: an empty or `None` `filter_tags` raises `ValueError` with `aws.calls == []` in both a dry run and a real run, through `VPC.delete()` and through `VpcCleaner.plan()`; a default VPC is never touched or listed. BUG-088: no `instance.terminate` call exists, and a VPC with instances is kept before any mutation. BUG-087: `delete_vpc` is retried only on a `ClientError` with code `DependencyViolation`, with 4 injected sleeps over 5 attempts; any other error is attempted once, recorded and skipped, the run goes on, and the VPC is not listed. I copied HEAD's `tests/test_aws_vpc_fix.py` and `tests/test_aws_vpc_parity.py` into a worktree at `182466d`: all 19 fix tests and all 17 `test_diverges_from_main_by_design` cases fail there. The divergence cases fail on behaviour, not only on the new `sleep` keyword. All of them pass on HEAD.
+- (2) Direction rule: every diverging outcome keeps more, fails closed, or makes fewer calls (no terminate, fewer delete retries, the deleted list is never longer). For uncovered inputs the call order matches the oracle, apart from the moved read-only scan. The oracle (`tests/legacy/aws_vpc.txt`) is untouched. Each `DIVERGING` entry has an in-scope bug ID and asserts both `not check(old)` and `check(new)`. The shared fixture changes (default non-empty `filter_tags`, no instances in `full()`) apply to the old and new runs alike, so they are not a loosening.
+- (3) Production commands: none use `--resource vpc`.
+- (4) The fail-closed path (`require_filter_tags`) runs before `list_regions` and before any client or resource is created.
+- (5) `git diff 182466d..HEAD` does not touch any locked test, `safety_lock.json`, PLAN.md, STATUS.md, BUGS.md, CLEANUP_SAFETY.md or `tests/legacy/`.
+- (6) README Safety Invariants and Public API are updated. I fixed two NITs in `crc/aws/vpc/README.md`. The Public API line of `VpcCleaner` now lists `require_filter_tags`, `is_default` and the `sleep` attribute, and notes that `apply_region`/`delete_vpc` now report which VPCs were kept. The quirk list said "BUG-084 to BUG-095", which included the fixed BUG-087 and BUG-088; it now reads "BUG-084 to BUG-086 and BUG-089 to BUG-095".
+- (7) Owner decision: the remainders (protected VPCs still listed as deleted, the age gate, the dry run not running the instance scan, terminated instances still blocking) are explained there.
+
+### Findings
+
+- NIT (new bug, does not exist on main in this form): `crc/aws/vpc/cleaner.py` `VpcCleaner.apply()`. If a connectivity error aborts a region partway through `apply_region()`, the VPCs that region already kept (because of instances or a failed `delete_vpc`) are lost from `kept`, so they are still reported in `Result.succeeded`. The `VPC.delete()` adapter path removes them one by one and is not affected. The outcome is no worse than main (main lists every VPC) and nothing extra is deleted. Proposed follow-up: have `apply_region` append to a caller-owned `kept` list so that partial progress survives the exception.
+- No BLOCKING findings.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check` (ruff, mypy, lint-imports, pytest): green, 42450 passed.
+
+ROUND 2 VERDICT: APPROVE

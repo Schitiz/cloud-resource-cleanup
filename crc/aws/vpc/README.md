@@ -14,7 +14,7 @@ Modules:
 ## Public API
 
 - `VPC`: adapter that crc.py calls (delete(), get_deleted, delete_count, vpc_ids_to_delete, get_vpc_ids); runs the cleaner region by region, VPC by VPC, in the order of main.
-- `VpcCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus build_filter, list_vpcs, plan_region, apply_region, is_protected, should_skip and delete_vpc used by the adapter).
+- `VpcCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus require_filter_tags, build_filter, list_vpcs, plan_region, apply_region, is_default, is_protected, should_skip and delete_vpc used by the adapter; apply_region and delete_vpc report which VPCs were kept; the `sleep` attribute is the injected sleep between delete retries).
 - `VpcRuntime`: frozen dataclass with the injected client factory, resource factory and region lister of VPC (and the sleep between delete retries; no clock: the module has no age gate).
 - `build_vpc_cleaner()`: registry factory behind @register("aws", "vpc"); reads filter_tags, exception_tags and notags from RunContext.options.
 - `has_instances()`: (teardown.py) read-only scan, True when a subnet of the VPC has an instance; the VPC is then kept (BUG-088).
@@ -30,7 +30,7 @@ Modules:
 - Protection (`policy.exception_tags_any`, `policy.notags_all`) is evaluated on the VPC's tags (`vpc.tags`, `None` is no tags) (BUG-012, fixed). A VPC skipped as protected is still recorded in the deleted list of the run, as on `main` (second half of BUG-012, left open).
 - Instances are never terminated. A VPC that still has an instance in any subnet is kept before anything is detached or deleted (`has_instances`, `skip("has_instances")`) and is not listed as deleted (BUG-088, fixed). The check runs in real runs only, so a dry run may still list such a VPC.
 - `delete_vpc` is retried (up to 5 attempts, injected sleep of 3 s between attempts) only on a `ClientError` with code `DependencyViolation`; any other error is logged, recorded with `run.fail` and the VPC is skipped and not listed as deleted (BUG-087, fixed in FIX-AWS-VPC, `delete.py`).
-- Connectivity errors skip the region (SAF-001, `describe_regions` falls back to the static list, other errors propagate, SAF-004); every other teardown error propagates and nothing is isolated per VPC (CLEANUP_SAFETY.md). `VPC.delete()` keeps the call order of `main` (per region: client, resource, listing, then for each VPC protection check, instance scan and teardown). The Cleaner path decides protection for a whole region in `plan()`, so after an aborted region it logs the `Tags and notags not present` warning of VPCs `main` never reached. Quirks: BUG-021 and BUG-084 to BUG-095 (AWS-1).
+- Connectivity errors skip the region (SAF-001, `describe_regions` falls back to the static list, other errors propagate, SAF-004); every other teardown error propagates and nothing is isolated per VPC (CLEANUP_SAFETY.md). `VPC.delete()` keeps the call order of `main` (per region: client, resource, listing, then for each VPC protection check, instance scan and teardown). The Cleaner path decides protection for a whole region in `plan()`, so after an aborted region it logs the `Tags and notags not present` warning of VPCs `main` never reached. Quirks: BUG-021, BUG-084 to BUG-086 and BUG-089 to BUG-095 (AWS-1).
 - Do not call real cloud APIs in tests; mock every SDK client.
 
 ## Extension Rules
