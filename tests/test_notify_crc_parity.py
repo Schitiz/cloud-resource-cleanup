@@ -163,6 +163,7 @@ def compare(oracle_module: ModuleType, case: Case, name: str) -> Recorded:
     act_current = next(act for n, _, _, act in CASES if n == name)
     old = execute(oracle_module.CRC, [oracle_module], case)
     new = execute_current(case, act_current)
+    assert old["adapters"] == [] == old["reads"], case.name
     if name in BUG_033_PING_DIVERGENT:
         assert_bug_033_ping(case, name, old, new)
         return old

@@ -86,3 +86,77 @@ Ran `pip install -r requirements.txt -r requirements-dev.txt` followed by `make 
 
 VERDICT: APPROVE
 
+
+## Round 2 (Opus)
+
+Scope: `git diff fc6fa4d..HEAD` on `wa/1` (commits `c963a22`, `e3fca8f`).
+
+### Round 1 fixes re-checked
+
+- `nic_none` / `vm_none` (`tests/test_cli_crc_parity.py:355-356`): the current side is now
+  `len(None)` instead of `c.get_msg(..., None)` on the current `CRC`. It no longer calls any of
+  the five methods, and it does not fall through to `NewCRC.notify_deleted_*`. In practice it is a
+  frozen expectation: no Slack, no Influx, no stdout, and `TypeError: object of type 'NoneType'
+  has no len()`, compared with main's `notify_deleted_{nic,vm}_via_slack(get_deleted=None)`.
+  Accepted, because `get_deleted=None` cannot reach any routed cleaner.
+- `current_ping` (`tests/helpers_wa1_notify.py:99-108`): goes through `Report` and
+  `SlackNotifier.ping_owners(report, resource)` with the default lookups, which matches what
+  `SlackNotifier.send` does in production (`crc/notify/slack.py:194-197`). Before this lane,
+  `ping_list` / `ping_no_len` were compared against `ping_owners_raw`, which copies main's
+  pre-loop. They are now asserted as the BUG-033 divergence (`assert_bug_033_ping`). Main's side
+  is pinned to frozen data: one `usergroups_list` call, the groups-failure stdout and the exact
+  error. The routed side is pinned to its own error, with no Slack, Influx or stdout. That is not
+  weaker than before. Note: `docs/refactor/BUGS.md:140` still lists BUG-033 as `open`. The routed
+  path has dropped the pre-loop, but `crc/cli/notify.py:75-79` keeps it. Updating the status is
+  outside this lane, so it is left to the integrator.
+- The dead `ping_dict` / `ping_empty` rows in `NOTIFY_SPECS` were removed, and both cases remain
+  in the new file.
+
+### Findings & fixes made in review
+
+1. **Two compared keys were lost** (`tests/test_notify_crc_parity.py:165`). At `fc6fa4d`, the
+   moved rows went through `compare` with `routed=None`, or through `compare_notify` with
+   `for key in old`. That compared every recorded key: `result`, `attributes`, `adapters`,
+   `reads`, `slack`, `influx`, `stdout`. The new `compare` only checks `COMPARED` (4 keys).
+   I added `assert old["adapters"] == [] == old["reads"]` on main's side as a frozen expectation
+   (the routed side has no adapters or reads), so those two keys are covered again. `attributes`
+   is a snapshot of the constructor taken before the action runs. It is constructor parity,
+   covered by `test_constructor_matches_main` (WA-2's area), and it cannot be compared without
+   the current `CRC`. Not restored.
+
+### Checklist
+
+1. Grep for `crc\.cli|NewCRC` in `tests/test_notify_crc_parity.py` and
+   `tests/helpers_wa1_notify.py`: docstrings only, no imports. The five methods appear in the new
+   file only in the legacy column of `CASES` (main's `CRC` through `oracle` ->
+   `load_legacy_crc("legacy_crc_main_crc")`). Grep
+   `\.(get_msg|slack_lookup_user_by_email|get_user_groups_list|write_influxdb|ping_on_slack)\(`
+   on `tests/test_cli_crc_parity.py`: no matches.
+2. Same 15 case names, same grid (3 failure variants x 2 dry-run settings x 4 Slack modes x
+   6 Influx modes = 144 per name), 2160 cases (pinned by `EXPECTED_CASES`). The expected values of
+   divergent cases are frozen literals, not derived from the routed side: `get_msg_none`
+   (`NONE_LEN` / `NONE_ITER`), `get_msg_bad_operation` (`BAD_WORD_TEXT` / `KeyError`), BUG-033
+   (`BUG_033_PING_DIVERGENT`). BUG-030 has an explicit test.
+3. Mutations, run locally and reverted, not committed:
+   - `crc/core/report.py:181,207`: changed the dry-run text and the "the following" text of
+     `get_msg` / the owner ping. 180 failures in `tests/test_notify_crc_parity.py`.
+   - `crc/notify/influx.py:77`: changed the suffix separator `_` to `-`. 72 failures.
+4. Changed files: `docs/archive/reviews/WA-1.md`, `tests/archtest/test_count_floor.txt`,
+   `tests/helpers_wa1_notify.py`, `tests/test_cli_crc_parity.py` (moved blocks only; constructor
+   and `scan_instances_with_tag` cases untouched), `tests/test_notify_crc_parity.py`. No
+   production code.
+6. `pip install -r requirements.txt -r requirements-dev.txt`, then `make check` (before my fix):
+   ruff, mypy, import-linter (5 kept), **44414 passed in 53.80s**, ARCH-008 44414 / floor 44414,
+   wall time 1m13.0s. After my fix: see gates below.
+
+## New bugs
+
+None.
+
+### Gates after the round 2 fix
+
+`make check`: ruff passed, mypy passed, import-linter 5 kept / 0 broken, **44414 passed in
+50.96s**, ARCH-008 44414 / floor 44414 (test count unchanged, so the floor needs no change), wall
+time 0m57.5s.
+
+ROUND 2 VERDICT: APPROVE
