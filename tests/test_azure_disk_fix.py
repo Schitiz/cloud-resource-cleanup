@@ -115,3 +115,123 @@ def test_bug_174_selection_errors_still_propagate() -> None:
     with pytest.raises(AttributeError):
         cleaner.plan(_context())
     assert _calls(azure, "begin_delete") == []
+
+
+PRODUCTION_COMMANDS = [
+    (
+        "itest-6h",
+        [
+            "crc.py",
+            "--cloud",
+            "azure",
+            "--resource_group",
+            "yugabyte-rg",
+            "--resource",
+            "disk",
+            "--filter_tags",
+            '{"yb_task":["bug_bash_22_9_2023","itest", "itests", "itest-system", '
+            '"db-cross-functional","uitest", "dev-itest", "dev-uitest"]}',
+            "--age",
+            '{"hours": 6}',
+            "--max_age",
+            '{"days": 21}',
+            "--exception_tags",
+            '{"autoclean": ["false", "False", "FALSE"], '
+            '"auto_clean": ["false", "False", "FALSE"],"crc":["gke"]}',
+            "--slack_channel",
+            "yba-crc-cleanup-notifications",
+            "--custom_age_tag_key",
+            "max_retention_age",
+        ],
+        "itest",
+    ),
+    (
+        "keep-universe-1d",
+        [
+            "crc.py",
+            "--cloud",
+            "azure",
+            "--resource_group",
+            "yugabyte-rg",
+            "--resource",
+            "disk",
+            "--filter_tags",
+            '{"yb_task":["itest-keep-universe", "itest-system-keep-universe", '
+            '"db-cross-functional-keep-universe", "uitest-keep-universe", '
+            '"dev-itest-keep-universe", "dev-uitest-keep-universe"]}',
+            "--age",
+            '{"days": 1}',
+            "--max_age",
+            '{"days": 21}',
+            "--exception_tags",
+            '{"autoclean": ["false", "False", "FALSE"], '
+            '"auto_clean": ["false", "False", "FALSE"],"crc":["gke"]}',
+            "--slack_channel",
+            "yba-crc-cleanup-notifications",
+            "--custom_age_tag_key",
+            "max_retention_age",
+        ],
+        "itest-keep-universe",
+    ),
+    (
+        "stress-1d",
+        [
+            "crc.py",
+            "--cloud",
+            "azure",
+            "--resource_group",
+            "yugabyte-rg",
+            "--resource",
+            "disk",
+            "--filter_tags",
+            '{"yb_task":["stress", "stress-dev", "stress-chaos", "stress-lru-cdc", '
+            '"stress-smoke-cdc", "smoke-core", "stress-smoke-core", "stress-sqlancer", '
+            '"stress-lru-core", "stress-scale"]}',
+            "--age",
+            '{"days": 1}',
+            "--max_age",
+            '{"days": 21}',
+            "--exception_tags",
+            '{"autoclean": ["false", "False", "FALSE"], '
+            '"auto_clean": ["false", "False", "FALSE"],"crc":["gke"]}',
+            "--slack_channel",
+            "db-stress-tests-cleanup-notifications",
+            "--custom_age_tag_key",
+            "max_retention_age",
+        ],
+        "stress",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("argv", "matching_task"),
+    [(cmd, task) for _, cmd, task in PRODUCTION_COMMANDS],
+    ids=[name for name, _, _ in PRODUCTION_COMMANDS],
+)
+def test_production_commands_keep_selection_and_list_configured_group(
+    argv: list[str],
+    matching_task: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from crc.cli.main import main
+
+    azure = FakeAzure(
+        [
+            disk("match-old", {"yb_task": matching_task}),
+            disk("skip-autoclean", {"yb_task": matching_task, "autoclean": "false"}),
+            disk("skip-gke", {"yb_task": matching_task, "crc": "gke"}),
+            disk("skip-attached", {"yb_task": matching_task}, state="Attached"),
+            disk("skip-other-task", {"yb_task": "unrelated"}),
+        ]
+    )
+    azure.install(monkeypatch)
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "fake-token")
+    monkeypatch.setattr("crc.cli.main.build_slack_client", lambda *a: None)
+    monkeypatch.setattr("sys.argv", argv)
+    main()
+    assert _calls(azure, "list") == []
+    assert _calls(azure, "list_by_resource_group") == [("list_by_resource_group", "yugabyte-rg")]
+    assert _calls(azure, "begin_delete") == [("begin_delete", "yugabyte-rg", "match-old")]
+    assert azure.waited == ["match-old"]
+

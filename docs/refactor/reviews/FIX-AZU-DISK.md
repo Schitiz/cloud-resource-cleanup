@@ -47,3 +47,24 @@ Rung FIX-AZU-DISK (wave FIX-1): behaviour fixes in `crc/azu/disk.py`. Status: co
 - `crc/azu/disk.py` `Disk.delete()` / `apply()`: a disk named `None` is deleted by Azure with
   `begin_delete(rg, None)` semantics unclear; with the fix the later `"Deleted disk: " + name`
   `TypeError` is caught and reported as a failure. Exists on main: yes (it raised there). Not fixed.
+
+## Round 1 (Argon)
+
+### Findings
+
+- Fixed in review:
+  - `crc/azu/README.md:12,41`: updated `## Purpose` (`begin_delete(...).result()`) and `## Public API` (`DiskOperations`: `list_by_resource_group and begin_delete` instead of stale `list and begin_delete`) to match `crc/azu/disk.py`.
+  - `tests/test_azure_disk_fix.py`: added `test_production_commands_keep_selection_and_list_configured_group` covering all three production Jenkins CLI invocations (`--cloud azure --resource disk`) end-to-end.
+  - `tests/test_azure_disk_parity.py`: asserted summary log lines in `_assert_diverges` and `_assert_cleaner_diverges` for `BUG-174` diverging cases.
+- Checklist verification:
+  1. **Bugs fixed**: `BUG-172` (`disks.list_by_resource_group(self._resource_group)` replaces subscription-wide `disks.list()`, never deriving group from resource id) and `BUG-174` (`begin_delete(...).result()` awaited before recording deletion, per-disk `Exception` logged at `ERROR`, recorded via `_logger.failed` and `Result.failed`, loop continues to next disk, listing/selection errors still propagate) are fixed and covered by unit and parity tests that fail on `182466d` and pass now.
+  2. **Direction rule**: `list_by_resource_group` only narrows listing to the configured resource group; `decide()` is unchanged; failed deletes are no longer recorded as deleted; `tests/legacy/azu_disk.txt` is untouched; diverging parity cases are explicitly marked `diverges="BUG-174"` with exact `Fixed` assertions in `DIVERGING`.
+  3. **Production commands**: all three Jenkins commands run with identical flags and selection inside `$RESOURCE_GROUP`.
+  4. **Fail-closed paths**: listing and selection errors in `plan()` raise before any `begin_delete` call.
+  5. **Protected files**: `tests/archtest/safety_lock.json`, locked safety test files, `docs/refactor/PLAN.md`, `docs/refactor/STATUS.md`, `docs/refactor/BUGS.md`, and `CLEANUP_SAFETY.md` are untouched.
+  6. **README (ARCH-002)**: `crc/azu/README.md` `## Purpose`, `## Public API`, and `## Safety Invariants` updated and in sync.
+  7. **Unfixed sub-cases**: selection/decision error propagation and CLI exit-code semantics are documented under `## Owner decision`.
+  8. **Gates**: `ruff check .`, `mypy`, `lint-imports`, and `pytest -q` all pass (42,457 passed, up from 42,444 at `182466d`).
+
+VERDICT: APPROVE
+

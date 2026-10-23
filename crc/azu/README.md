@@ -9,7 +9,7 @@ Azure cleaners (azure-mgmt SDK). They delete or stop leftover VMs, disks, IPs an
 Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.md`):
 
 - `_base.py`: `Base`: Azure credential from the `AZURE_CREDENTIALS_*` variables, and lazily built compute and network clients for a resource group (rung PL-AZ)
-- `disk.py`: `AzureDiskCleaner` (registered as `azure`/`disk`) and the adapter `Disk`: deletes unattached managed disks (`begin_delete`); any-key tag filter, age gate
+- `disk.py`: `AzureDiskCleaner` (registered as `azure`/`disk`) and the adapter `Disk`: deletes unattached managed disks (`begin_delete(...).result()`); any-key tag filter, age gate
 - `ip.py`: `AzureIpCleaner` (registered as `azure`/`ip`) and the adapter `IP`: deletes IPs without an IP configuration (`begin_delete`); any-key tag filter
 - `nic.py`: `AzureNicCleaner` (registered as `azure`/`nic`) and the adapter `NIC`: deletes NICs not attached to a VM (`begin_delete(...).result()`, three attempts); plain substring name filters
 - `spot_vm/`: `AzureSpotVmCleaner` (registered as `azure`/`spot_instances`) and the adapter `SpotVM`: deletes stopped or deallocated Spot VMs and their leftover disks and NICs (subpackage with its own README, rung AZ-5)
@@ -38,7 +38,7 @@ copyright comment and declares no export list.
 - `build_nic_cleaner()`: registry factory behind @register("azure", "nic"); reads resource_group, name_regex and exception_regex from RunContext.options and builds the client from `Base`.
 - `NIC`: adapter crc.py calls (delete(), get_deleted, delete_count, nics_names_to_delete, base); runs the cleaner NIC by NIC in the order of main.
 - `SdkDisk`: Protocol of the Azure disk fields read (name, tags, time_created, disk_state).
-- `DiskOperations`: Protocol of the two disks calls used, list and begin_delete (positional arguments); tests pass fakes.
+- `DiskOperations`: Protocol of the two disks calls used, list_by_resource_group and begin_delete (positional arguments); tests pass fakes.
 - `DiskComputeClient`: Protocol of the compute client part used (the disks operations).
 - `DiskSettings`: frozen dataclass of the filters and age gate (filter_tags, exception_tags, notags, age, custom_age_tag_key, disk_states).
 - `AzureDiskCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus list_disks, decide and delete_disk used by the adapter); the client factory is injected through the constructor.

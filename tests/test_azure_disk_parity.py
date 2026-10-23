@@ -585,6 +585,10 @@ def _assert_diverges(case: Case, old: Outcome, new: Outcome) -> None:
     assert [r[2] for r in new.logs if r[2].startswith("Deleted disk: ")] == [
         f"Deleted disk: {n}" for n in fixed.deleted
     ]
+    assert [r[2] for r in new.logs if "Azure Disks" in r[2]] == [
+        f"number of Azure Disks deleted: {len(fixed.deleted)}",
+        f"List of Azure Disks deleted: {fixed.deleted}",
+    ]
     listed = [c for c in new.calls if c[0] in ("list", "list_by_resource_group")]
     assert listed == [("list_by_resource_group", _group(case))]
     assert [c for c in new.calls if c[0] == "begin_delete"] == _begin_deletes(
@@ -595,10 +599,15 @@ def _assert_diverges(case: Case, old: Outcome, new: Outcome) -> None:
 
 def _assert_cleaner_diverges(case: Case, old: Outcome, new: Outcome) -> None:
     fixed = DIVERGING[case.id]
+    assert (old.error, old.deleted) != (new.error, new.deleted)
     assert new.error is None
     assert new.deleted == fixed.deleted
     assert new.waited == fixed.waited
     assert _errors(new.logs) == fixed.errors
+    assert [r[2] for r in new.logs if "Azure Disks" in r[2]] == [
+        f"number of Azure Disks deleted: {len(fixed.deleted)}",
+        f"List of Azure Disks deleted: {fixed.deleted}",
+    ]
     assert _only(new.calls, "list") == []
     assert _only(new.calls, "list_by_resource_group") == [("list_by_resource_group", _group(case))]
 
