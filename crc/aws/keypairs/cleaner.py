@@ -3,83 +3,30 @@
 """AWS EC2 key pair cleaner.
 
 `KeyPairCleaner` implements the `crc.core.cleaner.Cleaner` contract: `plan()` lists key pairs
-(`describe_key_pairs`) and filters them, `apply()` calls `delete_key_pair`. `KeyPairs` is the
-legacy class `crc.py` uses; it keeps its constructor and attributes and runs the cleaner
-region by region, in the exact call order of the original implementation.
+(`describe_key_pairs`) and filters them, `apply()` calls `delete_key_pair`. The legacy class
+`crc.py` uses lives in `adapter.py`.
 """
 
 import datetime
 import logging
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
-from typing import Any, Protocol
-
-import boto3
+from collections.abc import Sequence
 
 from crc.aws import _regionlog
-from crc.aws._base import get_all_regions
-from crc.aws.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
+from crc.aws._common import ec2_regions, group_by_region, log_deleted_summary, skip_region
+from crc.aws.connectivity import CONNECTIVITY_ERRORS
 from crc.core import age as core_age
 from crc.core import logger, policy
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext, Skipped
 from crc.core.registry import register
-from crc.service import Service
 
-_SERVICE_NAME = "ec2"
-_DEFAULT_REGION = "us-west-2"
-_SKIP_CONTEXT = "keypair cleanup"
+from .client import ClientFactory, KeyPairClient, RegionLister, boto3_client
 
-
-class KeyPairClient(Protocol):
-    """The two EC2 calls this cleaner uses."""
-
-    def describe_key_pairs(self) -> Mapping[str, Any]:
-        """List the key pairs of the client's region."""
-        ...
-
-    def delete_key_pair(self, *, KeyName: str) -> Mapping[str, Any]:
-        """Delete one key pair by name."""
-        ...
+SKIP_CONTEXT = "keypair cleanup"
 
 
-ClientFactory = Callable[[str], KeyPairClient]
-RegionLister = Callable[[], Sequence[str]]
-Clock = Callable[[], datetime.datetime]
-
-
-def _boto3_client(region: str) -> KeyPairClient:
-    client: KeyPairClient = boto3.client(_SERVICE_NAME, region_name=region)
-    return client
-
-
-def _all_regions() -> Sequence[str]:
-    return get_all_regions(_SERVICE_NAME, _DEFAULT_REGION)
-
-
-@dataclass(frozen=True, slots=True)
-class KeyPairRuntime:
-    """Injected collaborators of `KeyPairs`: the SDK client factory, the region lister and the
-    clock that supplies `now` (the cleaner itself never reads the clock)."""
-
-    client_factory: ClientFactory = _boto3_client
-    list_regions: RegionLister = _all_regions
-    clock: Clock = datetime.datetime.now
-
-
-def _skip_region(region: str, error: BaseException) -> None:
-    _regionlog.region_skipped(region, error)
-    log_skipped_region(region, _SKIP_CONTEXT, error)
-
-
-def _log_summary(deleted: Sequence[str], *, dry_run: bool) -> None:
-    items = list(deleted)
-    if not dry_run:
-        logging.warning(f"number of AWS keypairs deleted: {len(items)}")
-        logging.warning(f"List of AWS keypairs deleted: {items}")
-    else:
-        logging.warning(
-            f"List of AWS keypairs (Total: {len(items)}) which will be deleted: {items}"
-        )
+def log_summary(deleted: Sequence[str], *, dry_run: bool) -> None:
+    """The summary lines `main` logs once all regions are done."""
+    log_deleted_summary("keypairs", deleted, dry_run=dry_run)
 
 
 class KeyPairCleaner:
@@ -118,27 +65,24 @@ class KeyPairCleaner:
                 client = self._client_factory(region)
                 region_plan = self.plan_region(client, region, context.now)
             except CONNECTIVITY_ERRORS as e:
-                _skip_region(region, e)
+                skip_region(region, SKIP_CONTEXT, e)
                 continue
             candidates.extend(region_plan.candidates)
             skipped.extend(region_plan.skipped)
         if context.dry_run:
-            _log_summary([c.id for c in candidates], dry_run=True)
+            log_summary([c.id for c in candidates], dry_run=True)
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
 
     def apply(self, plan: Plan, context: RunContext) -> Result:
         """Delete the planned key pairs, region by region (nothing in a dry run)."""
-        by_region: dict[str, list[Candidate]] = {}
-        for candidate in plan.candidates:
-            by_region.setdefault(candidate.region, []).append(candidate)
         deleted: list[str] = []
-        for region, items in by_region.items():
+        for region, items in group_by_region(plan.candidates).items():
             try:
                 client = self._client_factory(region)
                 self.apply_region(client, items, deleted, dry_run=context.dry_run)
             except CONNECTIVITY_ERRORS as e:
-                _skip_region(region, e)
-        _log_summary(deleted, dry_run=context.dry_run)
+                skip_region(region, SKIP_CONTEXT, e)
+        log_summary(deleted, dry_run=context.dry_run)
         return Result(succeeded=tuple(deleted))
 
     def plan_region(self, client: KeyPairClient, region: str, now: datetime.datetime) -> Plan:
@@ -210,70 +154,9 @@ def build_keypair_cleaner(context: RunContext) -> Cleaner:
     """Registry factory. Options: `name_regex`, `exception_regex` (lists) and `age` (dict)."""
     options = context.options
     return KeyPairCleaner(
-        client_factory=_boto3_client,
-        list_regions=_all_regions,
+        client_factory=boto3_client,
+        list_regions=ec2_regions,
         name_regex=list(options.get("name_regex") or ()),
         exception_regex=list(options.get("exception_regex") or ()),
         age=options.get("age"),
     )
-
-
-class KeyPairs(Service):
-    """Legacy entry point used by `crc.py`: deletes key pairs that match the name regexes,
-    skips the exception regexes and are older than `age`. In dry run it only lists them.
-
-    Attributes: `deleted_keypairs` (names deleted, or listed in a dry run), `name_regex`,
-    `exception_regex`, `age`, `dry_run`. `get_deleted` and `count` read the result.
-    """
-
-    service_name = _SERVICE_NAME
-    default_region_name = _DEFAULT_REGION
-
-    def __init__(
-        self,
-        dry_run: bool,
-        name_regex: list[str] | None,
-        exception_regex: list[str] | None,
-        age: core_age.AgeSpec | int | None,
-        runtime: KeyPairRuntime | None = None,
-    ) -> None:
-        super().__init__()
-        self.deleted_keypairs: list[str] = []
-        self.dry_run = dry_run
-        self.name_regex = name_regex
-        self.exception_regex = exception_regex
-        self.age = age
-        self._runtime = runtime or KeyPairRuntime()
-
-    @property
-    def get_deleted(self) -> list[str]:
-        """Names of the key pairs deleted (listed in a dry run)."""
-        return self.deleted_keypairs
-
-    @property
-    def count(self) -> int:
-        """Number of key pairs deleted (listed in a dry run); logs the count."""
-        count = len(self.deleted_keypairs)
-        logging.info(f"count of items in deleted_keypairs: {count}")
-        return count
-
-    def delete(self) -> None:
-        """Delete (or, in a dry run, only list) the matching key pairs of every region."""
-        runtime = self._runtime
-        cleaner = KeyPairCleaner(
-            runtime.client_factory,
-            runtime.list_regions,
-            self.name_regex,
-            self.exception_regex,
-            self.age,
-        )
-        for region in runtime.list_regions():
-            try:
-                client = runtime.client_factory(region)
-                region_plan = cleaner.plan_region(client, region, runtime.clock())
-                cleaner.apply_region(
-                    client, region_plan.candidates, self.deleted_keypairs, dry_run=self.dry_run
-                )
-            except CONNECTIVITY_ERRORS as e:
-                _skip_region(region, e)
-        _log_summary(self.deleted_keypairs, dry_run=self.dry_run)

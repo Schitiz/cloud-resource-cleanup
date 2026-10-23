@@ -7,6 +7,7 @@ AWS EBS disk cleaner (AWS-4). Deletes available (unattached) EBS volumes in ever
 Modules, one per responsibility:
 
 - `cleaner.py`: the `Cleaner` (`plan()` lists and filters, `apply()` deletes) and its registry factory.
+- `guard.py`: the region level error policy and the summary lines.
 - `client.py`: typed Protocols of the boto3 calls used and the default factories.
 - `settings.py`: validated settings (age gates, filters, regex) and age normalisation.
 - `volumes.py`: tag, name, state and creation-age decisions for one volume, labels and server side filters.
@@ -14,6 +15,8 @@ Modules, one per responsibility:
 
 ## Public API
 
+- `region_guard()`: region level error policy (connectivity and unauthorised errors skip the region, others are logged and flagged).
+- `log_summary()`: the summary lines logged once all regions are done.
 - `Disk`: adapter that crc.py calls (delete(), get_deleted, count, disks_to_delete, age, detach_age); runs the cleaner region by region in the order of main.
 - `DiskCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus plan_region, note_dry_run, apply_region, region_guard and log_summary used by the adapter).
 - `DiskRuntime`: frozen dataclass with the injected EC2 and CloudWatch client factories and the region lister.

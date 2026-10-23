@@ -4,7 +4,7 @@
 
 AWS cleaners (boto3). They delete or stop leftover EC2, EBS, network, key and KMS resources across regions.
 
-**Refactored.** Every module is strict-checked and none is in the legacy ratchet. `_base.py`, `connectivity.py` and `__init__.py` (PL-AWS, strict typing and parity oracles, no behaviour change; they are not `Cleaner`s and register nothing) are shared plumbing; `keypairs.py` (R4a), `elastic_ips.py` (R4b), `kms.py` (R4c), `snapshot.py` (AWS-2), `vpc/` (AWS-1, subpackage since ST-AWS-VPC), `vm/` (AWS-3, subpackage since ST-AWS-VM), `disk/` (AWS-4) and `spot_instance_requests/` (AWS-5) are `Cleaner`s registered under `aws` (no behaviour change). The adapter classes (`KeyPairs`, `ElasticIPs`, `Kms`, `Snapshot`, `VPC`, `VM`, `Disk`, `SpotInstanceRequests`) remain the entry point `crc/cli` uses. Any change must follow `ARCHITECTURE.md`; a behaviour change needs a behaviour-fix rung in `docs/refactor/PLAN.md` (`.cursor/skills/crc-python-refactor/BEHAVIOUR_FIX.md`), with `make check` green.
+**Refactored.** Every module is strict-checked and none is in the legacy ratchet. `_base.py`, `connectivity.py` and `__init__.py` (PL-AWS, strict typing and parity oracles, no behaviour change; they are not `Cleaner`s and register nothing) are shared plumbing; `keypairs/` (R4a), `elastic_ips/` (R4b), `kms/` (R4c), `snapshot/` (AWS-2), each a subpackage since W2-AWS-A,, `vpc/` (AWS-1, subpackage since ST-AWS-VPC), `vm/` (AWS-3, subpackage since ST-AWS-VM), `disk/` (AWS-4) and `spot_instance_requests/` (AWS-5) are `Cleaner`s registered under `aws` (no behaviour change). The adapter classes (`KeyPairs`, `ElasticIPs`, `Kms`, `Snapshot`, `VPC`, `VM`, `Disk`, `SpotInstanceRequests`) remain the entry point `crc/cli` uses. Any change must follow `ARCHITECTURE.md`; a behaviour change needs a behaviour-fix rung in `docs/refactor/PLAN.md` (`.cursor/skills/crc-python-refactor/BEHAVIOUR_FIX.md`), with `make check` green.
 
 Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.md`):
 
@@ -12,46 +12,26 @@ Modules (operations and filters as catalogued in `docs/refactor/FILTER_VARIANTS.
 - `_regionlog.py`: `start`, `region_done` and `region_skipped`, thin wrappers over `crc.core.logger.current()` with an injectable clock for the `REGION` line (LOG-AWS2; log text only)
 - `connectivity.py`: `CONNECTIVITY_ERRORS` and `log_skipped_region` (unreachable regions are logged and skipped; refactored, PL-AWS)
 - `disk/`: package (`__init__.py` keeps the import path `crc.aws.disk`): `DiskCleaner` (registered as `aws` / `disk`) and the `Disk` adapter: deletes available EBS volumes (`delete_volume`); tags, regex, `yb_task` and Kubernetes skips, CloudWatch detach age; opt-in `--cloud aws --resource disk`. See `crc/aws/disk/README.md`
-- `elastic_ips.py`: `ElasticIpCleaner` (registered as `aws` / `ip`) and the `ElasticIPs` adapter: releases unassociated, tagged Elastic IPs (`release_address`)
-- `keypairs.py`: `KeyPairCleaner` (registered as `aws` / `keypair`) and the `KeyPairs` adapter: deletes key pairs by name regex (`delete_key_pair`)
-- `kms.py`: `KmsCleaner` (registered as `aws` / `kms`) and the `Kms` adapter: schedules key deletion (`schedule_key_deletion`) for keys matching description and user ARN
-- `snapshot.py`: `SnapshotCleaner` (registered as `aws` / `snapshot`) and the `Snapshot` adapter: deletes snapshots older than `age_days` (`delete_snapshot`) that carry no exception tag and back no AMI
+- `_common.py`: helpers shared by the cleaners below (W2-AWS-A; structure only)
+- `elastic_ips/`: package (`__init__.py` keeps the import path `crc.aws.elastic_ips`; `cleaner.py`, `client.py`, `adapter.py`): `ElasticIpCleaner` (registered as `aws` / `ip`) and the `ElasticIPs` adapter: releases unassociated, tagged Elastic IPs (`release_address`)
+- `keypairs/`: package (`__init__.py` keeps the import path `crc.aws.keypairs`; `cleaner.py`, `client.py`, `adapter.py`): `KeyPairCleaner` (registered as `aws` / `keypair`) and the `KeyPairs` adapter: deletes key pairs by name regex (`delete_key_pair`)
+- `kms/`: package (`__init__.py` keeps the import path `crc.aws.kms`; `cleaner.py`, `client.py`, `settings.py`, `tags.py`, `adapter.py`): `KmsCleaner` (registered as `aws` / `kms`) and the `Kms` adapter: schedules key deletion (`schedule_key_deletion`) for keys matching description and user ARN
+- `snapshot/`: package (`__init__.py` keeps the import path `crc.aws.snapshot`; `cleaner.py`, `client.py`, `protection.py`, `adapter.py`): `SnapshotCleaner` (registered as `aws` / `snapshot`) and the `Snapshot` adapter: deletes snapshots older than `age_days` (`delete_snapshot`) that carry no exception tag and back no AMI
 - `spot_instance_requests/`: package (`__init__.py` keeps the import path `crc.aws.spot_instance_requests`): `SpotRequestCleaner` (registered as `aws` / `spot_instance_requests`) and the `SpotInstanceRequests` adapter: cancels spot requests, terminates instances, deletes leftover volumes. See `crc/aws/spot_instance_requests/README.md`
 - `vm/`: package (`__init__.py` keeps the import path `crc.aws.vm`): `VmCleaner` (registered as `aws` / `vm`; terminates (`terminate_instances`) or stops (`stop_instances`) running instances), the `VM` adapter (`delete()`, `stop()`, `find_instances_with_tag()`) with its `VmRuntime`, the typed EC2 Protocols and the read-only tag scan. See `crc/aws/vm/README.md`
 - `vpc/`: package (`__init__.py` keeps the import path `crc.aws.vpc`): `VpcCleaner` (registered as `aws` / `vpc`) and the `VPC` adapter: tears down and deletes VPCs matching an EC2 `tag:key` filter (`delete_vpc`). See `crc/aws/vpc/README.md`
 
 ## Public API
 
-Every module is refactored. The modules directly in this package (_base.py, connectivity.py, keypairs.py, elastic_ips.py, kms.py and snapshot.py) are synced with this README by ARCH-002; the disk, spot_instance_requests, vm and vpc subpackages list their names in their own READMEs.
+Every module is refactored. The modules directly in this package (_base.py, _common.py, _regionlog.py and connectivity.py) are synced with this README by ARCH-002; the keypairs, elastic_ips, kms, snapshot, disk, spot_instance_requests, vm and vpc subpackages list their names in their own READMEs.
 __init__.py holds only a copyright comment and declares no __all__ (no export list).
 
 - `get_all_regions()`: (_base.py) regions of an AWS service from describe_regions on a client in the default region; a connectivity error falls back to the static botocore region list (Session get_available_regions), every other error propagates.
 - CONNECTIVITY_ERRORS (connectivity.py, a constant tuple, not a symbol): the botocore network errors (ConnectionError and its subclasses, ReadTimeoutError, ConnectionClosedError) that skip a region instead of failing; auth errors are not in it.
 - `log_skipped_region()`: (connectivity.py) logs the WARNING of a region skipped for a connectivity error (region, context, error type and text).
+- `ec2_regions()`, `skip_region()`, `group_by_region()`, `log_deleted_summary()`: (_common.py) shared by the key pair, Elastic IP, KMS, snapshot and disk cleaners: the EC2 region lister (get_all_regions for ec2 in us-west-2), the skipped-region count plus WARNING of a connectivity error, candidates grouped by region, and the "number of ... deleted" / "will be deleted" summary lines. The constants EC2_SERVICE_NAME and DEFAULT_REGION are not symbols. No behaviour of their own.
 - `start()`, `region_done()`, `region_skipped()`: (_regionlog.py) timestamp for a region, the REGION run-log line (resources listed, selected, seconds) and the skipped-region count of the core run log; they never decide what is selected or deleted.
 
-- `KeyPairClient`: Protocol of the two EC2 calls used, describe_key_pairs and delete_key_pair; tests pass fakes.
-- `KeyPairRuntime`: frozen dataclass with the injected client factory, region lister and clock (now) of KeyPairs.
-- `KeyPairCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus per-region plan_region and apply_region).
-- `build_keypair_cleaner()`: registry factory behind @register("aws", "keypair"); reads name_regex, exception_regex and age from RunContext.options.
-- `KeyPairs`: adapter crc.py calls (delete(), get_deleted, count, deleted_keypairs); runs the cleaner region by region in the order of main.
-- `ElasticIpClient`: Protocol of the two EC2 calls used, describe_addresses and release_address; tests pass fakes.
-- `ElasticIpRuntime`: frozen dataclass with the injected client factory and region lister of ElasticIPs (no clock: the module has no age gate).
-- `ElasticIpCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus per-region plan_region and apply_region).
-- `build_elastic_ip_cleaner()`: registry factory behind @register("aws", "ip"); reads filter_tags, exception_tags and notags from RunContext.options.
-- `ElasticIPs`: adapter crc.py calls (delete(), get_deleted, count, deleted_ips); runs the cleaner region by region in the order of main.
-- `KmsClient`: Protocol of the five KMS calls used (get_paginator, list_resource_tags, describe_key, get_key_policy, schedule_key_deletion); tests pass fakes.
-- `KmsPaginator`: Protocol of the list_keys paginator (paginate).
-- `KmsRuntime`: frozen dataclass with the injected client factory and clock (now) of Kms.
-- `KmsSettings`: frozen dataclass with the filters and thresholds of one run (filter_tags, exception_tags, description, user, pending window, age, custom age tag key).
-- `KmsCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus connect_and_list, plan_keys and schedule used by the adapter).
-- `build_kms_cleaner()`: registry factory behind @register("aws", "kms"); reads filter_tags, exception_tags, kms_key_description, kms_user, kms_pending_window, age and custom_age_tag_key from RunContext.options.
-- `Kms`: adapter crc.py calls (delete(), get_deleted, kms_keys_to_delete); runs the cleaner in the order of main.
-- `SnapshotClient`: Protocol of the three EC2 calls used, describe_snapshots, describe_images and delete_snapshot; tests pass fakes.
-- `SnapshotRuntime`: frozen dataclass with the injected client factory, region lister and clock (now, UTC) of Snapshot.
-- `SnapshotCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus check_age, iter_region, delete_one and is_protected used by the adapter).
-- `build_snapshot_cleaner()`: registry factory behind @register("aws", "snapshot"); reads age_days (default 90, the value crc.py passes) and exception_tags from RunContext.options.
-- `Snapshot`: adapter crc.py calls (delete(), get_deleted, delete_count, deleted_snapshots); runs the cleaner region by region, snapshot by snapshot, in the order of main.
 
 ### spot_instance_requests
 

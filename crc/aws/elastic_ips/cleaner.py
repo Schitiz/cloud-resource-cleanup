@@ -3,81 +3,30 @@
 """AWS Elastic IP cleaner.
 
 `ElasticIpCleaner` implements the `crc.core.cleaner.Cleaner` contract: `plan()` lists the
-addresses (`describe_addresses`) and filters them, `apply()` calls `release_address`.
-`ElasticIPs` is the legacy class `crc.py` uses; it keeps its constructor and attributes and
-runs the cleaner region by region, in the exact call order of the original implementation.
+addresses (`describe_addresses`) and filters them, `apply()` calls `release_address`. The
+legacy class `crc.py` uses lives in `adapter.py`.
 """
 
 import logging
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
-from typing import Any, Protocol
-
-import boto3
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from crc.aws import _regionlog
-from crc.aws._base import get_all_regions
-from crc.aws.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
+from crc.aws._common import ec2_regions, group_by_region, log_deleted_summary, skip_region
+from crc.aws.connectivity import CONNECTIVITY_ERRORS
 from crc.core import logger, policy
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext, Skipped
 from crc.core.registry import register
-from crc.service import Service
 
-_SERVICE_NAME = "ec2"
-_DEFAULT_REGION = "us-west-2"
-_SKIP_CONTEXT = "elastic IP cleanup"
+from .client import ClientFactory, ElasticIpClient, RegionLister, TagSpec, boto3_client
+
+SKIP_CONTEXT = "elastic IP cleanup"
 _ALLOCATION_ID = "allocation_id"
 
-TagSpec = Mapping[str, Sequence[str]]
 
-
-class ElasticIpClient(Protocol):
-    """The two EC2 calls this cleaner uses."""
-
-    def describe_addresses(self) -> Mapping[str, Any]:
-        """List the Elastic IP addresses of the client's region."""
-        ...
-
-    def release_address(self, *, AllocationId: str) -> Mapping[str, Any]:
-        """Release one Elastic IP by allocation id."""
-        ...
-
-
-ClientFactory = Callable[[str], ElasticIpClient]
-RegionLister = Callable[[], Sequence[str]]
-
-
-def _boto3_client(region: str) -> ElasticIpClient:
-    client: ElasticIpClient = boto3.client(_SERVICE_NAME, region_name=region)
-    return client
-
-
-def _all_regions() -> Sequence[str]:
-    return get_all_regions(_SERVICE_NAME, _DEFAULT_REGION)
-
-
-@dataclass(frozen=True, slots=True)
-class ElasticIpRuntime:
-    """Injected collaborators of `ElasticIPs`: the SDK client factory and the region lister."""
-
-    client_factory: ClientFactory = _boto3_client
-    list_regions: RegionLister = _all_regions
-
-
-def _skip_region(region: str, error: BaseException) -> None:
-    _regionlog.region_skipped(region, error)
-    log_skipped_region(region, _SKIP_CONTEXT, error)
-
-
-def _log_summary(deleted: Sequence[str], *, dry_run: bool) -> None:
-    items = list(deleted)
-    if not dry_run:
-        logging.warning(f"number of AWS Elastic IPs deleted: {len(items)}")
-        logging.warning(f"List of AWS Elastic IPs deleted: {items}")
-    else:
-        logging.warning(
-            f"List of AWS Elastic IPs (Total: {len(items)}) which will be deleted: {items}"
-        )
+def log_summary(deleted: Sequence[str], *, dry_run: bool) -> None:
+    """The summary lines `main` logs once all regions are done."""
+    log_deleted_summary("Elastic IPs", deleted, dry_run=dry_run)
 
 
 def _pair(tag: Mapping[str, Any], spec: TagSpec | None) -> dict[str, Any]:
@@ -119,27 +68,24 @@ class ElasticIpCleaner:
                 client = self._client_factory(region)
                 region_plan = self.plan_region(client, region)
             except CONNECTIVITY_ERRORS as e:
-                _skip_region(region, e)
+                skip_region(region, SKIP_CONTEXT, e)
                 continue
             candidates.extend(region_plan.candidates)
             skipped.extend(region_plan.skipped)
         if context.dry_run:
-            _log_summary([c.id for c in candidates], dry_run=True)
+            log_summary([c.id for c in candidates], dry_run=True)
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
 
     def apply(self, plan: Plan, context: RunContext) -> Result:
         """Release the planned addresses, region by region (nothing in a dry run)."""
-        by_region: dict[str, list[Candidate]] = {}
-        for candidate in plan.candidates:
-            by_region.setdefault(candidate.region, []).append(candidate)
         deleted: list[str] = []
-        for region, items in by_region.items():
+        for region, items in group_by_region(plan.candidates).items():
             try:
                 client = self._client_factory(region)
                 deleted.extend(self.apply_region(client, items, dry_run=context.dry_run))
             except CONNECTIVITY_ERRORS as e:
-                _skip_region(region, e)
-        _log_summary(deleted, dry_run=context.dry_run)
+                skip_region(region, SKIP_CONTEXT, e)
+        log_summary(deleted, dry_run=context.dry_run)
         return Result(succeeded=tuple(deleted))
 
     def plan_region(self, client: ElasticIpClient, region: str) -> Plan:
@@ -224,78 +170,9 @@ def build_elastic_ip_cleaner(context: RunContext) -> Cleaner:
     """Registry factory. Options: `filter_tags`, `exception_tags` and `notags` (dicts)."""
     options = context.options
     return ElasticIpCleaner(
-        client_factory=_boto3_client,
-        list_regions=_all_regions,
+        client_factory=boto3_client,
+        list_regions=ec2_regions,
         filter_tags=options.get("filter_tags"),
         exception_tags=options.get("exception_tags"),
         notags=options.get("notags"),
     )
-
-
-class ElasticIPs(Service):
-    """Legacy entry point used by `crc.py`: releases unassociated Elastic IPs that match
-    `filter_tags` and are not in `exception_tags`. In dry run it only lists them.
-
-    Attributes: `deleted_ips` (public IPs released, or listed in a dry run), `filter_tags`,
-    `exception_tags`, `notags`, `dry_run`. `get_deleted` and `count` read the result.
-    """
-
-    service_name = _SERVICE_NAME
-    default_region_name = _DEFAULT_REGION
-
-    def __init__(
-        self,
-        dry_run: bool,
-        filter_tags: TagSpec | None,
-        exception_tags: TagSpec | None,
-        notags: TagSpec | None,
-        runtime: ElasticIpRuntime | None = None,
-    ) -> None:
-        super().__init__()
-        self.deleted_ips: list[str] = []
-        self.dry_run = dry_run
-        self.filter_tags = filter_tags
-        self.exception_tags = exception_tags
-        self.notags = notags
-        self._runtime = runtime or ElasticIpRuntime()
-
-    @property
-    def get_deleted(self) -> list[str]:
-        """Public IPs released (listed in a dry run)."""
-        return self.deleted_ips
-
-    @property
-    def count(self) -> int:
-        """Number of Elastic IPs released (listed in a dry run); logs the count."""
-        count = len(self.deleted_ips)
-        logging.info(f"count of items in deleted_ips: {count}")
-        return count
-
-    def _cleaner(self) -> ElasticIpCleaner:
-        runtime = self._runtime
-        return ElasticIpCleaner(
-            runtime.client_factory,
-            runtime.list_regions,
-            self.filter_tags,
-            self.exception_tags,
-            self.notags,
-        )
-
-    def _should_skip_instance(self, tags: Sequence[Mapping[str, Any]]) -> bool:
-        return self._cleaner().should_skip(tags)
-
-    def delete(self) -> None:
-        """Release (or, in a dry run, only list) the matching Elastic IPs of every region."""
-        runtime = self._runtime
-        cleaner = self._cleaner()
-        for region in runtime.list_regions():
-            try:
-                client = runtime.client_factory(region)
-                region_plan = cleaner.plan_region(client, region)
-                released = cleaner.apply_region(
-                    client, region_plan.candidates, dry_run=self.dry_run
-                )
-                self.deleted_ips.extend(released)
-            except CONNECTIVITY_ERRORS as e:
-                _skip_region(region, e)
-        _log_summary(self.deleted_ips, dry_run=self.dry_run)
