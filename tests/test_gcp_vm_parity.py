@@ -744,9 +744,9 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
     ("age-error-on-wrong-state-ignored", lambda o: o.error is None and o.deleted == []),
     ("custom-age-keeps-young", lambda o: o.deleted == []),
     ("custom-age-shortens", lambda o: o.deleted == ["d"]),
-    ("custom-age-empty-falls-back", lambda o: o.deleted == ["d"]),
-    ("custom-age-unparseable-falls-back", lambda o: o.deleted == ["d"]),
-    ("custom-age-zero-falls-back-to-default", lambda o: o.deleted == ["d"]),
+    ("custom-age-empty-falls-back", lambda o: o.deleted == []),
+    ("custom-age-unparseable-falls-back", lambda o: o.deleted == []),
+    ("custom-age-zero-falls-back-to-default", lambda o: o.deleted == []),
     ("filter-all-keys", lambda o: o.deleted == ["a"]),
     ("filter-one-key-missing-fails", lambda o: o.deleted == []),
     ("filter-empty-values-means-key-present", lambda o: o.deleted == ["a", "b", "d"]),
@@ -798,6 +798,15 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
 ]
 
 
+BUG_004_FIXED = frozenset(
+    [
+        "custom-age-empty-falls-back",
+        "custom-age-unparseable-falls-back",
+        "custom-age-zero-falls-back-to-default",
+    ]
+)
+
+
 @pytest.mark.parametrize(("case_id", "check"), QUIRKS, ids=[q[0] for q in QUIRKS])
 def test_quirk_is_preserved(
     case_id: str,
@@ -810,7 +819,11 @@ def test_quirk_is_preserved(
     case = _find(case_id)
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run(_new, case, monkeypatch, caplog, capsys)
-    assert check(old), "oracle no longer shows the quirk"
+    # BUG-004/BUG-016: the oracle class inherits the live crc.service.Service, so it cannot
+    # show the old custom-age-tag behaviour here; tests/test_crc_service_parity.py pins it
+    # against the frozen crc_service oracle. Fixed cases assert the new outcome only.
+    if case_id not in BUG_004_FIXED:
+        assert check(old), "oracle no longer shows the quirk"
     assert check(new)
 
 

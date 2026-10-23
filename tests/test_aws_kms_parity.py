@@ -738,7 +738,7 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
     ),
     ("age-tag-found-via-key-entry-keeps", lambda o: o.deleted == []),
     ("age-tag-found-via-key-entry-short-takes", lambda o: o.deleted == ["k1"]),
-    ("age-tag-unparseable-falls-back-to-age", lambda o: o.deleted == ["k1"]),
+    ("age-tag-unparseable-falls-back-to-age", lambda o: o.deleted == []),
     ("age-empty-matches-everything", lambda o: o.deleted == ["k1"]),
     ("age-none-matches-everything", lambda o: o.deleted == ["k1"]),
     ("max-age-shortens-threshold", lambda o: o.deleted == ["k1"]),
@@ -769,6 +769,9 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
 ]
 
 
+BUG_004_FIXED = frozenset(["age-tag-unparseable-falls-back-to-age"])
+
+
 @pytest.mark.parametrize(("case_id", "check"), QUIRKS, ids=[q[0] for q in QUIRKS])
 def test_quirk_is_preserved(
     case_id: str,
@@ -782,7 +785,11 @@ def test_quirk_is_preserved(
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run(_new, case, monkeypatch, caplog, capsys)
     cleaner = _run_cleaner(case, monkeypatch, caplog, capsys)
-    assert check(old), "oracle no longer shows the quirk"
+    # BUG-004/BUG-016: the oracle class inherits the live crc.service.Service, so it cannot
+    # show the old custom-age-tag behaviour here; tests/test_crc_service_parity.py pins it
+    # against the frozen crc_service oracle. Fixed cases assert the new outcome only.
+    if case_id not in BUG_004_FIXED:
+        assert check(old), "oracle no longer shows the quirk"
     assert check(new)
     assert check(cleaner)
 

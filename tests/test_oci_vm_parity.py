@@ -565,6 +565,15 @@ PARAMS = [(case, op) for case in CASES for op in OPERATIONS]
 PARAM_IDS = [f"{case.id}-{op}" for case, op in PARAMS]
 
 
+BUG_004_FIXED = frozenset(
+    [
+        "custom-age-tag-empty-falls-back-to-age",
+        "custom-age-tag-unparseable-falls-back-to-age",
+        "custom-age-tag-zero-days-falls-back-to-age",
+    ]
+)
+
+
 @pytest.mark.parametrize(("case", "operation"), PARAMS, ids=PARAM_IDS)
 def test_adapter_matches_main(
     case: Case,
@@ -727,9 +736,9 @@ QUIRKS: Sequence[tuple[str, str, Callable[[Outcome], bool]]] = [
     ("max-age-shortens", "delete", lambda o: o.acted == ["a"]),
     ("max-age-empty-dict", "delete", lambda o: o.acted == []),
     ("max-age-not-a-dict", "delete", lambda o: o.error is not None),
-    ("custom-age-tag-unparseable-falls-back-to-age", "delete", lambda o: o.acted == ["a"]),
-    ("custom-age-tag-empty-falls-back-to-age", "delete", lambda o: o.acted == ["a"]),
-    ("custom-age-tag-zero-days-falls-back-to-age", "delete", lambda o: o.acted == ["a"]),
+    ("custom-age-tag-unparseable-falls-back-to-age", "delete", lambda o: o.acted == []),
+    ("custom-age-tag-empty-falls-back-to-age", "delete", lambda o: o.acted == []),
+    ("custom-age-tag-zero-days-falls-back-to-age", "delete", lambda o: o.acted == []),
     ("untagged-with-filter-skipped", "delete", lambda o: o.acted == []),
     ("untagged-without-filter-included", "delete", lambda o: o.acted == ["a", "b"]),
     ("filter-all-keys", "delete", lambda o: o.acted == ["a"]),
@@ -777,7 +786,11 @@ def test_quirk_is_preserved(
     case = next(c for c in CASES if c.id == case_id)
     old = _run(_legacy, case, operation, monkeypatch, caplog, capsys)
     new = _run(_new, case, operation, monkeypatch, caplog, capsys)
-    assert check(old), "oracle no longer shows the quirk"
+    # BUG-004/BUG-016: the oracle class inherits the live crc.service.Service, so it cannot
+    # show the old custom-age-tag behaviour here; tests/test_crc_service_parity.py pins it
+    # against the frozen crc_service oracle. Fixed cases assert the new outcome only.
+    if case_id not in BUG_004_FIXED:
+        assert check(old), "oracle no longer shows the quirk"
     assert check(new)
 
 
