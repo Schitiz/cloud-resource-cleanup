@@ -26,6 +26,13 @@ from tests.log_fix_aws_compute import RULES
 
 FIXED_BUGS = {"BUG-356"}
 
+# Cases whose inputs trigger a fixed bug: id -> (bug id, volume ids still deleted). The oracle
+# (main) deletes more; `_check_divergence` pins the new outcome.
+DIVERGING: Mapping[str, tuple[str, Sequence[str]]] = {
+    "yb-task-key-variants": ("BUG-282", ["f"]),
+    "detach-age-and-age": ("BUG-283", ["a"]),
+}
+
 ORACLE = Path(__file__).parent / "legacy" / "aws_disk.txt"
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=datetime.UTC)
 DELETE_PREFIXES = ("Deleted volume", "Failed to delete volume")
@@ -954,6 +961,9 @@ def test_matches_main(
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run(_new, case, monkeypatch, caplog, capsys)
     old = dataclasses.replace(old, logs=expected_logs(old.logs, FIXED_BUGS, rules=RULES))
+    if case.id in DIVERGING:
+        _check_divergence(case, old, new)
+        return
     assert new.calls == old.calls
     assert new.error == old.error
     assert new.deleted == old.deleted
@@ -971,6 +981,8 @@ def test_skip_lines_are_debug_only_in_new_code(
     """BUG-356 (LOG-AWS1): every INFO "Skipping volume ..." line of the oracle is DEBUG now."""
     differing = 0
     for case in CASES:
+        if case.id in DIVERGING:
+            continue
         old = _run(_legacy, case, monkeypatch, caplog, capsys)
         new = _run(_new, case, monkeypatch, caplog, capsys)
         assert new.logs == expected_logs(old.logs, FIXED_BUGS, rules=RULES), case.id
@@ -1005,6 +1017,9 @@ def test_cleaner_protocol_matches_main(
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run_cleaner(case, monkeypatch, caplog, capsys)
     old = dataclasses.replace(old, logs=expected_logs(old.logs, FIXED_BUGS, rules=RULES))
+    if case.id in DIVERGING:
+        _check_divergence(case, old, new)
+        return
     assert new.error == old.error
     assert new.stdout == old.stdout
     if new.error is None:
@@ -1051,6 +1066,27 @@ def test_cleaner_error_path_never_deletes_after_listing_error(
 
 def _flatten(outcome: Outcome) -> str:
     return "\n".join(r[2] for r in outcome.logs)
+
+
+def _delete_ids(calls: Sequence[tuple[Any, ...]]) -> list[str]:
+    return [str(c[-1]) for c in calls if _is_delete_call(c)]
+
+
+def _check_divergence(case: Case, old: Outcome, new: Outcome) -> None:
+    """The oracle shows the bug, the new code keeps the volumes the bug deleted and nothing
+    else changes (errors, count of regions, kept volumes still deleted)."""
+    bug, kept_ids = DIVERGING[case.id]
+    assert new.error == old.error is None, bug
+    old_ids = _delete_ids(old.calls)
+    assert len(old_ids) > len(kept_ids), f"oracle no longer shows {bug}"
+    assert _delete_ids(new.calls) == [i for i in old_ids if i in kept_ids], bug
+    assert len(new.deleted) == len(kept_ids) < len(old.deleted), bug
+    assert set(new.deleted) < set(old.deleted), bug
+    removed = [i for i in old_ids if i not in kept_ids]
+    flat = _flatten(new)
+    for volume_id in removed:
+        assert f"Skipping volume {volume_id}: " in flat, bug
+        assert f"Deleted volume us-west-2/{volume_id}" not in flat, bug
 
 
 QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
@@ -1101,12 +1137,6 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
     (
         "yb-task-sensitive-tokens",
         lambda o: o.deleted == ["us-west-2/v5 yb_task=productive", "us-west-2/v6 yb_task=vpnx"],
-    ),
-    (
-        "yb-task-key-variants",
-        lambda o: (
-            o.deleted == ["us-west-2/d yb_task=dev", "us-west-2/e", "us-west-2/f yb_task=dev"]
-        ),
     ),
     ("yb-task-non-string", lambda o: o.error is None and o.deleted == []),
     ("kubernetes-skipped", lambda o: o.deleted == ["us-west-2/e"]),
