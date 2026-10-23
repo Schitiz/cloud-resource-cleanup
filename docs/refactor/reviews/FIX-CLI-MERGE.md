@@ -71,3 +71,36 @@ Ran `pip install -r requirements.txt -r requirements-dev.txt && make check`:
 - `pytest -q`: **42513 passed** (42479 at `2bf120a`, +34; 42444 at `182466d`, +69)
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Reviewed `git diff 2bf120a..HEAD` independently, and checked round 1's fix (the added `## Owner decision` section). It is accurate and matches `docs/refactor/reviews/FIX-CLI-ROUTE.md` and `docs/refactor/reviews/FIX-CLI-ALL.md`.
+
+### Checks
+
+1. **Bugs fixed, with tests that fail on `2bf120a`.** I copied `tests/test_cli_merge_fix.py` and `tests/test_cli_route_fix.py` into a worktree at `2bf120a`: 28 failed, 8 passed. The 8 that pass are the unchanged baselines: the production commands, `--cloud aws --resource snapshot|vpc` as before, the two scan-path tests, and `--cloud all --resource nic` still failing closed. On `HEAD` all 36 pass.
+   - BUG-009 and BUG-084 (routing): `crc/cli/dispatch.py:197-198` puts `snapshot` and `vpc` in `SUPPORTED_CLOUDS` as `("aws",)`. An explicit non-AWS cloud raises `--resource <r> is AWS-only; use --cloud aws (got --cloud <c>)` from `validate_targets`. Under `--cloud all`, the azure, gcp and oci pairs come after the first unsupported pair and are all unsupported, so they are returned as skips. AWS runs once and no `CRC` is built for the skipped clouds.
+   - BUG-017 and BUG-018: unchanged from FIX-CLI-ALL. Adding the two resources does not change which pair is the first unsupported one. `vpc` is not in `RESOURCES`, `snapshot` is last, and `--resource all` needs `--cloud all`, where the disk breaker raises first.
+   - BUG-344: `inputs.check_scan_tag` (`crc/cli/inputs.py:148`) runs before `validate_targets` and `set_max_age` (`crc/cli/main.py:51-55`).
+2. **Direction rule.** Every change either raises earlier (before `MAX_AGE` is set, before any `CRC`, `Snapshot` or cleaner call) or skips non-AWS passes under `--cloud all`. Nothing is deleted, stopped or released that `main` kept. `tests/legacy/` is untouched. In `tests/test_cli_main_parity.py`, cases go to `expected_fixed()` only through `diverges()`, which tags BUG-009, BUG-084 or BUG-344, and to `diverging_outcome()` only for BUG-017 or BUG-018. All other cases still assert full equality on result, events, stdout, stderr, warnings and `MAX_AGE`. The `without_reset` change (empty stdout, original `MAX_AGE`) applies only to BUG-017 and BUG-018 error cases. There, the error now comes before `set_max_age`, so it stops earlier and is not a global loosening.
+3. **Production commands.** `--cloud aws --resource snapshot --age '{"days": 90}'` and `--cloud aws --resource vm --scan_tag autoclean=false --dry_run` are pinned in `tests/test_cli_merge_fix.py::test_production_commands_run_unchanged` and by the unmarked parity cases. `tests/test_cli_dispatch_fix.py` runs every supported single-cloud pair unchanged. The Jenkinsfile is not in this repo, and no single-cloud production pair is unsupported.
+4. **Fail-closed before SDK mutation.** `validate_targets` runs in `main()` after the clients are built (construction only) and before `set_max_age`, `run_scan` and `run_dispatch`. `run_dispatch` calls it again for direct callers. The read-only `--scan_tag` path skips the check, and it always exits with code 0 before `run_dispatch`.
+5. **Guardrails.** `git diff 2bf120a..HEAD` touches none of the locked safety tests, `tests/archtest/**`, `tests/legacy/**`, `docs/refactor/PLAN.md`, `STATUS.md`, `BUGS.md`, `CLEANUP_SAFETY.md`, `AGENTS.md`, `ARCHITECTURE.md` or `.cursor/**`.
+6. **README.** `crc/cli/README.md` has one "One pair rule" Safety Invariant and the BUG-344 invariant. The Known-quirks line keeps only the open BUG-009 and BUG-084 clauses. Public API lists `check_scan_tag` and no longer lists the removed `check_aws_only_resources`. ARCH-002 passes.
+7. **Owner decision.** The unfixed BUG-009 and BUG-084 clauses (hard-coded `age_days=90`, missing Slack and Influx notifications) and the `build_selection` follow-up are explained.
+
+### Findings
+
+- **BLOCKING:** none.
+- **NIT (not fixed):** `tests/test_core_selection.py:170` `run_main_after_fix` uses `pytest.raises(ValueError)` without `match`. ROUTE's dropped `assert_aws_only_fix` matched `--resource <r> is AWS-only`. The message is still asserted for every single-cloud AWS-only pair in `tests/test_cli_route_fix.py` and `tests/test_cli_merge_fix.py`, so no coverage is lost. A later rung could pass `match=re.escape(dispatch._unsupported_message(*bad[0]))`.
+- **NIT (not fixed):** the Coding summary's interacting cases could also say that the skip-log reason changed from ROUTE's `aws_only_resource` to `unsupported_cloud_resource`. Case 1 already says this, so no edit is needed.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt && make check`:
+- `ruff check .`: All checks passed!
+- `mypy`: Success: no issues found in 231 source files
+- `lint-imports`: Contracts: 5 kept, 0 broken
+- `pytest -q`: **42513 passed** (same as round 1; 42479 at `2bf120a`, +34)
+
+ROUND 2 VERDICT: APPROVE
