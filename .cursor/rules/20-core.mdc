@@ -7,10 +7,11 @@ alwaysApply: false
 # Core, notifiers and CLI
 
 - `crc/core` policy and age code is pure: plain data in, decision out, no I/O, and time only
-  through the injected `now`. Fail closed on unparseable input.
+  through the injected `now` (existing exception: `is_old` reads `MAX_AGE`; add no new env read).
+  Fail closed on unparseable input.
 - Notifiers consume the `Report` only and hold no cloud logic.
-- `crc/cli` is the only layer that reads env, prints or exits; it parses and validates flag
-  values before any cloud call.
+- New env reads, prints and exits go in `crc/cli` (other layers: ARCH-003); it parses and
+  validates flag values before any cloud call.
 - A CLI flag is an external contract (Jenkins jobs in `cloud-resource-cleanup-triggers`): never
   rename, remove, re-type or change a default; a new flag is optional. See the flag workflow in
   `AGENTS.md`.

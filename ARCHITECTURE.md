@@ -24,7 +24,7 @@ python crc.py <flags>
 
 | Package | Role |
 |---------|------|
-| `crc/cli` | Flags, validation, dispatch, the bridge to the engine, route tables. Only layer that reads env, prints, exits |
+| `crc/cli` | Flags, validation, dispatch, the bridge to the engine, route tables. The layer that reads env, prints and exits (what other layers may not do: ARCH-003) |
 | `crc/core` | Engine, registry, `Cleaner` protocol, report model, run log, pure policy and age code. Imports no cloud package or SDK |
 | `crc/<cloud>` | `aws`, `azu`, `gcp`, `oci`: one package per resource kind, built on `crc.core`; clouds never import each other |
 | `crc/notify` | Slack and InfluxDB sinks that consume only the `Report` |
@@ -38,7 +38,7 @@ before moving code between layers.
 `RunContext(dry_run, operation, options, now)`, a one-pair `Selection`, then `engine.run` with the
 notifiers from `build_notifiers` (Slack when a client is set, then Influx when one is set; none for
 `Route.notify=False`). A route table per cloud (`crc/cli/routes/<cloud>.py`) maps a kind to a
-`Route(options_builder, notify, precheck)`. The options builder turns parsed flags into the
+`Route(options, notify, precheck)`. The `options` builder turns parsed flags into the
 `context.options` keys that the cleaner factory reads; values stay raw (`None` stays `None`).
 `bridge.build_registry` and `build_notifiers` are looked up at call time so tests can patch them
 (`tests/helpers_cli_routes.py`). A kind in no route table still runs through the legacy
@@ -86,7 +86,8 @@ Types are frozen dataclasses in `crc/core/cleaner.py`: `Candidate`, `Skipped`, `
 
 Pure functions on plain data, no I/O: `crc/core/policy*.py` (tags, `notags`, exception tags, name
 regex, managed-resource checks, age) and `crc/core/age*.py` (parse `--age`, `--detach_age`,
-`--max_age`, custom age tags, `is_old`). Fail closed: an unreadable custom age tag or bad age keeps
+`--max_age`, custom age tags, `is_old`). One exception: `is_old` reads the `MAX_AGE` environment
+variable that `main` sets from `--max_age`. Fail closed: an unreadable custom age tag or bad age keeps
 the resource and records a skip. Cleaners fetch and normalise; policy decides. See
 `crc/core/README.md` for the function list.
 

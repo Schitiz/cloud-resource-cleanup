@@ -152,3 +152,88 @@ No code bugs fixed. Doc lies and stale wording noticed (not fixed; owners of tho
 6. **Full `make check`:** `43095 passed in 52.59s` (total `make check` wall time `58.6s`; `ARCH-008: 43095 tests, floor 43078`).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+### Round 1 fixes checked
+
+- The "refactor history" wording that Round 1 removed is gone. The Round 1 `## Links to fix` and
+  `## New bugs` inventories are accurate as far as I sampled (`crc/core/engine.py:1,33`,
+  `crc/core/selection.py:1-5`, `crc/cli/routes/__init__.py`).
+- Round 1 missed two doc lies (below). Its "Only allowed files changed" is true in spirit only:
+  `.claude/skills/crc-maintain` (symlink retarget, needed so the link does not dangle) and the
+  existing test `tests/archtest/test_arch002_readmes.py` (needed because ARCH-002 was relaxed) are
+  outside the listed paths. Both are justified; I accept them.
+
+### Findings and fixes (Round 2)
+
+1. Doc lie, fixed: `ARCHITECTURE.md` layer table said `crc/cli` is the "only layer that reads env,
+   prints, exits", and `.cursor/rules/20-core.mdc` said the same. False today: `crc/core/age.py:49`
+   reads `MAX_AGE`, `crc/notify/slack_owners.py:32,48,68` prints, `crc/azu/_base.py:27-31` reads
+   `os.environ`. ARCH-003 is the real limit. Reworded both to "the layer that reads env, prints and
+   exits (other layers: ARCH-003)" / "new env reads, prints and exits go in `crc/cli`".
+2. Doc lie, fixed: `ARCHITECTURE.md` "Core policy and age" said `crc/core/age*.py` is pure, with no I/O.
+   `is_old` reads `MAX_AGE`, which `crc/cli/clients.py:33-37` `set_max_age` exports. Added that one
+   exception to `ARCHITECTURE.md` and `20-core.mdc`.
+3. Inaccuracy, fixed: `ARCHITECTURE.md` named the route fields `Route(options_builder, ...)`. The
+   field is `options` (`crc/cli/routes/__init__.py`).
+4. Wave history, fixed: in `tests/archtest/README.md`, ARCH-003 said "its env ban waits for Wave B".
+   It now says "no env ban: `crc/core/age.py` reads `MAX_AGE`".
+5. Not fixed, minor: ARCH-011 recognises only inline links `[t](target)`. It does not check
+   reference-style links (`[t]: target`), `<angle>` targets or targets that contain `)`. None are
+   used in the scoped docs today. Extend the check if one is added.
+6. Not fixed, informational: `make check` here took 76 s wall time (pytest 55.5 s, with `-n auto`).
+   `AGENTS.md` says "about 40 s", which matches the contract's figure. The time depends on the
+   machine.
+
+### Gates
+
+1. New-agent read: with `AGENTS.md` plus `ARCHITECTURE.md` (add a cleaner) or `fix-bug.md` (fix a
+   bug), an agent knows which files to touch and which checks to run. I checked 12 statements
+   against the code. These were true:
+   - `Makefile` targets and `SLOW_PARITY` (three files)
+   - `bridge.py` `route_for` / `run_routed` / `build_notifiers` (Slack then Influx, `notify=False`)
+   - `dispatch.py:186-189` route before `HANDLERS`
+   - `routes/aws.py` imports `crc.aws.keypairs` with `noqa: F401`
+   - `engine.run`: plan, then apply unless dry run, `Report.from_plan` / `from_result`, `fail_open`, `KIND_LABELS`
+   - `registry` `DEFAULT_REGISTRY`, `DuplicateCleanerError`, `UnknownCleanerError`
+   - `Operation` delete/stop
+   - `RESOURCES` in `constants.py`
+   - pair rules in `pairs.py`
+   - labels in `report.py`
+   - `_add_*_args` in `args.py` / `args_run.py`
+   - `DEFAULTS_EXPECTED` and the oracle in `test_cli_args_parity.py`
+   - `scan.py` forces dry run and exits 0
+   - `main()` calls `set_max_age`
+   - `literal_eval` flags
+   - the import-linter contracts
+
+   Three statements were false or inaccurate; they are findings 1 to 3 above.
+2. `grep -rni "rung\|refactor\|R0a\|R4"` over the active docs matches only the preserved
+   `docs/refactor/BUGS.md` and `docs/refactor/bugs/` paths.
+3. SAF IDs before and after are identical (diff of `grep -o SAF-[0-9]*`). The only `CLEANUP_SAFETY.md`
+   edits are the two wording changes. `docs/refactor/BUGS.md` and `docs/refactor/bugs/` have no diff.
+4. ARCH-010, ARCH-011 and the ARCH-002 relaxation each have a rule ID, a `REMEDIATION:` paragraph and
+   `tmp_path` self-tests:
+   - ARCH-010 tests over the limit, at the limit, and files with no budget.
+   - ARCH-011 tests a missing target, resolution relative to the document, `.cursor`, anchors,
+     external links, code, fences and root-relative links.
+   - ARCH-002 tests directories without code and code under `docs/`.
+
+   The checks are not brittle: the limits are constants pinned by a test, and the link check uses
+   the filesystem rather than a list. The 38 archtest tests for these checks pass. Doc sizes:
+   `AGENTS.md` 105/120, rule files 15-19/40, `SKILL.md` 52/150.
+5. Scope: allowed files only, plus the two justified extras above. The archive moves are git
+   renames (`R100`). `CLAUDE.md` is still a symlink to `AGENTS.md`. All links resolve (ARCH-011 green).
+6. `make check` (after `pip install -r requirements.txt -r requirements-dev.txt`) passes:
+   `43095 passed in 55.52s`, 76 s wall time, ARCH-008 43095 against a floor of 43078. It is green
+   again after the Round 2 edits: 43095 tests, 56 s wall time.
+
+## New bugs (Round 2)
+
+- `crc/azu/_base.py:27-31` reads `os.environ` in a cloud package (legacy adapter base; ARCH-003 exempts
+  it through the ratchet). Move the env reads to `crc/cli` when Azure kinds move to the engine.
+- `crc/notify/slack_owners.py:32,48,68` uses `print` instead of the logger. ARCH-003 does not ban
+  `print` in `crc/notify`.
+
+ROUND 2 VERDICT: APPROVE
