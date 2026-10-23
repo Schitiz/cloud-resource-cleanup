@@ -330,15 +330,30 @@ def test_ping_failure_modes_are_the_documented_quirks(legacy: ModuleType) -> Non
 
 
 @pytest.mark.parametrize(
-    ("operated", "expected"),
+    ("operated", "expected", "routed_expected"),
     [
-        ({"alice": ["v-1"], "bob": None}, ("TypeError", "object of type 'NoneType' has no len()")),
-        ({"alice": ["v-1"], "bob": 3}, ("TypeError", "object of type 'int' has no len()")),
-        (["v-1"], ("AttributeError", "'list' object has no attribute 'keys'")),
+        (
+            {"alice": ["v-1"], "bob": None},
+            ("TypeError", "object of type 'NoneType' has no len()"),
+            ("TypeError", "'NoneType' object is not iterable"),
+        ),
+        (
+            {"alice": ["v-1"], "bob": 3},
+            ("TypeError", "object of type 'int' has no len()"),
+            ("TypeError", "'int' object is not iterable"),
+        ),
+        (
+            ["v-1"],
+            ("AttributeError", "'list' object has no attribute 'keys'"),
+            ("AttributeError", "'list' object has no attribute 'items'"),
+        ),
     ],
 )
 def test_ping_on_slack_bad_input_matches_legacy(
-    legacy: ModuleType, operated: Any, expected: tuple[str, str]
+    legacy: ModuleType,
+    operated: Any,
+    expected: tuple[str, str],
+    routed_expected: tuple[str, str],
 ) -> None:
     """Oracle: groups are fetched, then every value is measured, before any owner is pinged.
 
@@ -355,19 +370,18 @@ def test_ping_on_slack_bad_input_matches_legacy(
     routed_calls, _, routed_out, routed_error = routed_run(
         "aws", "disk", by_owner=operated, setup=setup, influx=False
     )
-    assert routed_error is not None
-    assert routed_error[0] in {"TypeError", "AttributeError"}
+    assert routed_error == routed_expected
     assert routed_calls == []
     assert routed_out == ""
 
 
 def test_slack_and_user_lookups_match_legacy(legacy: ModuleType) -> None:
     for setup in (lookup_setup("U1", GROUPS, False, False), lookup_setup(None, None, False, False)):
-        old = run(legacy, lambda crc: crc.slack_lookup_user_by_email("a@b.c"), setup)
-        new = routed_call(lambda n, _crc: n["slack"].lookup_user_by_email("a@b.c"), setup)
+        old = run(legacy, lambda crc: print(crc.slack_lookup_user_by_email("a@b.c")), setup)
+        new = routed_call(lambda n, _crc: print(n["slack"].lookup_user_by_email("a@b.c")), setup)
         assert new == old
-        old = run(legacy, lambda crc: crc.get_user_groups_list(), setup)
-        new = routed_call(lambda n, _crc: n["slack"].user_groups(), setup)
+        old = run(legacy, lambda crc: print(crc.get_user_groups_list()), setup)
+        new = routed_call(lambda n, _crc: print(n["slack"].user_groups()), setup)
         assert new == old
 
 
@@ -683,6 +697,18 @@ def test_engine_with_notifiers_matches_legacy_section_and_owner_flows(
     with contextlib.redirect_stdout(stdout):
         run_engine(Selection((("azure", "vm"),)), ctx, registry, notifiers)
     assert (slack.mock_calls, normalise(influx), stdout.getvalue(), None) == old
+    assert (
+        routed_run(
+            "azure",
+            "vm",
+            dry_run=dry_run,
+            succeeded=["vm-1"],
+            related={NIC: ["nic-1"]},
+            setup=setup,
+            suffix="ci",
+        )
+        == old
+    )
 
 
 @pytest.mark.parametrize(
@@ -739,3 +765,4 @@ def test_engine_with_notifiers_matches_legacy_on_disk_owner_pings(
         except Exception as e:
             error = (type(e).__name__, str(e))
     assert (slack.mock_calls, normalise(influx), stdout.getvalue(), error) == old
+    assert routed_run("gcp", "disk", by_owner=OWNERS, setup=setup) == old

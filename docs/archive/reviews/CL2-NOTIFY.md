@@ -41,3 +41,35 @@ notify code. No production file, oracle, locked test or other test file was edit
 ## New bugs
 
 None.
+
+## Round 1 (Argon)
+
+Scope reviewed: `git diff 2bd8e67..HEAD` on branch `cl2/notify` (lane `CL2-NOTIFY`).
+
+### Findings & fixes made in review
+
+1. **Tightened assertions in `tests/test_notify_parity.py`**:
+   - `test_ping_on_slack_bad_input_matches_legacy`: asserted the exact `routed_expected` `(type_name, message)` tuple per parametrized bad input (`TypeError: 'NoneType' object is not iterable`, `TypeError: 'int' object is not iterable`, `AttributeError: 'list' object has no attribute 'items'`) instead of `routed_error[0] in {"TypeError", "AttributeError"}`.
+   - `test_slack_and_user_lookups_match_legacy`: wrapped both the oracle (`crc.slack_lookup_user_by_email` / `crc.get_user_groups_list`) and bridge-notifier (`n["slack"].lookup_user_by_email` / `n["slack"].user_groups`) calls in `print(...)` so the returned lookup values are also compared via `stdout`, not only the mock calls and error stdout.
+   - `test_engine_with_notifiers_matches_legacy_section_and_owner_flows` and `test_engine_with_notifiers_matches_legacy_on_disk_owner_pings`: added `routed_run(...) == old` assertions alongside the direct `(SlackNotifier, InfluxNotifier)` engine wiring assertions.
+
+### Checklist verification
+
+1. **No legacy CLI imports or calls**: Grepped `tests/test_notify_parity.py` and `tests/helpers_cl2_notify.py`. Neither file imports `crc.cli.resource_ops`, `crc.cli.vm_ops`, `crc.cli.notify`, `crc.cli.adapter_args`, `crc.cli.report_calls`, or `tests.helpers_legacy_handlers`, and neither calls any `delete_*`, `stop_*`, `notify_*`, `ping_on_slack`, `write_influxdb`, `slack_lookup_user_by_email`, `get_user_groups_list`, or `get_msg` method on the current `crc.cli.runner.CRC` (`CRC` is constructed only as the context object passed to `crc.cli.bridge.build_notifiers`).
+2. **Parity comparisons & case count**: All 995 test cases in `tests/test_notify_parity.py` are preserved and run the legacy side against `tests.helpers_oracle.load_legacy_crc()`. Every routable Slack and Influx case is compared against `crc.cli.bridge.build_notifiers` (`SlackNotifier` / `InfluxNotifier`) driven through `crc.core.engine.run` (`routed_run`) or direct notifier calls (`routed_call`), and unroutable inputs (`disk-tuple`, `disk-none`, `vm-without-ids`, `get_msg(..., None)`, non-iterable `by_owner` values) are asserted against frozen expected outcomes. Documented quirks (`BUG-028`, `BUG-030`, `BUG-031`, `BUG-033`, `BUG-034`, `BUG-041`, `BUG-042`) remain explicitly verified.
+3. **Mutation check (non-vacuous)**: Tested two local mutations (reverted without committing):
+   - Mutated `crc/core/report.py::get_msg` Slack message text -> 343 of 995 tests in `tests/test_notify_parity.py` failed immediately.
+   - Mutated `crc/notify/influx.py::InfluxNotifier._emit` tag `"resource"` -> 113 of 995 tests in `tests/test_notify_parity.py` failed immediately.
+4. **Scope & protected files**: Only `tests/test_notify_parity.py`, `tests/helpers_cl2_notify.py`, and `docs/archive/reviews/CL2-NOTIFY.md` are modified (`git diff 2bd8e67..HEAD`). No production code (`crc/**`), other tests, hash-locked safety tests, `tests/legacy/*.txt`, or `tests/archtest/**` files were touched.
+
+### Gates & test count
+
+Ran `pip install -r requirements.txt -r requirements-dev.txt` followed by `make check`:
+
+- `python3 -m ruff check .`: passed
+- `python3 -m mypy`: passed (365 source files)
+- `lint-imports`: passed (5 contracts kept, 0 broken)
+- `python3 -m pytest -q -n auto`: **44400 passed in 57.16s** (`tests/test_notify_parity.py`: 995 passed in 2.84s; `make check` total 78.0s)
+- `python3 -m tests.archtest.test_count check`: `ARCH-008: 44400 tests, floor 44400`
+
+VERDICT: APPROVE
