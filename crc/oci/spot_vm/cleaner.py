@@ -8,6 +8,7 @@ the leftover volumes); `apply()` terminates each instance, waits for `TERMINATED
 leftover volumes, in the order of the original implementation.
 """
 
+import dataclasses
 import logging
 from collections.abc import Sequence
 
@@ -58,7 +59,13 @@ class SpotVmCleaner:
         list_regions: RegionLister,
         settings: SpotVmSettings,
         pager: Pager = list_all,
+        *,
+        engine: bool = False,
     ) -> None:
+        """`engine` is True for the cleaner `crc.core.engine` builds: a dry-run `plan()` then
+        logs the ACTION lines per region and names its candidates by display name, the names
+        the legacy adapter reported (the engine never calls `apply()` in a dry run)."""
+        self._engine = engine
         self._clients_factory = clients_factory
         self._list_regions = list_regions
         self._settings = settings
@@ -85,15 +92,16 @@ class SpotVmCleaner:
                     if isinstance(decision, Skipped):
                         skipped.append(decision)
                     else:
-                        candidates.append(
-                            with_checked_volumes(
-                                clients,
-                                decision,
-                                self._settings,
-                                self._pager,
-                                dry_run=context.dry_run,
-                            )
+                        checked = with_checked_volumes(
+                            clients,
+                            decision,
+                            self._settings,
+                            self._pager,
+                            dry_run=context.dry_run,
                         )
+                        candidates.append(checked)
+                        if context.dry_run and self._engine:
+                            record_dry_run(Plan(candidates=(checked,)))
                 except Exception as e:
                     log_instance_error(getattr(instance, "display_name", "?"), e)
                     _logger.record_failure(region, getattr(instance, "id", "?"), e)
@@ -101,6 +109,8 @@ class SpotVmCleaner:
         if context.dry_run:
             volumes = [v for c in candidates for v in c.extra["volumes"]]
             log_summary([c.name for c in candidates], volumes, dry_run=True)
+            if self._engine:
+                candidates = [dataclasses.replace(c, id=c.name) for c in candidates]
             return Plan(
                 candidates=tuple(candidates),
                 skipped=tuple(skipped),
@@ -114,7 +124,8 @@ class SpotVmCleaner:
         names = [c.name for c in plan.candidates]
         if context.dry_run:
             volumes = [v for c in plan.candidates for v in c.extra["volumes"]]
-            record_dry_run(plan)
+            if not self._engine:
+                record_dry_run(plan)
             return Result(succeeded=tuple(names), related={VOLUMES_LABEL: tuple(volumes)})
         done: list[str] = []
         deleted: list[str] = []
@@ -206,4 +217,4 @@ def build_spot_vm_cleaner(context: RunContext) -> Cleaner:
         age=core_age.require_positive_age(options.get("age")),
         custom_age_tag_key=options.get("custom_age_tag_key") or "",
     )
-    return SpotVmCleaner(clients_for(base), regions_of(base), settings)
+    return SpotVmCleaner(clients_for(base), regions_of(base), settings, engine=True)

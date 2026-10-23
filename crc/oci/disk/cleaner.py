@@ -6,6 +6,7 @@
 `apply()` calls `delete_volume` / `delete_boot_volume`. The legacy class `Disk` is in `adapter.py`.
 """
 
+import dataclasses
 import datetime
 import logging
 from collections.abc import Sequence
@@ -26,11 +27,10 @@ from crc.oci import _logger
 from crc.oci._base import Base
 from crc.oci._common import group_by_region
 from crc.oci.connectivity import CONNECTIVITY_ERRORS, log_skipped_region
+from crc.oci.disk import attachments
 from crc.oci.disk.api import ApiFactory, RegionLister, SdkVolume, VolumeApi, api_for, regions_of
-from crc.oci.disk.decide import in_use, skip_reason, sort_decisions
+from crc.oci.disk.decide import skip_reason, sort_decisions
 from crc.oci.disk.settings import (
-    ATTACHMENTS_CONTEXT,
-    BOOT_ATTACHMENTS_CONTEXT,
     IN_USE_ATTACHMENT_STATES,
     KIND_BOOT_DISK,
     KIND_DISK,
@@ -77,11 +77,18 @@ class DiskCleaner:
         api_factory: ApiFactory,
         list_regions: RegionLister,
         settings: DiskSettings,
+        *,
+        engine: bool = False,
     ) -> None:
+        """`engine` is True for the cleaner `crc.core.engine` builds: a dry-run `plan()` then
+        logs the ACTION lines per region and names its candidates by display name, the names
+        the legacy adapter reported (the engine never calls `apply()` in a dry run)."""
+        self._engine = engine
         self._api_factory = api_factory
         self._list_regions = list_regions
         self._settings = settings
         self._unknown_regions: set[str] = set()
+        self.partial_succeeded: list[str] = []
 
     def supports(self, operation: Operation) -> bool:
         return operation is Operation.DELETE
@@ -91,6 +98,7 @@ class DiskCleaner:
         candidates: list[Candidate] = []
         skipped: list[Skipped] = []
         self._unknown_regions = set()
+        self.partial_succeeded = []
         for region in self._list_regions():
             started = _logger.region_started()
             before = len(candidates)
@@ -102,12 +110,16 @@ class DiskCleaner:
                 _logger.region_skipped(region, e)
                 continue
             attached = self.attached_volume_ids(api, region)
+            mark = len(candidates)
             sort_decisions(
                 (self.decide(v, attached, KIND_DISK, region, context.now) for v in volumes),
                 candidates,
                 skipped,
             )
+            if context.dry_run:
+                self._note_dry_run(candidates[mark:])
             attached_boot = self.attached_boot_volume_ids(api, region)
+            mark = len(candidates)
             sort_decisions(
                 (
                     self.decide(v, attached_boot, KIND_BOOT_DISK, region, context.now)
@@ -116,17 +128,28 @@ class DiskCleaner:
                 candidates,
                 skipped,
             )
+            if context.dry_run:
+                self._note_dry_run(candidates[mark:])
             _logger.region_done(
                 region, len(volumes) + len(boot_volumes), len(candidates) - before, started
             )
         if context.dry_run:
             log_summary([c.name for c in candidates], dry_run=True)
+            if self._engine:
+                candidates = [dataclasses.replace(c, id=c.name) for c in candidates]
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
+
+    def _note_dry_run(self, found: Sequence[Candidate]) -> None:
+        if self._engine:
+            attachments.note_dry_run(found, self.partial_succeeded)
 
     def apply(self, plan: Plan, context: RunContext) -> Result:
         """Delete the planned volumes region by region (nothing in a dry run). A failed delete
         is logged and left out of the result, as on main."""
+        if context.dry_run and self._engine:
+            return Result(succeeded=tuple(c.name for c in plan.candidates))
         deleted: list[str] = []
+        self.partial_succeeded = deleted
         failed: list[Failure] = []
         for region, items in group_by_region(plan.candidates).items():
             api = self._api_factory(region)
@@ -142,38 +165,12 @@ class DiskCleaner:
         return api.list_volumes(), api.list_boot_volumes()
 
     def attached_volume_ids(self, api: VolumeApi, region: str) -> set[str] | None:
-        """Ids of block volumes in use, or `None` when the attachments cannot be listed (a
-        connectivity error). OCI has no "unattached" lifecycle state: a volume stays `AVAILABLE`
-        whether or not it is attached, so attachments are listed separately. `None` means every
-        block volume of the region is kept (fail closed, BUG-096)."""
-        try:
-            return {a.volume_id for a in in_use(api.list_volume_attachments())}
-        except CONNECTIVITY_ERRORS as e:
-            log_skipped_region(region, ATTACHMENTS_CONTEXT, e)
-            self._keep_all(region, KIND_DISK, e)
-            return None
+        """Ids of block volumes in use, or `None` (every volume of the region is kept)."""
+        return attachments.attached_volume_ids(api, region, self._keep_all)
 
     def attached_boot_volume_ids(self, api: VolumeApi, region: str) -> set[str] | None:
-        """Ids of boot volumes in use, or `None` when they cannot be known: a connectivity
-        error while listing availability domains or any domain's attachments (BUG-097), or a
-        region without availability domains (BUG-098). `None` means every boot volume of the
-        region is kept (fail closed). Boot volume attachments are scoped per availability
-        domain, unlike regular volume attachments."""
-        attached_ids: set[str] = set()
-        try:
-            domains = api.list_availability_domains()
-            if not domains:
-                self._keep_all(region, KIND_BOOT_DISK, ValueError("no availability domains"))
-                return None
-            for domain in domains:
-                attached_ids.update(
-                    a.boot_volume_id for a in in_use(api.list_boot_volume_attachments(domain))
-                )
-        except CONNECTIVITY_ERRORS as e:
-            log_skipped_region(region, BOOT_ATTACHMENTS_CONTEXT, e)
-            self._keep_all(region, KIND_BOOT_DISK, e)
-            return None
-        return attached_ids
+        """Ids of boot volumes in use, or `None` (every boot volume of the region is kept)."""
+        return attachments.attached_boot_volume_ids(api, region, self._keep_all)
 
     def _keep_all(self, region: str, kind: str, error: BaseException) -> None:
         logging.warning(f"Region {region}: keeping every {kind}: {UNKNOWN_REASONS[kind]}")
@@ -246,4 +243,4 @@ def build_disk_cleaner(context: RunContext) -> Cleaner:
         age=options.get("age") or {},
         custom_age_tag_key=options.get("custom_age_tag_key") or "",
     )
-    return DiskCleaner(api_for(base), regions_of(base), settings)
+    return DiskCleaner(api_for(base), regions_of(base), settings, engine=True)

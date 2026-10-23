@@ -7,6 +7,7 @@ every region and decides on them, `apply()` terminates (delete) or stops them. `
 (`crc.oci.vm.adapter`) is the legacy class `crc.py` uses.
 """
 
+import dataclasses
 import logging
 from typing import cast
 
@@ -66,7 +67,13 @@ class VmCleaner:
         api_factory: ApiFactory,
         list_regions: RegionLister,
         settings: VmSettings,
+        *,
+        engine: bool = False,
     ) -> None:
+        """`engine` is True for the cleaner `crc.core.engine` builds: a dry-run `plan()` then
+        logs the ACTION lines per region and names its candidates by display name, the names
+        the legacy adapter reported (the engine never calls `apply()` in a dry run)."""
+        self._engine = engine
         self._api_factory = api_factory
         self._list_regions = list_regions
         self._settings = settings
@@ -93,19 +100,24 @@ class VmCleaner:
                 if isinstance(decision, Candidate):
                     candidates.append(decision)
                     selected += 1
+                    if context.dry_run and self._engine:
+                        self._record(decision, context.operation, dry_run=True)
                 else:
                     skipped.append(decision)
             _logger.region_done(region, len(instances), selected, started)
         if context.dry_run:
             log_for(context.operation, [c.name for c in candidates], dry_run=True)
+            if self._engine:
+                candidates = [dataclasses.replace(c, id=c.name) for c in candidates]
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
 
     def apply(self, plan: Plan, context: RunContext) -> Result:
         """Act on the planned instances region by region (nothing in a dry run). A failed call
         is logged and left out of the result, as on main."""
         if context.dry_run:
-            for candidate in plan.candidates:
-                self._record(candidate, context.operation, dry_run=True)
+            if not self._engine:
+                for candidate in plan.candidates:
+                    self._record(candidate, context.operation, dry_run=True)
             return Result(succeeded=tuple(c.name for c in plan.candidates))
         done: list[str] = []
         failed: list[Failure] = []
@@ -228,4 +240,4 @@ def build_vm_cleaner(context: RunContext) -> Cleaner:
         custom_age_tag_key=options.get("custom_age_tag_key") or "",
         instance_states=DEFAULT_INSTANCE_STATES if states is None else states,
     )
-    return VmCleaner(compute_api_for(base), regions_of(base), settings)
+    return VmCleaner(compute_api_for(base), regions_of(base), settings, engine=True)

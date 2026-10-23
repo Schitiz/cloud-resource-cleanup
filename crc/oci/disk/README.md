@@ -8,6 +8,7 @@ Modules, split by responsibility:
 
 - `api.py` (was `disk_api.py`): the typed Protocols of the OCI calls the cleaner uses, their SDK implementation and the per-region factories on top of `Base`
 - `settings.py`: `DiskSettings`, `DiskRuntime`, the skip vocabulary and the summary log
+- `attachments.py`: which volumes and boot volumes are attached (so kept) and the dry-run ACTION lines of `plan()`
 - `decide.py`: state, attachment, tag and age checks and small helpers over decisions and attachments
 - `cleaner.py` (was the first part of `disk.py`): `DiskCleaner` (registered as `oci` / `disk`), re-exports of the settings names, and the registry factory
 - `adapter.py` (was the last part of `disk.py`): `Disk`, the class `crc.py` calls
@@ -22,7 +23,9 @@ Modules, split by responsibility:
 - `regions_of()`: builds the region lister from get_all_regions of Base.
 - `DiskRuntime`: frozen dataclass with the injected API factory, region lister and clock (now) of `Disk`; unset parts come from Base.
 - `DiskSettings`: frozen dataclass with the filters and thresholds of one run (filter tags, exception tags, notags, age, custom age tag key).
-- `DiskCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus list_region, attached_volume_ids, attached_boot_volume_ids (both return None when the attachments are unknown), decide and remove used by the adapter).
+- `attached_volume_ids()`, `attached_boot_volume_ids()`: ids of block and boot volumes in use, or nothing when unknown (module attachments; `DiskCleaner` wraps them).
+- `note_dry_run()`: logs the ACTION lines of a dry run and collects the display names (module attachments).
+- `DiskCleaner`: the Cleaner (supports, read-only plan, mutating apply, list_region, attached_volume_ids, attached_boot_volume_ids (both return None when the attachments are unknown), decide and remove used by the adapter); built by the registry factory with the engine flag, see Safety Invariants.
 - `build_disk_cleaner()`: registry factory behind @register("oci", "disk"); reads filter_tags, exception_tags, notags, age and custom_age_tag_key from RunContext.options.
 - `Disk`: adapter crc.py calls (delete(), get_deleted, count, disk_names_to_delete); subclasses Service and Base; decides and deletes volume by volume in the order of main.
 - `skip_reason()`: why a volume is kept (state, attachment, tag, age), or None for a candidate; used by DiskCleaner.decide.
@@ -38,6 +41,7 @@ Modules, split by responsibility:
 - Only `AVAILABLE` volumes that are not `ATTACHED` / `ATTACHING` are candidates; block and boot volumes are both covered.
 - An empty age matches every volume (SAF-006) and `MAX_AGE` can shorten the age (SAF-010); the age of a volume with a custom age tag fails open to `--age` (SAF-009, `BUG-004`).
 - A failed delete is logged and skipped, never raised, as on main.
+- Engine path: the factory builds `DiskCleaner(..., engine=True)`, so a dry-run `plan()` logs the would_delete ACTION lines per region and names its candidates by display name (as the legacy `Disk` reported them), because `crc.core.engine` never calls `apply()` in a dry run. (`crc/cli/routes/oci.py`, `NotifyMode.REPORT_THEN_RERAISE`, BUG-408): `plan()` lists every region before `apply()` deletes, so a listing error in a later region stops the pair before any delete; `partial_succeeded` holds the names listed so far in a dry run and the names deleted so far in `apply()`, which the bridge reports before it re-raises.
 - Fail closed per region (FIX-OCI-DISK, `BUG-096`, `BUG-097`, `BUG-098`): `attached_volume_ids()` and `attached_boot_volume_ids()` return `None` when the attachments are unknown, and `decide()` then keeps every block volume (or boot volume) of that region (skip reasons `block volume attachments unknown` / `boot volume attachments unknown`, run-log skip `attachments_unknown`). Unknown means: a connectivity or auth error (`CONNECTIVITY_ERRORS`) while listing volume attachments, while listing availability domains or while listing the attachments of any one availability domain (a partial set is discarded), or a region with no availability domains. The region is recorded once as `region_skipped` and a WARNING `Region <r>: keeping every disk|boot disk: ...` is logged. The other volume kind of the region and other regions are decided as before; an unexpected (non-connectivity) error still propagates.
 - Filtering per module: `docs/refactor/FILTER_VARIANTS.md` section 5 (freeform tags, any key). Parity oracle: `tests/legacy/oci_disk.txt`, a frozen copy of `main`, never edited. Known quirks: `docs/refactor/BUGS.md` rows `BUG-004`, `BUG-096` to `BUG-110`, `BUG-353`, `BUG-354`.
 - Do not call real cloud APIs in tests; mock every SDK client.
