@@ -45,6 +45,8 @@ copyright comment and declares no export list.
 - Logging (LOG-AZU, BUG-358, BUG-361, BUG-362): every cleaner (vm, spot_vm, disk, ip, nic, `vm_delete_helpers`) reports to `crc.core.logger.current()`: one REGION line per resource group, one ACTION line per resource deleted, stopped or listed in a dry run, skip counts under short reasons, and swallowed per-resource errors (VM processing, Spot VM, leftover Spot disk, NIC after three attempts, VM primary NIC after 24 attempts) through `failed()`. The raw tag dumps of disks and VMs and the per-leftover-disk skip lines are DEBUG with unchanged text. Log text and levels only: selection, calls and call order are unchanged. Unattached (no `begin()`), these calls log nothing.
 - Do not call real cloud APIs in tests; mock every SDK client.
 
+- Engine path (ENG-AZU, BUG-392): the CLI runs `ip`, `nic`, `disk`, `vm` and `spot_instances` through `crc.core.engine` (`crc/cli/routes/azu.py`); `plan()` reads the whole listing before `apply()` mutates. A real `AzureIpCleaner` run logs its `REGION` line from `apply()` after the deletes (a dry run from `plan()`), as the adapter did, so a failed delete leaves the line out. The `IP`, `NIC`, `Disk`, `VM` and `SpotVM` adapters stay importable for the oracle and the hash-locked `tests/test_azu_spot_vm.py` (Cleaner copy: `tests/test_azu_spot_vm_engine.py`).
+
 ## Extension Rules
 
 1. Do not edit these modules to add features or fix bugs in a refactor rung; behaviour fixes are

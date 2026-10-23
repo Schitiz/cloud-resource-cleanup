@@ -55,18 +55,22 @@ def _run(
     mp.setattr(bridge, "datetime", type("D", (), {"now": staticmethod(lambda tz=None: NOW)}))
     if not routed:
         mp.setattr(cli_dispatch, "route_for", lambda cloud, resource: None)
-    real_run_routed = cli_dispatch.run_routed
+    real_run_routed = bridge.run_routed
 
     def counting(*args: Any) -> None:
         ROUTED_RUNS.append(kind.resource)
         real_run_routed(*args)
 
-    mp.setattr(cli_dispatch, "run_routed", counting)
+    mp.setattr(cli_dispatch, "run_routed", counting, raising=True)
     logs, out = Logs(), StringIO()
     result: Any = ("ok",)
     records: list[logging.LogRecord] = []
-    handler = logging.Handler()
-    handler.emit = records.append  # type: ignore[method-assign]
+
+    class Collect(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = Collect()
     root = logging.getLogger()
     root.addHandler(handler)
     old_level = root.level

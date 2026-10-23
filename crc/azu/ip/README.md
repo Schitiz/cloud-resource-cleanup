@@ -20,7 +20,7 @@ Modules (split by responsibility in W2-AZU, no behaviour change):
 
 ## Safety Invariants
 
-- Authoritative text: `CLEANUP_SAFETY.md`; the per-module invariants are in `crc/azu/README.md` (Azure IPs (AZ-1)). `plan()` makes no mutating call and never in a dry run (ARCH-005); the delete calls run from `apply()` and the adapter only.
+- Authoritative text: `CLEANUP_SAFETY.md`; the per-module invariants are in `crc/azu/README.md` (Azure IPs (AZ-1)). `plan()` makes no mutating call and never in a dry run (ARCH-005); the delete calls run from `apply()` and the adapter only. A real run logs its `REGION` line at the end of `apply()` (a dry run in `plan()`), so a delete error leaves it out, as in the adapter (ENG-AZU).
 - Selection: any-key `filter_tags`, `exception_tags` any key, `notags` all keys, kept when in use; no age gate (SAF-011 not met).
 - Do not call real cloud APIs in tests; mock every SDK client.
 

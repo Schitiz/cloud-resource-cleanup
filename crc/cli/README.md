@@ -27,7 +27,7 @@ plain `dict`, as on `main`.
 - `scan.py`: `run_scan`, the read-only `--scan_tag` path; it wraps each cloud pass in `crc.core.logger.begin()` / `finish()` (`operation=scan`), prints, notifies Slack and always exits with code 0.
 - `bridge.py`: `route_for`, `run_routed`, `init_run_logging`, `build_registry`, `build_notifiers`: the engine bridge. A pair whose kind is in the route table of its cloud (`routes/aws.py`, `azu.py`, `gcp.py`, `oci.py`) initialises logging via `Service`, runs `crc.core.engine.run` with the registered cleaner, a `RunContext` and a one pair `Selection`, then the Slack and Influx notifiers (Slack first, only when a Slack client is set; Influx only when an Influx client is set) and the route's extra notifiers. The route's `NotifyMode` picks none (`vpc`, `snapshot`), report (default) or report then re-raise (`disk`: a `plan()` or `apply()` error is reported with `partial_succeeded`, then raised again); `Route.precheck` is the AWS disk opt-in gate and `Route.after` prints the snapshot line. `init_run_logging`, `build_registry` and `build_notifiers` are looked up in `bridge` at call time: the seam the CLI parity tests patch (`tests/helpers_cli_routes.py`).
 - `routes/`: the route tables (see `routes/README.md`).
-- `dispatch.py`: `run_dispatch`, the cloud and resource loops: one small handler per resource wrapped in `crc.core.logger.begin()` / `finish()` (`try`/`finally`), the pair validation (`validate_targets`, including the AWS-only `snapshot` and `vpc`) with the AWS disk opt-in breaker, the spot warnings, and the legacy handlers of the kinds some cloud still runs on `CRC` (`disk`, `ip`, `nic`, `vm`, `spot_instance_requests`, `spot_instances`). The AWS pairs of every kind run through `bridge`; `kms`, `snapshot` and `vpc` have no legacy handler left.
+- `dispatch.py`: `run_dispatch`, the cloud and resource loops: one small handler per resource wrapped in `crc.core.logger.begin()` / `finish()` (`try`/`finally`), the pair validation (`validate_targets`, including the AWS-only `snapshot` and `vpc`) with the AWS disk opt-in breaker, the spot warnings, and the legacy handlers of the kinds some cloud still runs on `CRC` (`disk`, `ip`, `nic`, `vm`, `spot_instance_requests`, `spot_instances`). The AWS pairs of every kind and the Azure `disk`, `ip`, `nic`, `spot_instances` and `vm` pairs run through `bridge`; `kms`, `snapshot` and `vpc` have no legacy handler left.
 
 ## Public API
 
@@ -99,7 +99,7 @@ plain `dict`, as on `main`.
    cloud still runs the kind on the legacy path: a supported pair with neither a route nor a handler
    runs nothing between RUN START and RESULT), and retarget the tests: the
    adapter's parity test drives the Cleaner through `engine.run` with the same oracle cases; the CLI
-   parity tests (`test_cli_main_parity.py` `ROUTED_CALLS`, `test_cli_logger.py`) use
+   parity tests (`test_cli_main_parity.py` `ROUTED_CALLS` (AWS; every other cloud has its own `tests/helpers_routed_<cloud>.py` with a `ROUTED_CALLS` table, so lanes do not edit one shared table), `test_cli_logger.py`) use
    `tests/helpers_cli_routes.FakeCleaners`, which patches `bridge.build_registry` and
    `bridge.build_notifiers` so the fake cleaner records the flags it received; add the kind to
    `tests/test_cli_bridge_parity.py` to compare Slack, Influx, output and errors with the oracle `CRC`.

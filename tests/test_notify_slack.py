@@ -44,9 +44,7 @@ def report(
     return Report(cloud, operation, dry_run, tuple(sections))
 
 
-def send(
-    client: Mock, rep: Report, channel: str = "chan", dry_run: bool = False
-) -> None:
+def send(client: Mock, rep: Report, channel: str = "chan", dry_run: bool = False) -> None:
     SlackNotifier(client, channel).send(rep, context(dry_run, rep.operation))
 
 
@@ -188,9 +186,7 @@ def owner_report(dry_run: bool = False) -> Report:
     )
 
 
-def ping_client(
-    user: str | None = None, groups: Any = None, group_error: bool = False
-) -> Mock:
+def ping_client(user: str | None = None, groups: Any = None, group_error: bool = False) -> Mock:
     client = Mock()
     if user is None:
         client.users_lookupByEmail.side_effect = RuntimeError("users_not_found")

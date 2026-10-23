@@ -191,4 +191,3 @@ def test_production_jenkins_filter_tags_selection_unchanged(
     ]
     cleaner = build(addresses, [], filter_tags=filter_tags)
     assert planned(cleaner) == expected
-

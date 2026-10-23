@@ -152,8 +152,8 @@ def test_bug_017_cloud_all_real_crc_does_not_build_skipped_clouds(
     if adapter_attr is not None:
         monkeypatch.setattr(resource_ops, adapter_attr, FakeAdapter)
     else:
-        FakeCleaners().install(monkeypatch).side_effect[(expected_cloud, resource)] = (
-            lambda ctx: deleted.append(expected_cloud)
+        FakeCleaners().install(monkeypatch).side_effect[(expected_cloud, resource)] = lambda ctx: (
+            deleted.append(expected_cloud)
         )
     options = read_options(
         {
