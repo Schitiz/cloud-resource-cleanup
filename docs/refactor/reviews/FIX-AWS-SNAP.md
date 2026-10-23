@@ -71,3 +71,41 @@ Scope reviewed: `git diff 182466d..HEAD` (`crc/aws/snapshot.py`, `crc/aws/README
 Test count: 42444 before (`182466d`), 42449 after (+5).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 182466d..HEAD`, read independently after round 1's fixes. Round 1 findings 2 and 3 (exact outcomes pinned in `tests/test_aws_snapshot_fix.py`, stale README sentence) hold. Round 1 finding 1 caused a regression, fixed below.
+
+### Checks
+
+1. **Bugs fixed.** BUG-144: a tag entry without `Key` is ignored and a missing `Value` reads as `''`, for old and young snapshots, and a valid exception tag next to a malformed entry still protects. BUG-149: any non-connectivity error from client creation, `describe_snapshots`, `describe_images` or a snapshot decision is logged at ERROR, recorded with `fail(region, "-", e)` and `region_skipped`, and the region is skipped; other regions continue (adapter and Cleaner paths). I copied `tests/test_aws_snapshot_fix.py` and the new parity module into a worktree at `182466d`: 46 tests fail there (every BUG-144 / BUG-149 test, including all 30 `test_diverging_case_has_the_fixed_outcome` cases) and pass now. The 17 tests that pass on both are guards for unchanged behaviour (connectivity skip, oracle-shows-the-bug, the new young non-list test).
+2. **Direction rule / parity.** `tests/legacy/` is untouched. The 15 `DIVERGES` entries each carry BUG-144 or BUG-149 and have an exact new outcome; `SAME_CASES` (54) still assert full equality with the oracle, and nothing is loosened globally. On the Cleaner path a failing region contributes no candidate. On the adapter path only snapshots that `main` also deleted before the error are deleted in that region. Later regions are now cleaned, which is the intended BUG-149 outcome. One violation was found and fixed (finding 1).
+3. **Production command.** `--cloud aws --resource snapshot --age '{"days": 90}' --exception_tags '{...}'`: no CLI or adapter-signature change. Well-formed AWS tags (every entry has `Key` and `Value`) give the same selection, calls and logs (parity `SAME_CASES`).
+4. **Fail-closed.** `check_age` runs before `list_regions` and before any client call. `describe_regions` errors still propagate before any per-region call (SAF-004).
+5. **Protected files.** `git diff 182466d..HEAD` is empty for the locked tests, `safety_lock.json`, `tests/archtest/**`, PLAN/STATUS/BUGS, `CLEANUP_SAFETY.md`, `AGENTS.md`, `ARCHITECTURE.md` and `.cursor/**`.
+6. **README (ARCH-002).** The Safety Invariants describe both fixes; the Public API section needs no change (`_is_tag_list` / `_read_tags` are private; `is_protected` gained only an optional `tag_map`).
+7. **Owner decision.** None needed; both bugs are fixed.
+
+### Findings (fixed in review)
+
+1. **Direction rule: a young snapshot with non-list `Tags` skipped its whole region** (`crc/aws/snapshot.py` `_decide`, introduced by round 1 finding 1). With exception tags set, `_read_tags` ran before the age gate for every shape of `Tags`. A young snapshot whose `Tags` is a dict, or a list with a non-mapping entry, therefore raised `TypeError`, and BUG-149 skipped the region. On `182466d` that snapshot was skipped as too young without reading its tags, and later old snapshots of the region were deleted. I checked the input `[young Tags={"a": "b"}, old untagged]` with `{"keep": []}`: `182466d` deletes `o`, while HEAD before this fix deleted nothing and recorded a failure. The change keeps more, but neither bug row covers this input (the coding summary itself says non-list Tags are out of scope), so it must equal the oracle. Fix: the early read now applies only to a list of mappings (`_is_tag_list`). Other shapes are read after the age gate in `_is_protected` and raise for old snapshots exactly as on `main`. Added `test_non_list_tags_on_a_young_snapshot_are_not_read_as_on_main` (dict and non-mapping entry) in `tests/test_aws_snapshot_fix.py`, and made the README sentence precise ("read only after the age gate and still raise for old snapshots as on `main`").
+
+### Notes (no change)
+
+- NIT (owner awareness): BUG-149 turns a per-region auth error (`AuthFailure`, `UnauthorizedOperation`) from an uncaught exception, which exits non-zero, into `ERRORS` / `FAILED` run-log lines with exit code 0. The Jenkins snapshot job will no longer go red on a credential problem that only affects listing; `describe_regions` auth errors still fail the run. This is what the task notes ask for ("recorded ... and the region skipped").
+- NIT: `exception_tags` that is not a dict (for example `--exception_tags '["keep"]'`) now fails every region one by one (`AttributeError` at the first tagged old snapshot, case `exception-tags-not-a-dict`) instead of aborting the run. Validating the type before any call would fail closed earlier. This is out of scope here, so I am listing it as a new bug: `crc/aws/snapshot.py` `_is_protected` (`exception_tags.items()`), exists on main: yes (`crc/aws/snapshot.py:33`).
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check` (ruff, mypy, import-linter, pytest): see the table below.
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed |
+| `mypy` (`crc`, `tests`) | Success: no issues found in 229 source files |
+| `lint-imports` | Contracts: 5 kept, 0 broken |
+| `pytest -q` | 42451 passed |
+
+Test count: 42449 after round 1, 42451 now (+2: `test_non_list_tags_on_a_young_snapshot_are_not_read_as_on_main[dict]` and `[non-mapping-entry]`).
+
+ROUND 2 VERDICT: APPROVE
