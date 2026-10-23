@@ -33,7 +33,6 @@ EBS_MESSAGE = "AWS EBS volume cleanup requires '--cloud aws --resource disk'"
 METHOD_KINDS = {
     "delete_disks": "disk",
     "delete_ip": "ip",
-    "delete_keypairs": "keypair",
     "delete_nic": "nic",
     "delete_vm": "vm",
     "stop_vm": "vm",

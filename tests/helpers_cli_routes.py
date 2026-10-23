@@ -55,6 +55,7 @@ class FakeCleaners:
         return lambda context: FakeCleaner(cloud, kind, self, context)
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> "FakeCleaners":
+        monkeypatch.setattr(bridge, "init_run_logging", lambda: None)
         monkeypatch.setattr(bridge, "build_registry", lambda: self.registry)
         monkeypatch.setattr(bridge, "build_notifiers", lambda crc, route: [])
         return self

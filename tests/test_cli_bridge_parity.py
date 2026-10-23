@@ -105,6 +105,7 @@ def _bridged(monkeypatch: pytest.MonkeyPatch, seen: list[RunContext], ids: list[
         registry.register("aws", "keypair")(
             lambda context: _as_cleaner(FakeCleaner(case.scenario, seen, ids))
         )
+        monkeypatch.setattr(bridge, "init_run_logging", lambda: None)
         monkeypatch.setattr(bridge, "build_registry", lambda: registry)
         crc = build(NewCRC, case, logs)
         route = bridge.route_for("aws", "keypair")
@@ -148,26 +149,28 @@ def test_bridge_matches_crc_delete_keypairs(
     assert dict(seen[0].options) == OPTIONS
 
 
-def test_bridge_reaches_the_cleaner_with_the_flags() -> None:
+def test_bridge_reaches_the_cleaner_with_the_flags(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[RunContext] = []
+    init_calls: list[tuple[Any, ...]] = []
     registry = Registry()
     registry.register("aws", "keypair")(
         lambda context: _as_cleaner(FakeCleaner(Scenario({}), seen, IDS))
     )
-    with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(bridge, "build_registry", lambda: registry)
-        crc = NewCRC("aws", False, None, None, None)
-        route = bridge.route_for("aws", "keypair")
-        assert route is not None
-        bridge.run_routed(
-            crc,
-            "aws",
-            "keypair",
-            _options(False),
-            Targets("aws", False, ["aws"], ["keypair"]),
-            route,
-        )
+    monkeypatch.setattr("crc.service.init_logging", lambda *args: init_calls.append(args))
+    monkeypatch.setattr(bridge, "build_registry", lambda: registry)
+    crc = NewCRC("aws", False, None, None, None)
+    route = bridge.route_for("aws", "keypair")
+    assert route is not None
+    bridge.run_routed(
+        crc,
+        "aws",
+        "keypair",
+        _options(False),
+        Targets("aws", False, ["aws"], ["keypair"]),
+        route,
+    )
     assert [dict(c.options) for c in seen] == [OPTIONS]
+    assert init_calls == [("logs/crc.log",)]
 
 
 def test_route_tables_route_only_aws_keypair() -> None:

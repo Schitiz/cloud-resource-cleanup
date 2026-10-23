@@ -20,6 +20,7 @@ from crc.core.cleaner import Operation, RunContext
 from crc.core.selection import Selection
 from crc.notify.influx import InfluxNotifier
 from crc.notify.slack import SlackNotifier
+from crc.service import Service
 
 TABLES: dict[str, dict[str, Route]] = {
     "aws": aws_routes.ROUTES,
@@ -37,6 +38,11 @@ def route_for(cloud: Any, kind: Any) -> Route | None:
 def is_routed_kind(kind: Any) -> bool:
     """True when at least one cloud routes `kind`."""
     return any(kind in table for table in TABLES.values())
+
+
+def init_run_logging() -> None:
+    """Initialise the log file and root handlers, as `Service.__init__` did in every adapter."""
+    Service()
 
 
 def build_registry() -> registry.Registry:
@@ -60,6 +66,7 @@ def run_routed(
     """Run one routed pair through the engine: precheck, plan, apply unless dry run, notify."""
     if route.precheck is not None:
         route.precheck(crc, options, targets)
+    init_run_logging()
     context = RunContext(
         dry_run=bool(options.dry_run),
         operation=Operation(options.operation_type or "delete"),

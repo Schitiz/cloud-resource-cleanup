@@ -29,3 +29,37 @@ Lane ENG-0 (branch `eng/bridge`): the bridge from the CLI to `crc.core.engine`, 
 
 - `crc/cli/notify.py:~113`: `CRC.notify_deleted_keypair_via_slack` is now dead code in production (kept only because `test_cli_crc_parity.py` still exercises it).
 - No other new bugs found.
+
+## Round 1 (Argon)
+
+Scope reviewed: `git diff 0240820..HEAD` on branch `eng/bridge` (lane `ENG-0`).
+
+### Findings & fixes made in review
+
+1. **BLOCKING (fixed): Routed pairs no longer called `Service.__init__()` (`crc.service.init_logging("logs/crc.log")`)** (`crc/cli/bridge.py`, `tests/helpers_cli_routes.py`, `tests/test_cli_bridge_parity.py`, `tests/test_cli_logging_init.py`):
+   - Deleting `KeyPairs(Service)` removed the `super().__init__()` (`Service.__init__`) call that every legacy adapter ran before its cleaner. Without it, a real CLI run of a routed pair never called `init_logging("logs/crc.log")`, never printed `Setting loglevel to logging: DEBUG`, never created `logs/crc.log` or attached the root `FileHandler`/`StreamHandler`, never released the held `RUN START` header via `run_log.logging_ready()` (`BUG-364`), dropped `INFO`/`DEBUG` lines (`RUN START`, `REGION`, `ACTION`, `SKIPPED`, `RESULT`), and triggered `logging.basicConfig()` on the first `logging.warning` call (`BUG-363`).
+   - Added `init_run_logging()` in `crc/cli/bridge.py` (calling `Service()`) and called it in `run_routed()` right after `route.precheck` and before `engine.run`, matching the exact point `Service.__init__` ran in every legacy adapter. `FakeCleaners.install` in `tests/helpers_cli_routes.py` patches `bridge.init_run_logging` for fake-cleaner unit tests, `test_cli_logging_init.py::test_cli_path_with_init_logging_in_cleaner_adds_no_stray_handler` now exercises the real `bridge.init_run_logging()` path (instead of calling `init_logging` inside the test callback), and `test_cli_bridge_parity.py::test_bridge_reaches_the_cleaner_with_the_flags` asserts `crc.service.init_logging("logs/crc.log")` is called.
+2. **BLOCKING (fixed): `tests/test_cli_args_parity.py` failed with 4,034 `ImportError`s when run in isolation** (`tests/test_cli_args_parity.py`):
+   - `tests/test_cli_args_parity.py` loads `tests/legacy/crc_main.txt` in its `oracle` fixture (`from crc.aws.keypairs import KeyPairs`) without calling `provide_legacy_keypairs()`. It only passed under `pytest -n auto` when another CLI parity file happened to be imported first in the same worker. Added `provide_legacy_keypairs()` to `tests/test_cli_args_parity.py`.
+3. **Test & factory tightening (fixed)** (`crc/aws/keypairs/cleaner.py`, `tests/test_aws_keypair_parity.py`, `tests/test_cli_main_parity.py`, `tests/test_cli_dispatch_fix.py`, `tests/test_core_selection.py`, `tests/README.md`):
+   - `build_keypair_cleaner` in `crc/aws/keypairs/cleaner.py` now passes `options.get("name_regex")` and `options.get("exception_regex")` directly to `KeyPairCleaner` as `KeyPairs.delete()` did instead of eagerly wrapping them in `list(... or ())`.
+   - Restored log parity assertion `assert new.logs == expected_logs(old.logs[:-1], LOG_BUGS, rules=RULES)` in `test_aws_keypair_parity.py::test_engine_matches_main` for all dry-run and single-region cases.
+   - Asserted `context.dry_run` in `test_cli_main_parity.py::install_routed_fakes`, restored the `"keypair"` case in `test_cli_dispatch_fix.py::test_bug_017_cloud_all_real_crc_does_not_build_skipped_clouds`, removed dead `"delete_keypairs"` from `METHOD_KINDS` in `test_core_selection.py`, and listed `test_cli_bridge_parity.py` and `helpers_cli_routes.py` in `tests/README.md`.
+
+### Checklist verification
+
+1. **CLI result parity for routed `aws` / `keypair`**: selection, mutations and order within each region, `RUN START` / `RESULT` lines, `Service` / `init_logging` startup, Slack text, Influx points, log lines, exceptions and exit codes, `validate_targets`, and `--dry_run` non-mutation match the legacy path; the only behaviour change is plan-all-regions-before-apply, recorded in `BUG-383` (`docs/refactor/BUGS.md`) and one bullet in `CLEANUP_SAFETY.md`.
+2. **Parity tests non-vacuous**: `test_cli_main_parity.py`, `test_cli_bridge_parity.py`, `test_cli_crc_parity.py`, `test_cli_args_parity.py`, and `test_aws_keypair_parity.py` all reach real or recording fake cleaners and assert the oracle facts.
+3. **Hash-locked safety tests**: the 5 locked test files (`test_aws_disk.py`, `test_aws_spot_instance_requests.py`, `test_azu_spot_vm.py`, `test_gcp_spot_vm.py`, `test_oci_spot_vm.py`) and `tests/archtest/safety_lock.json` are untouched and passing (their adapters remain on the legacy path in this lane).
+4. **Protected files**: no oracle (`tests/legacy/*.txt`), archtest (`tests/archtest/*.py`), guardrail (`AGENTS.md`, `ARCHITECTURE.md`, `.cursor/**`, `pyproject.toml`, `Makefile`, `docs/refactor/PLAN.md`, `docs/refactor/STATUS.md`), or `requirements*.txt` file was edited; `test_count_floor.txt` raised to `43078` via `make raise-test-floor`.
+5. **Limits & README sync**: all touched non-legacy, non-test files are at most 250 lines and functions at most 60 lines (`ARCH-004`); all package READMEs (`crc/cli/README.md`, `crc/cli/routes/README.md`, `crc/aws/README.md`, `crc/aws/keypairs/README.md`, `tests/README.md`) are in sync (`ARCH-002`).
+
+### Gates & test count
+
+- `python3 -m ruff check .`: passed
+- `python3 -m mypy`: passed (337 source files)
+- `lint-imports`: passed (5 contracts kept, 0 broken)
+- `python3 -m pytest -q -n auto`: **43078 passed in 53.94s**
+- `python3 -m tests.archtest.test_count check`: `ARCH-008: 43078 tests, floor 43078`
+
+VERDICT: APPROVE

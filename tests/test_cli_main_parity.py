@@ -314,6 +314,7 @@ def install_routed_fakes(fakes: Fakes, monkeypatch: pytest.MonkeyPatch) -> None:
             def record(
                 context: RunContext, cloud: str = cloud, method: str = method, keys: Any = keys
             ) -> None:
+                assert context.dry_run is ("--dry_run" in fakes.case.argv)
                 args = [norm(context.options[key]) for key in keys]
                 fakes.events.append((f"crc.{method}", cloud, args, {}))
                 if fakes.case.crc_fail == method:

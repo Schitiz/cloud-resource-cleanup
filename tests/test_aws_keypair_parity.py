@@ -311,6 +311,8 @@ def test_engine_matches_main(
         assert new_lists == old_lists
     if new.error is None:
         assert new.deleted == old.deleted
+    if case.dry_run or len(case.regions) <= 1:
+        assert new.logs == expected_logs(old.logs[:-1], LOG_BUGS, rules=RULES)
 
 
 QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [

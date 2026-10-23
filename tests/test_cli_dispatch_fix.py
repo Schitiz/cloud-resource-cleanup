@@ -9,6 +9,7 @@ from crc.cli import dispatch, resource_ops
 from crc.cli.constants import CLOUDS, RESOURCES
 from crc.cli.context import RunContext
 from crc.cli.inputs import Options, Targets, read_options, resolve_targets
+from tests.helpers_cli_routes import FakeCleaners
 
 CONTEXT = RunContext(
     dry_run=True,
@@ -129,13 +130,14 @@ def test_bug_017_cloud_all_skips_unsupported_pairs_with_a_warning(
 @pytest.mark.parametrize(
     ("resource", "adapter_attr", "expected_cloud"),
     [
+        ("keypair", None, "aws"),
         ("kms", "Kms", "aws"),
     ],
 )
 def test_bug_017_cloud_all_real_crc_does_not_build_skipped_clouds(
     monkeypatch: pytest.MonkeyPatch,
     resource: str,
-    adapter_attr: str,
+    adapter_attr: str | None,
     expected_cloud: str,
 ) -> None:
     deleted: list[str] = []
@@ -147,7 +149,12 @@ def test_bug_017_cloud_all_real_crc_does_not_build_skipped_clouds(
         def delete(self) -> None:
             deleted.append(expected_cloud)
 
-    monkeypatch.setattr(resource_ops, adapter_attr, FakeAdapter)
+    if adapter_attr is not None:
+        monkeypatch.setattr(resource_ops, adapter_attr, FakeAdapter)
+    else:
+        FakeCleaners().install(monkeypatch).side_effect[(expected_cloud, resource)] = (
+            lambda ctx: deleted.append(expected_cloud)
+        )
     options = read_options(
         {
             "cloud": "all",

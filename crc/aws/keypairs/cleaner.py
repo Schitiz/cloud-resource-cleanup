@@ -165,7 +165,7 @@ def build_keypair_cleaner(context: RunContext) -> Cleaner:
     return KeyPairCleaner(
         client_factory=boto3_client,
         list_regions=ec2_regions,
-        name_regex=list(options.get("name_regex") or ()),
-        exception_regex=list(options.get("exception_regex") or ()),
+        name_regex=options.get("name_regex"),
+        exception_regex=options.get("exception_regex"),
         age=options.get("age"),
     )

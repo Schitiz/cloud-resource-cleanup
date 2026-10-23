@@ -25,7 +25,7 @@ plain `dict`, as on `main`.
 - `clients.py`: the Slack `WebClient` and `InfluxDBClient` construction (the InfluxDB field check runs right before it) and the `MAX_AGE` environment write with its print, and its reset.
 - `context.py`: `RunContext` (the settings every `CRC` of a run shares) and `make_crc`, the one place that builds `CRC(...)` for `main`.
 - `scan.py`: `run_scan`, the read-only `--scan_tag` path; it wraps each cloud pass in `crc.core.logger.begin()` / `finish()` (`operation=scan`), prints, notifies Slack and always exits with code 0.
-- `bridge.py`: `route_for`, `run_routed`, `build_registry`, `build_notifiers`: the engine bridge. A pair whose kind is in the route table of its cloud (`routes/aws.py`, `azu.py`, `gcp.py`, `oci.py`) runs `crc.core.engine.run` with the registered cleaner, a `RunContext` and a one pair `Selection`, then the Slack and Influx notifiers (Slack first, only when a Slack client is set; Influx only when an Influx client is set). `build_registry` and `build_notifiers` are looked up in `bridge` at call time: the seam the CLI parity tests patch (`tests/helpers_cli_routes.py`).
+- `bridge.py`: `route_for`, `run_routed`, `init_run_logging`, `build_registry`, `build_notifiers`: the engine bridge. A pair whose kind is in the route table of its cloud (`routes/aws.py`, `azu.py`, `gcp.py`, `oci.py`) initialises logging via `Service`, runs `crc.core.engine.run` with the registered cleaner, a `RunContext` and a one pair `Selection`, then the Slack and Influx notifiers (Slack first, only when a Slack client is set; Influx only when an Influx client is set). `init_run_logging`, `build_registry` and `build_notifiers` are looked up in `bridge` at call time: the seam the CLI parity tests patch (`tests/helpers_cli_routes.py`).
 - `routes/`: the route tables (see `routes/README.md`).
 - `dispatch.py`: `run_dispatch`, the cloud and resource loops: one small handler per resource wrapped in `crc.core.logger.begin()` / `finish()` (`try`/`finally`), the AWS disk opt-in circuit breaker, the pair validation (`validate_targets`, including the AWS-only `snapshot` and `vpc`), the spot warnings and the `Snapshot` branch.
 
@@ -34,6 +34,7 @@ plain `dict`, as on `main`.
 - `route_for()`: the route of a (cloud, kind) pair, or None when the pair keeps the legacy handler (module bridge.py).
 - `is_routed_kind()`: True when at least one cloud routes the kind.
 - `run_routed()`: run one routed pair through the engine with its notifiers.
+- `init_run_logging()`: initialise the log file and root handlers as Service did in every adapter; patched by the parity tests.
 - `build_registry()`: the registry the routed cleaners come from; patched by the parity tests.
 - `build_notifiers()`: the Slack then Influx notifiers of a routed pair; patched by the parity tests.
 - `main()`: the CLI entry (module main.py); crc.py re-exports it. It is not re-exported from the package init module, so the name `main` on the package stays the module.
