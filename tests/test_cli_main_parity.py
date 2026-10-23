@@ -580,8 +580,10 @@ def diverging_outcome(case: Case, expected: Outcome) -> tuple[str, Outcome] | No
     ]
     if not bad:
         return None
-    if not cloud_all:
-        assert len(bad) == 1
+    calls = [event for event in expected.events if event[0] in UNSUPPORTED_PAIR_CALLS]
+    stops_main = calls.index(bad[0]) < len(calls) - len(bad)
+    if not cloud_all or stops_main:
+        assert cloud_all or len(bad) == 1
         message = UNSUPPORTED_PAIR_CALLS[bad[0][0]][1].format(cloud=bad[0][1])
         return "BUG-017", without_reset(
             expected, before_first_cleaner(expected.events), ("error", ValueError, message)

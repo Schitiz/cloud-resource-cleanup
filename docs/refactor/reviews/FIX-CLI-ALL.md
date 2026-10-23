@@ -55,3 +55,33 @@ Reviewed `git diff 182466d..HEAD` against the `FIX-CLI-ALL` task, `.cursor/skill
 
 VERDICT: APPROVE
 
+
+## Round 2 (Opus)
+
+Reviewed `git diff 182466d..HEAD` independently, after checking Round 1's fix (lazy `make_crc` after the skip check). Round 1's fix is correct: `CRC` is only built for a cloud with a non-skipped pair, and for every non-skipped input it is built just before that cloud's first cleaner, as before.
+
+### Findings
+
+- **BLOCKING (fixed): the direction rule was broken for `--cloud all --resource nic`.** Clouds run in the order `aws, azure, gcp, oci`. On `182466d` (and `main`) the first pair `aws`+`nic` raised `NICs operation is only supported on Azure.` before any delete, so nothing was deleted. Skipping it let `azure`+`nic` run, so Azure NICs got deleted where `main` deleted nothing. `test_bug_017_cloud_all_real_crc_does_not_build_skipped_clouds[nic]` asserted that deletion. The parity tests missed it because their recording fake `CRC` never raises for an unsupported cloud, so the oracle appeared to call `delete_nic` on all four clouds. Fix in `crc/cli/dispatch.py` `validate_targets`: under `--cloud all`, unsupported pairs are skipped only when no supported pair comes after the first unsupported one (that matches what `main` ran: `keypair`/`kms` run aws only, `ip` runs aws/azure/gcp). Otherwise the run fails closed with the first pair's `ValueError` message before any `CRC` is built. For the CLI this only affects `--cloud all --resource nic`; `--resource all` hits the BUG-018 error first. Tests:
+  - `tests/test_cli_dispatch_fix.py`: removed the nic skip expectations and added `test_bug_017_cloud_all_nic_raises_before_any_cleaner` and `test_bug_017_cloud_all_nic_real_crc_deletes_nothing`. Both fail on `4346ab7`; the module does not import on `182466d`.
+  - `tests/test_cli_main_parity.py` `diverging_outcome`: under `--cloud all`, a case where a supported call follows the first unsupported call now expects the up-front `ValueError` (still marked BUG-017, oracle untouched).
+  - `tests/test_core_selection.py` `raises_up_front`: same rule.
+  - `crc/cli/README.md` Safety Invariants: the BUG-017 line now states the nic case.
+- **NIT (fixed):** `tests/test_cli_logger.py::test_each_cloud_and_resource_pass_gets_a_header_and_a_result` used synthetic `Targets` (`[aws, gcp]` × `[keypair, ip]`, cloud_arg `all`), which the CLI cannot produce. On `main` the real `CRC` would stop at `gcp`+`keypair`. I swapped `keypair` for `vm`, so the test still checks the log header and result per pass.
+- New bugs: none beyond those already listed above.
+
+### Checks
+
+1. BUG-017: an explicit unsupported pair raises before any `CRC` or cleaner. Under `--cloud all`, `keypair`, `kms` and `ip` skip the unsupported clouds with a WARNING and a `SKIPPED reason=unsupported_cloud_resource` log line, while `nic` fails closed. BUG-018: `--cloud all --resource disk|all` raises the EBS opt-in error before any cleaner. The tests fail on `182466d` and pass now.
+2. Direction rule: after this fix, no input deletes more than on `182466d`. Supported explicit pairs run unchanged (`test_supported_explicit_pairs_run_unchanged`). Parity oracles in `tests/legacy/` are untouched, each diverging case is marked BUG-017 or BUG-018 with the exact new outcome, and nothing is loosened globally.
+3. Production commands: none listed; no supported explicit pair changes.
+4. Fail-closed paths raise in `validate_targets`, before the loop, before any `make_crc` or SDK call.
+5. No locked safety test, `safety_lock.json`, `tests/legacy/`, PLAN/STATUS/BUGS, `CLEANUP_SAFETY.md` or `.cursor/**` edited.
+6. `crc/cli/README.md` Public API (`validate_targets`, `is_supported_pair`) and Safety Invariants are updated; ARCH-002 passes.
+7. No bug is left unfixed; the existing Owner decision about `crc/core/selection.py` stands.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt`, then `make check`: ruff all checks passed; mypy no issues in 229 source files; lint-imports 5 kept, 0 broken; pytest **42479 passed**.
+
+ROUND 2 VERDICT: APPROVE

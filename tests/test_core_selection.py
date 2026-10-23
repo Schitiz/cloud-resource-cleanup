@@ -121,7 +121,12 @@ def unsupported_items(items: Any) -> list[tuple[str, str]]:
 
 
 def raises_up_front(cloud: str, items: Any) -> bool:
-    return bool(unsupported_items(items)) and cloud != "all"
+    """An explicit cloud, or `--cloud all` with a supported pair after the first unsupported one."""
+    bad = unsupported_items(items)
+    if not bad:
+        return False
+    rest = list(items)[list(items).index(bad[0]) :]
+    return cloud != "all" or len(rest) > len(bad)
 
 
 def run_main_after_fix(  # noqa: PLR0913, PLR0917 - mirrors run_crc_main plus the items

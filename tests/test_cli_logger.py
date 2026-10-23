@@ -46,22 +46,22 @@ def test_each_cloud_and_resource_pass_gets_a_header_and_a_result(
 ) -> None:
     caplog.set_level(logging.INFO)
     options = _options(name_regex=["^t-"], age={"days": 1}, resource_group="rg")
-    dispatch.run_dispatch(Mock(), options, _targets(["aws", "gcp"], ["keypair", "ip"]))
+    dispatch.run_dispatch(Mock(), options, _targets(["aws", "gcp"], ["vm", "ip"]))
     lines = _run_lines(caplog)
     assert len(lines) == len(["start", "result"]) * 4
     starts = [line for line in lines if line.startswith("RUN START")]
     assert [line.split()[2:5] for line in starts] == [
-        ["cloud=aws", "resource=keypair", "operation=delete"],
+        ["cloud=aws", "resource=vm", "operation=delete"],
         ["cloud=aws", "resource=ip", "operation=delete"],
-        ["cloud=gcp", "resource=keypair", "operation=delete"],
+        ["cloud=gcp", "resource=vm", "operation=delete"],
         ["cloud=gcp", "resource=ip", "operation=delete"],
     ]
     assert starts[0] == (
-        "RUN START cloud=aws resource=keypair operation=delete dry_run=false "
+        "RUN START cloud=aws resource=vm operation=delete dry_run=false "
         'age={"days":1} name_regex=["^t-"] resource_group="rg"'
     )
     assert lines[1].startswith(
-        "RESULT cloud=aws resource=keypair operation=delete dry_run=false selected=0 done=0 "
+        "RESULT cloud=aws resource=vm operation=delete dry_run=false selected=0 done=0 "
         "failed=0 skipped=0 regions=0 regions_skipped=0 duration_s="
     )
     assert [line.startswith("RUN START") for line in lines] == [True, False] * 4

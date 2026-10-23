@@ -80,7 +80,6 @@ def test_bug_017_explicit_cloud_raises_before_any_cleaner(
     ("resource", "supported"),
     [
         ("keypair", ["aws"]),
-        ("nic", ["azure"]),
         ("kms", ["aws"]),
         ("ip", ["aws", "azure", "gcp"]),
     ],
@@ -125,7 +124,6 @@ def test_bug_017_cloud_all_skips_unsupported_pairs_with_a_warning(
     ("resource", "adapter_attr", "expected_cloud"),
     [
         ("keypair", "KeyPairs", "aws"),
-        ("nic", "NIC", "azure"),
         ("kms", "Kms", "aws"),
     ],
 )
@@ -156,6 +154,30 @@ def test_bug_017_cloud_all_real_crc_does_not_build_skipped_clouds(
     )
     dispatch.run_dispatch(CONTEXT, options, resolve_targets(options))
     assert deleted == [expected_cloud]
+
+
+def test_bug_017_cloud_all_nic_raises_before_any_cleaner(monkeypatch: pytest.MonkeyPatch) -> None:
+    recorder = Recorder()
+    recorder.install(monkeypatch)
+    with pytest.raises(ValueError, match=r"NICs operation is only supported on Azure\."):
+        run("all", "nic")
+    assert recorder.calls == []
+
+
+def test_bug_017_cloud_all_nic_real_crc_deletes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    deleted: list[str] = []
+
+    class FakeNIC:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def delete(self) -> None:
+            deleted.append("azure")
+
+    monkeypatch.setattr(resource_ops, "NIC", FakeNIC)
+    with pytest.raises(ValueError, match=r"NICs operation is only supported on Azure\."):
+        run("all", "nic")
+    assert deleted == []
 
 
 @pytest.mark.parametrize("resource", ["disk", "all"])

@@ -214,20 +214,21 @@ def validate_targets(targets: Targets) -> list[tuple[Any, Any]]:
 
     BUG-018: `--cloud all` with disk or all can never complete (the AWS EBS breaker raises on the
     aws pair), so it raises here, before a cleaner of any cloud ran. BUG-017: an unsupported
-    pair of an explicit cloud raises here; under `--cloud all` it is returned to be skipped.
+    pair of an explicit cloud raises here. Under `--cloud all` the unsupported pairs are returned
+    to be skipped only when no supported pair comes after the first one: `main` stopped at that
+    pair, so running a later pair (azure for `--cloud all --resource nic`) would delete more.
     """
     handled = [r for r in targets.resources if r in HANDLERS]
     if "disk" in handled and targets.cloud_arg == "all" and not targets.aws_disk_opt_in:
         raise ValueError(AWS_DISK_OPT_IN_MESSAGE)
-    skipped = [
-        (cloud, resource)
-        for cloud in targets.clouds
-        for resource in handled
-        if not is_supported_pair(cloud, resource)
-    ]
-    if skipped and targets.cloud_arg != "all":
-        raise ValueError(_unsupported_message(*skipped[0]))
-    return skipped
+    pairs = [(cloud, resource) for cloud in targets.clouds for resource in handled]
+    first = next((i for i, pair in enumerate(pairs) if not is_supported_pair(*pair)), None)
+    if first is None:
+        return []
+    rest = pairs[first:]
+    if targets.cloud_arg != "all" or any(is_supported_pair(*pair) for pair in rest):
+        raise ValueError(_unsupported_message(*pairs[first]))
+    return rest
 
 
 def _skip_pair(cloud: Any, resource: Any, options: Options) -> None:
