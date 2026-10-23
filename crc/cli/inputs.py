@@ -168,3 +168,4 @@ def validate_values(options: Options) -> None:
     is_valid_dict("age", options.age)
     is_valid_dict("detach_age", options.detach_age)
     is_valid_dict("influxdb", options.influxdb)
+

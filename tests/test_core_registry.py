@@ -133,3 +133,4 @@ def test_default_registry_functions_use_default_instance(
     monkeypatch.undo()
     assert registry.DEFAULT_REGISTRY is not isolated
     assert registry.DEFAULT_REGISTRY.clouds() == registered_before
+
