@@ -17,7 +17,7 @@ Modules, split by responsibility:
 
 ## Public API
 
-- `SdkInstance`: Protocol of the attributes read from an OCI compute instance.
+- `SdkInstance`: Protocol of the attributes read from an OCI compute instance (including defined tags and metadata, read only by the OKE guard).
 - `ComputeApi`: Protocol of the three OCI calls the VM cleaner uses (list instances, terminate instance, stop instance); tests pass fakes.
 - `ApiFactory`: callable returning the `ComputeApi` of one region.
 - `STOP_ACTION`: the instance_action value that stops an instance.
@@ -36,8 +36,10 @@ Modules, split by responsibility:
 - `plan()` only lists and decides (ARCH-005); `apply()` is the only caller of `terminate_instance` / `stop_instance`.
 - Only instances in an allowed state (`RUNNING` by default) are candidates; `filter_tags` needs every key (`docs/refactor/FILTER_VARIANTS.md`, section 5).
 - An empty age matches every instance (SAF-006) and `MAX_AGE` can shorten the age (SAF-010); the age of an instance with a custom age tag fails open to `--age` (SAF-009, `BUG-004`).
+- OKE node-pool and instance-pool members are never terminated or stopped (`BUG-158`, same guard as `crc/oci/spot_vm`, `policy.oci_is_managed_or_oke_node`: an `oke` / `instancepool` / `instance_pool` / `instance-pool` marker, case-insensitive, in any freeform tag `key:value`, defined tag `namespace:key:value` or metadata entry). It runs right after the state check, also when `filter_tags` is empty; the skip reason is `managed`.
+- An unexpected error while evaluating one instance (missing or naive `time_created`, malformed `MAX_AGE`; `BUG-162`) is logged at ERROR, recorded as a run-log failure and the instance is kept; the loop goes on with the next instance and region (skip reason `evaluation failed`, in `plan().skipped` only). The run no longer aborts.
 - A failed terminate or stop is logged and skipped, never raised, as on main; list and region errors are not isolated per instance (connectivity errors skip the region, other errors propagate).
-- Known bugs and quirks (do not fix outside a behaviour-fix rung): `docs/refactor/BUGS.md` (`BUG-158` to `BUG-171`, `BUG-352`).
+- Known bugs and quirks (do not fix outside a behaviour-fix rung): `docs/refactor/BUGS.md` (`BUG-159` to `BUG-161`, `BUG-163` to `BUG-171`, `BUG-352`; `BUG-158` and `BUG-162` are fixed in FIX-OCI-VM).
 - Do not call real cloud APIs in tests; use fakes for `ComputeApi`.
 
 ## Extension Rules
