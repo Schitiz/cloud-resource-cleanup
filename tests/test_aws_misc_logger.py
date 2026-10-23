@@ -428,7 +428,7 @@ def _vpc(aws: FakeAws, *, dry_run: bool) -> VPC:
         lambda region: FakeResource(aws, region),
         lambda: list(aws.case.regions),
     )
-    return VPC(dry_run, None, None, None, runtime)
+    return VPC(dry_run, {"env": ["test"]}, None, None, runtime)
 
 
 def test_vpc_dry_run_and_real_run_lines(run_lines: Any) -> None:
@@ -482,7 +482,7 @@ def test_vpc_cleaner_plan_apply_and_skipped_region(run_lines: Any) -> None:
         lambda region: FakeClient(aws, region),
         lambda region: FakeResource(aws, region),
         lambda: [W2],
-        None,
+        {"env": ["test"]},
         None,
         None,
     )

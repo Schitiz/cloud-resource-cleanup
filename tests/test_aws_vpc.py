@@ -42,7 +42,7 @@ def _cleaner(
         client_factory=lambda region: FakeClient(aws, region),
         resource_factory=lambda region: FakeResource(aws, region),
         list_regions=lambda: list(aws.case.regions),
-        filter_tags=filter_tags,
+        filter_tags={"env": ["test"]} if filter_tags is None else filter_tags,
         exception_tags=exception_tags,
         notags=notags,
     )
@@ -108,10 +108,10 @@ def test_plan_in_dry_run_does_not_evaluate_protection(caplog: pytest.LogCaptureF
     assert plan.skipped == ()
 
 
-def test_plan_real_vpc_with_exception_tags_raises_before_any_mutation() -> None:
+def test_plan_real_vpc_with_exception_tags_evaluates_its_tags_bug_012() -> None:
     aws = _aws({W2: [full("vpc-1")]})
-    with pytest.raises(TypeError, match="not iterable"):
-        _cleaner(aws, exception_tags={"env": []}).plan(_context())
+    plan = _cleaner(aws, exception_tags={"env": []}).plan(_context())
+    assert [c.extra["protected"] for c in plan.candidates] == [False]
     assert _mutating(aws) == []
 
 
@@ -143,7 +143,6 @@ def test_apply_tears_down_in_order_and_deletes_the_vpc_last() -> None:
         "gw.delete",
         "rta.delete",
         "rt.delete",
-        "instance.terminate",
         "delete_vpc_endpoints",
         "sg.delete",
         "peering.delete",

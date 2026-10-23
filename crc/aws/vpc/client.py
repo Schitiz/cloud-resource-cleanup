@@ -53,11 +53,7 @@ class RouteTable(Deletable, Protocol):
 
 
 class Instance(Protocol):
-    """An EC2 instance in a subnet."""
-
-    def terminate(self) -> object:
-        """Terminate the instance."""
-        ...
+    """An EC2 instance in a subnet (only counted, never terminated: BUG-088)."""
 
 
 class Subnet(Deletable, Protocol):
@@ -106,6 +102,16 @@ class Vpc(Protocol):
     @property
     def id(self) -> str:
         """VPC id."""
+        ...
+
+    @property
+    def is_default(self) -> bool:
+        """True for the default VPC of the region (never touched, BUG-083)."""
+        ...
+
+    @property
+    def tags(self) -> Sequence[Mapping[str, str]] | None:
+        """The VPC's tags (`None` when untagged), as boto3 returns them."""
         ...
 
     @property

@@ -5,6 +5,11 @@ order), results, log records, stdout and raised errors must be identical for eve
 registered `Cleaner` path (factory with a `RunContext`, `plan()` then `apply()` unless dry run)
 is compared per region on SDK calls, and on results, errors, stdout, log records and the
 summary lines.
+
+Cases that trigger a fixed bug are not in `CASES`: they sit in `DIVERGING` with their bug ID,
+and the test asserts that the new code differs from the oracle and the exact new outcome
+(BUG-012, BUG-083, BUG-087, BUG-088; FIX-AWS-VPC). The call lists of the other cases are
+compared with the instance scan reads removed (the scan runs first now, BUG-088).
 """
 
 import datetime
@@ -70,6 +75,7 @@ class V:
     endpoints: list[str] = field(default_factory=list)
     peerings: list[str] = field(default_factory=list)
     tags: list[Any] | None = None
+    is_default: bool = False
 
 
 def full(vid: str, tags: list[Any] | None = None) -> V:
@@ -82,7 +88,7 @@ def full(vid: str, tags: list[Any] | None = None) -> V:
             Rt(f"rtb-{vid}-empty"),
         ],
         subnets=[
-            Sub(f"subnet-{vid}-1", [f"i-{vid}-1", f"i-{vid}-2"], [f"eni-{vid}-1"]),
+            Sub(f"subnet-{vid}-1", [], [f"eni-{vid}-1"]),
             Sub(f"subnet-{vid}-2", [], [f"eni-{vid}-2", f"eni-{vid}-3"]),
         ],
         sgs=[(f"sg-{vid}-def", "default"), (f"sg-{vid}-a", "web"), (f"sg-{vid}-b", "db")],
@@ -113,7 +119,7 @@ def client_error(operation: str) -> Exception:
 class Case:
     id: str
     regions: Mapping[str, Any]
-    filter_tags: Any = field(default_factory=dict)
+    filter_tags: Any = field(default_factory=lambda: {"env": ["test"]})
     exception_tags: Any = field(default_factory=dict)
     notags: Any = field(default_factory=dict)
     dry_run: bool = False
@@ -138,7 +144,6 @@ def _case_group_basic() -> list[Case]:
         Case("dry-run-with-filter", TWO, filter_tags={"env": ["test"]}, dry_run=True),
         Case("delete-two-regions", TWO),
         Case("delete-one", ONE),
-        Case("filter-none", ONE, filter_tags=None),
         Case("filter-key-only-empty-values", ONE, filter_tags={"env": []}),
         Case("filter-key-and-values", ONE, filter_tags={"env": ["a", "b*"]}),
         Case("filter-two-keys", ONE, filter_tags={"env": ["test"], "owner": ["qa"]}),
@@ -172,17 +177,15 @@ def _case_group_children() -> list[Case]:
         ),
         Case("two-gateways", {W2: [V("vpc-1", gateways=["igw-1", "igw-2"])]}),
         Case(
-            "instances-in-two-subnets",
+            "instances-in-two-subnets-dry-run",
             {W2: [V("vpc-1", subnets=[Sub("s-1", ["i-1"]), Sub("s-2", ["i-2", "i-3"])])]},
+            dry_run=True,
         ),
     ]
 
 
 def _case_group_skip() -> list[Case]:
     return [
-        Case("exception-tags-real-vpc-raises-type-error", ONE, exception_tags={"keep": []}),
-        Case("notags-real-vpc-raises-type-error", ONE, notags={"keep": []}),
-        Case("both-real-vpc-raises-type-error", ONE, exception_tags={"a": []}, notags={"b": []}),
         Case(
             "exception-tags-dry-run-does-not-raise",
             ONE,
@@ -190,19 +193,9 @@ def _case_group_skip() -> list[Case]:
             dry_run=True,
         ),
         Case("notags-dry-run-does-not-raise", ONE, notags={"keep": []}, dry_run=True),
-        Case(
-            "exception-tags-empty-first-region-raises-in-second",
-            {W2: [], E1: [full("vpc-2")]},
-            exception_tags={"keep": []},
-        ),
         Case("exception-tags-no-vpcs-no-error", {W2: [], E1: []}, exception_tags={"keep": []}),
         Case("exception-none-notags-none", ONE, exception_tags=None, notags=None),
         Case("exception-empty-notags-empty", ONE, exception_tags={}, notags={}),
-        Case(
-            "exception-tags-second-vpc-never-reached",
-            {W2: [full("vpc-1"), full("vpc-2")]},
-            exception_tags={"keep": []},
-        ),
     ]
 
 
@@ -277,7 +270,6 @@ def _case_group_tagged() -> list[Case]:
 
 
 def _case_group_errors() -> list[Case]:
-    delete_key = ("delete_vpc", W2, "vpc-1")
     return [
         Case(
             "list-connection-error-skips-region",
@@ -294,22 +286,6 @@ def _case_group_errors() -> list[Case]:
         ),
         Case("list-unexpected-error", {W2: ValueError("boom")}, fails_in_plan=True),
         Case("list-error-dry-run", {W2: client_error("DescribeVpcs")}, dry_run=True),
-        Case("delete-vpc-retried-then-succeeds", ONE, errors={delete_key: [ValueError("a"), None]}),
-        Case(
-            "delete-vpc-fails-every-retry-swallowed",
-            {W2: [full("vpc-1"), full("vpc-2")]},
-            errors={delete_key: [client_error("DeleteVpc")] * FIVE},
-        ),
-        Case(
-            "delete-vpc-dependency-violation-swallowed",
-            ONE,
-            errors={delete_key: [ValueError("DependencyViolation")] * 9},
-        ),
-        Case(
-            "delete-vpc-connection-error-is-retried-not-skipped",
-            {W2: [full("vpc-1")], E1: [full("vpc-3")]},
-            errors={delete_key: [conn_error(), conn_error(), None]},
-        ),
         Case(
             "security-group-delete-client-error-propagates",
             {W2: [full("vpc-1"), full("vpc-2")]},
@@ -344,11 +320,6 @@ def _case_group_errors() -> list[Case]:
             "association-delete-error-propagates",
             ONE,
             errors={("rta.delete", W2, "rtbassoc-vpc-1-s1"): client_error("DisassociateRoute")},
-        ),
-        Case(
-            "instance-terminate-error-propagates",
-            ONE,
-            errors={("instance.terminate", W2, "i-vpc-1-2"): client_error("Terminate")},
         ),
         Case(
             "describe-endpoints-error-propagates",
@@ -586,6 +557,8 @@ class FakeSubnet(Leaf):
 class FakeVpc:
     def __init__(self, aws: FakeAws, region: str, spec: V) -> None:
         self.aws, self.region, self.spec, self.id = aws, region, spec, spec.id
+        self.is_default = spec.is_default
+        self.tags = spec.tags
         rid = spec.id
         self.internet_gateways = Coll(
             aws,
@@ -739,7 +712,7 @@ def test_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run(_new, case, monkeypatch, caplog, capsys)
-    assert new.calls == old.calls
+    assert new.calls == _expected_calls(case, old.calls)
     assert new.error == old.error
     assert new.deleted == old.deleted
     assert new.count == old.count
@@ -765,6 +738,8 @@ def _run_cleaner(
         now=NOW,
     )
     cleaner = get("aws", "vpc")(ctx)
+    assert isinstance(cleaner, VpcCleaner)
+    cleaner.sleep = lambda seconds: None
     error: tuple[str, str] | None = None
     deleted: list[str] = []
     try:
@@ -777,6 +752,36 @@ def _run_cleaner(
         error = (type(e).__name__, str(e))
     logs = [(r.name, r.levelno, r.getMessage()) for r in caplog.records]
     return Outcome(aws.calls, deleted, len(deleted), logs, capsys.readouterr().out, error)
+
+
+def _scan_free(calls: Sequence[tuple[Any, ...]]) -> list[tuple[Any, ...]]:
+    """Drop the old post-route-table instance scan reads from the oracle call list."""
+    seen: set[tuple[Any, ...]] = set()
+    kept: list[tuple[Any, ...]] = []
+    for call in calls:
+        if call[0] == "subnet.instances.all":
+            continue
+        if call[0] == "subnets.all" and call[:3] not in seen:
+            seen.add(call[:3])
+            continue
+        kept.append(call)
+    return kept
+
+
+def _expected_calls(case: Case, old_calls: Sequence[tuple[Any, ...]]) -> list[tuple[Any, ...]]:
+    """Expected calls for unmarked cases: identical to the oracle except that the read-only
+    instance scan (`subnets.all` + `subnet.instances.all` per subnet) runs before `DhcpOptions`
+    instead of after `route_tables.all` (BUG-088)."""
+    without_old_scan = _scan_free(old_calls)
+    out: list[tuple[Any, ...]] = []
+    for i, call in enumerate(without_old_scan):
+        if call[0] == "DhcpOptions" and i + 1 < len(without_old_scan):
+            _, region, vpc_id, _ = without_old_scan[i + 1]
+            vpc = next(v for v in case.regions[region] if v.id == vpc_id)
+            out.append(("subnets.all", region, vpc_id))
+            out.extend(("subnet.instances.all", region, s.id) for s in vpc.subnets)
+        out.append(call)
+    return out
 
 
 def _sdk(calls: Sequence[tuple[Any, ...]]) -> list[tuple[Any, ...]]:
@@ -821,7 +826,7 @@ def test_cleaner_protocol_matches_main(
         assert _mutations(new.calls) == _mutations(old.calls)
         return
     assert new.deleted == old.deleted
-    assert _by_region(new.calls) == _by_region(old.calls)
+    assert _by_region(new.calls) == _by_region(_expected_calls(case, old.calls))
     old_logs = old.logs[:-1]
     # plan() decides every VPC up front, so after an aborted region the Cleaner path has
     # already logged the "Tags and notags not present" warning of VPCs main never reached.
@@ -843,26 +848,10 @@ def _errors_with(kind: str) -> Callable[[Outcome], bool]:
 
 QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
     (
-        "exception-tags-real-vpc-raises-type-error",
-        lambda o: (
-            o.error == ("TypeError", "'FakeVpc' object is not iterable") and o.deleted == ["vpc-1"]
-        ),
-    ),
-    ("notags-real-vpc-raises-type-error", _errors_with("TypeError")),
-    ("both-real-vpc-raises-type-error", _errors_with("TypeError")),
-    (
         "exception-tags-dry-run-does-not-raise",
         lambda o: o.error is None and o.deleted == ["vpc-1"],
     ),
-    (
-        "exception-tags-empty-first-region-raises-in-second",
-        lambda o: o.error is not None and o.deleted == ["vpc-2"],
-    ),
     ("exception-tags-no-vpcs-no-error", lambda o: o.error is None and o.deleted == []),
-    (
-        "exception-tags-second-vpc-never-reached",
-        lambda o: o.deleted == ["vpc-1", "vpc-2"] and o.error is not None,
-    ),
     (
         "tagged-protected-vpc-still-recorded",
         lambda o: (
@@ -899,24 +888,6 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
         lambda o: (
             ("WARNING", "Tags and notags not present")
             in [(logging.getLevelName(level), msg) for _, level, msg in o.logs]
-        ),
-    ),
-    (
-        "delete-vpc-fails-every-retry-swallowed",
-        lambda o: (
-            o.error is None
-            and sum(1 for c in o.calls if c[0] == "delete_vpc") == FIVE + 1
-            and o.deleted == ["vpc-1", "vpc-2"]
-        ),
-    ),
-    (
-        "delete-vpc-retried-then-succeeds",
-        lambda o: sum(1 for c in o.calls if c[0] == "delete_vpc") == THREE_DELETES,
-    ),
-    (
-        "delete-vpc-connection-error-is-retried-not-skipped",
-        lambda o: (
-            o.error is None and sum(1 for c in o.calls if c[0] == "delete_vpc") == FOUR_DELETES
         ),
     ),
     (
@@ -982,6 +953,179 @@ def test_quirk_is_preserved(
     new = _run(_new, case, monkeypatch, caplog, capsys)
     assert check(old), "oracle no longer shows the quirk"
     assert check(new)
+
+
+def _sleepless(vpc: VPC) -> VPC:
+    vpc._runtime = VpcRuntime(sleep=lambda seconds: None)
+    return vpc
+
+
+def _deletes(o: Outcome) -> list[tuple[Any, ...]]:
+    return [c for c in o.calls if c[0] == "delete_vpc"]
+
+
+def _terminates(o: Outcome) -> list[tuple[Any, ...]]:
+    return [c for c in o.calls if c[0] == "instance.terminate"]
+
+
+def _kept_for_instances(o: Outcome) -> bool:
+    return o.error is None and _mutations(o.calls) == [] and o.deleted == []
+
+
+_TWO_SUBNETS = {W2: [V("vpc-1", subnets=[Sub("s-1", ["i-1"]), Sub("s-2", ["i-2", "i-3"])])]}
+_DELETE_KEY = ("delete_vpc", W2, "vpc-1")
+_DEPENDENCY = ValueError("DependencyViolation")
+_DEPENDENCY_CLIENT_ERROR = ClientError(
+    {"Error": {"Code": "DependencyViolation", "Message": "in use"}}, "DeleteVpc"
+)
+
+# (case, bug id, check of the new outcome). The oracle must show the old behaviour and the new
+# outcome must differ from it.
+DIVERGING: Sequence[tuple[Case, str, Callable[[Outcome], bool]]] = [
+    (
+        Case("filter-none", ONE, filter_tags=None),
+        "BUG-083",
+        lambda o: o.error is not None and o.error[0] == "ValueError" and o.calls == [],
+    ),
+    (
+        Case("filter-empty-dict", ONE, filter_tags={}),
+        "BUG-083",
+        lambda o: o.error is not None and o.error[0] == "ValueError" and o.calls == [],
+    ),
+    (
+        Case("filter-empty-dict-dry-run", ONE, filter_tags={}, dry_run=True),
+        "BUG-083",
+        lambda o: o.error is not None and o.error[0] == "ValueError" and o.calls == [],
+    ),
+    (
+        Case("default-vpc-kept", {W2: [V("vpc-1", is_default=True), V("vpc-2")]}),
+        "BUG-083",
+        lambda o: (
+            o.error is None
+            and o.deleted == ["vpc-2"]
+            and _deletes(o) == [("delete_vpc", W2, "vpc-2")]
+        ),
+    ),
+    (
+        Case("default-vpc-dry-run", {W2: [V("vpc-1", is_default=True)]}, dry_run=True),
+        "BUG-083",
+        lambda o: o.error is None and o.deleted == [] and _mutations(o.calls) == [],
+    ),
+    (
+        Case("exception-tags-real-vpc-no-longer-raises", ONE, exception_tags={"keep": []}),
+        "BUG-012",
+        lambda o: o.error is None and o.deleted == ["vpc-1"] and len(_deletes(o)) == 1,
+    ),
+    (
+        Case("notags-real-vpc-no-longer-raises", ONE, notags={"keep": []}),
+        "BUG-012",
+        lambda o: o.error is None and o.deleted == ["vpc-1"],
+    ),
+    (
+        Case("both-real-vpc-no-longer-raises", ONE, exception_tags={"a": []}, notags={"b": []}),
+        "BUG-012",
+        lambda o: o.error is None and o.deleted == ["vpc-1"],
+    ),
+    (
+        Case(
+            "exception-tags-second-region-reached",
+            {W2: [], E1: [full("vpc-2")]},
+            exception_tags={"keep": []},
+        ),
+        "BUG-012",
+        lambda o: o.error is None and o.deleted == ["vpc-2"],
+    ),
+    (
+        Case(
+            "exception-tags-every-vpc-reached",
+            {W2: [full("vpc-1"), full("vpc-2")]},
+            exception_tags={"keep": []},
+        ),
+        "BUG-012",
+        lambda o: o.error is None and [c[2] for c in _deletes(o)] == ["vpc-1", "vpc-2"],
+    ),
+    (
+        Case("instances-in-two-subnets", _TWO_SUBNETS),
+        "BUG-088",
+        lambda o: _kept_for_instances(o) and _terminates(o) == [],
+    ),
+    (
+        Case(
+            "instance-terminate-never-called",
+            {W2: [V("vpc-1", subnets=[Sub("s-1", ["i-1", "i-2"])])]},
+            errors={("instance.terminate", W2, "i-2"): client_error("Terminate")},
+        ),
+        "BUG-088",
+        lambda o: _kept_for_instances(o) and _terminates(o) == [],
+    ),
+    (
+        Case("delete-vpc-other-error-not-retried", ONE, errors={_DELETE_KEY: [ValueError("a")]}),
+        "BUG-087",
+        lambda o: o.error is None and len(_deletes(o)) == 1 and o.deleted == [],
+    ),
+    (
+        Case(
+            "delete-vpc-client-error-skips-vpc-and-run-goes-on",
+            {W2: [full("vpc-1"), full("vpc-2")]},
+            errors={_DELETE_KEY: [client_error("DeleteVpc")] * FIVE},
+        ),
+        "BUG-087",
+        lambda o: (
+            o.error is None
+            and [c[2] for c in _deletes(o)] == ["vpc-1", "vpc-2"]
+            and o.deleted == ["vpc-2"]
+        ),
+    ),
+    (
+        Case(
+            "delete-vpc-dependency-violation-exhausted-not-listed",
+            {W2: [full("vpc-1"), full("vpc-2")]},
+            errors={_DELETE_KEY: [_DEPENDENCY_CLIENT_ERROR] * FIVE},
+        ),
+        "BUG-087",
+        lambda o: o.error is None and len(_deletes(o)) == FIVE + 1 and o.deleted == ["vpc-2"],
+    ),
+    (
+        Case(
+            "delete-vpc-non-client-dependency-text-not-retried",
+            ONE,
+            errors={_DELETE_KEY: [_DEPENDENCY] * 9},
+        ),
+        "BUG-087",
+        lambda o: o.error is None and len(_deletes(o)) == 1 and o.deleted == [],
+    ),
+    (
+        Case(
+            "delete-vpc-connection-error-not-retried",
+            {W2: [full("vpc-1")], E1: [full("vpc-3")]},
+            errors={_DELETE_KEY: [conn_error(), conn_error(), None]},
+        ),
+        "BUG-087",
+        lambda o: o.error is None and len(_deletes(o)) == THREE_DELETES and o.deleted == ["vpc-3"],
+    ),
+]
+
+
+@pytest.mark.usefixtures("debug_logs")
+@pytest.mark.parametrize(("case", "bug", "check"), DIVERGING, ids=[c.id for c, _, _ in DIVERGING])
+def test_diverges_from_main_by_design(
+    case: Case,
+    bug: str,
+    check: Callable[[Outcome], bool],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert bug in {"BUG-012", "BUG-083", "BUG-087", "BUG-088"}
+    old = _run(_legacy, case, monkeypatch, caplog, capsys)
+    new = _run(lambda c: _sleepless(_new(c)), case, monkeypatch, caplog, capsys)
+    assert (new.calls, new.error, new.deleted) != (old.calls, old.error, old.deleted), bug
+    assert not check(old), bug
+    assert check(new), bug
+    via_cleaner = _run_cleaner(case, monkeypatch, caplog, capsys)
+    assert via_cleaner.error == new.error
+    assert _mutations(via_cleaner.calls) == _mutations(new.calls)
+    assert via_cleaner.deleted == new.deleted
 
 
 SKIP_TAGS: Sequence[Any] = [
@@ -1063,7 +1207,7 @@ def test_runtime_injection_replaces_boto3(monkeypatch: pytest.MonkeyPatch) -> No
         resource_factory=lambda region: FakeResource(aws, region),
         list_regions=lambda: list(case.regions),
     )
-    vpc = VPC(False, {}, {}, {}, runtime)
+    vpc = VPC(False, {"env": ["test"]}, {}, {}, runtime)
     vpc.delete()
     assert vpc.get_deleted == ["vpc-1", "vpc-2", "vpc-3"]
     assert vpc.delete_count == len(vpc.get_deleted)
