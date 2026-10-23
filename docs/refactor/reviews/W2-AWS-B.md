@@ -49,3 +49,31 @@ Wave W2 lane W2-AWS-B: structure-only split of the four large AWS files, no beha
    - `make check` total runtime: `2m49s`
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+### Round 1 fixes
+
+Commit `33d494c` only adds re-exports (`Clock` in spot `cleaner.py`, `error_code` in `volumes.py`, `Decision` in vm `cleaner.py`, `__all__` with `VpcRuntime` in vpc `cleaner.py`). No logic changed; all correct.
+
+### Findings
+
+1. **No behaviour change**: I compared the AST of every function, method, class body and module-level assignment in the four base modules (`cea0a8a`) with their HEAD definitions (leading `_` stripped, line info ignored). Every VPC definition (cleaner, runtime and the `VPC` adapter) and every spot `cleaner.py` definition is identical. The only differences are these:
+   - spot `volume_tags.py`: `describe_volume_tag_list` and `volume_tag_keys` now share `_volume_tags`. It makes the same `describe_volumes` call with the same `Key` filter, the same empty-list and empty-set results, the same `ERRORS` handler and the same log text. The set comprehension that dropped the `if t.get("Key")` filter is equivalent because `_volume_tags` already applies it. `error_code` only gained a docstring.
+   - vm: `filter_instances`, `_note_skipped`, `should_skip`, `_decide`, `_screen` and `_judge` moved verbatim into `InstanceJudge`, and `VmCleaner` delegates to it. `build_vm_cleaner` calls `settings_from_options`, which has the same body, and `summarise` only gained a docstring. One subtlety: `_screen` used to call the overridable `VmCleaner.should_skip`, and now it calls `InstanceJudge.should_skip`. This is equivalent because nothing in `crc/` or `tests/` subclasses `VmCleaner` or patches `should_skip`, and `VmSettings` is a frozen dataclass that is never reassigned. The order of SDK calls and all log text are unchanged.
+   - Names defined in more than one module of a package are bound correctly (`ERRORS`, `error_code` and `log_summary` are imported from the intended module). The only duplicates, `SERVICE_NAME` and `RegionLister` in `vm/scan.py`, already existed at base.
+2. **Import paths and patch targets**: For each old module and each package `__init__`, I diffed `vars()` at base and at HEAD. Only incidental imports and private names are gone, plus `crc.aws.vpc.cleaner.VPC`, which nothing in `crc/`, `crc.py` or `tests/` imports from that path (`crc.aws.vpc.VPC` still works). Re-exporting it from `cleaner.py` would create an import cycle with `adapter.py`, so this is acceptable. No test has a string patch target that names `crc.aws.{vm,vpc,spot_instance_requests}`. The object patches still apply: `mock.patch.object(s, "VOLUME_POLL_INTERVAL_SEC", 0)` hits the spot adapter attribute that `adapter.py:88` reads, and `monkeypatch.setattr(_regionlog, "clock", ...)` patches the shared module that `vpc/runtime.py`, `vpc/cleaner.py` and `vpc/adapter.py` all reach through the module attribute.
+3. **Tests and guardrails**: `git diff cea0a8a..HEAD` touches no file under `tests/` (so no hash-locked test and no `tests/legacy/*.txt` oracle). It also touches no guardrail file and no flat `crc/aws/*.py` or `crc/aws/_common.py`.
+4. **Sizes and seams**: Every file in the three packages is at most 250 lines; the largest is `vpc/cleaner.py` at 245. The splits follow real seams (runtime and settings, region and error isolation, summary and reporting, volume tags, lookups, sweep, per-instance judge, legacy `VPC` adapter). `_volume_tags` and `error_code` are genuinely shared.
+5. **READMEs**: The three READMEs are 46 to 59 lines, their module lists are in sync, and ARCH-002 is green.
+6. **Gates**: `pip install -r requirements.txt -r requirements-dev.txt`, then `make check`: ruff passed, mypy strict passed (262 files), lint-imports kept 5 contracts with 0 broken, and pytest passed **43010 in 159.10s** (this includes ARCH-001..005 and SAF-LOCK). Total `make check` runtime: **178s**. The test count at base `cea0a8a`, from `pytest --collect-only`, is 43010, so the count is equal.
+
+### Fixes in round 2
+
+None needed.
+
+### New bugs
+
+None beyond the ones already listed (I confirmed their locations: `crc/aws/vm/judge.py:111` and `:75`).
+
+ROUND 2 VERDICT: APPROVE
