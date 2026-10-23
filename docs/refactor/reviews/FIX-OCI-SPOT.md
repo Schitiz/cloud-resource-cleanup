@@ -48,3 +48,31 @@ None.
 - `pytest` (including `tests/archtest`): 42474 passed (up from 42444 on `182466d`)
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+### Round 1 fixes checked
+
+- The `SdkAttachment.instance_id` property and the widened `ComputeClient.list_volume_attachments(compartment_id, instance_id="", volume_id="")` Protocol in `crc/oci/spot_vm/client.py` are correct. They match the real SDK call `list_volume_attachments(compartment_id, **kwargs)` (filters `instance_id` / `volume_id`), which `list_all` reaches through `oci.pagination.list_call_get_all_results(call, compartment_id=..., volume_id=...)`. The `record_failure` assertion in `tests/test_oci_spot_vm_fix.py::test_failed_attachment_read_keeps_the_volume` is correct.
+- I agree with Round 1 findings 1 to 6.
+
+### Findings
+
+1. BUG-255 is fixed for the inputs in its row: a volume older than the instance, a volume attached to another instance (multi-attach), and uncertain cases (missing, non-`datetime` or naive creation time; failed attachment read; attachment without `instance_id`). In each of these the volume is kept with skip `not_owned`. The ownership read sits behind the tag check in both paths (adapter `SpotVM._process` at `crc/oci/spot_vm/adapter.py:231-240` and cleaner `apply` / dry-run `_checked` at `crc/oci/spot_vm/cleaner.py:229-262`). The cleaner uses `candidate.launch_time`, which is set to `instance.time_created` without conversion (`cleaner.py:198`).
+2. Fails on 182466d, passes now: I copied the HEAD `tests/test_oci_spot_instances_parity.py` onto a 182466d worktree and ran `-k bug_255`. All 8 `test_bug_255_volume_not_owned_is_kept` cases failed (the old code deletes `v1`), and they pass on HEAD. `tests/test_oci_spot_vm_fix.py` only fails at collection on 182466d (it imports `leftovers.VolumeOwner`), so the parity cases are the behavioural proof.
+3. Direction rule: the only new branches return `False` (keep), and they run before `delete_leftover`. Instance terminate, wait and order are unchanged. `tests/legacy/oci_spot_vm.txt` is untouched. `_without_ownership_reads` drops only the new by-volume read (`list_volume_attachments_of_volume`) and the pager call just before it. Every other call, log, volume and stdout value is still compared with the oracle, and the mutating-call comparison in `test_cleaner_protocol_matches_main` is unfiltered. The parity fake defaults the volume creation time to `LATE` (after every instance), so unmarked cases stay owned and equal. The two new equal cases (volume created with the instance; another instance's `DETACHED` attachment) pin the non-covered inputs. The extra read per tag-passing volume is the minimum needed to tell a covered input from an uncovered one. It is a read only, and a volume older than the instance skips it.
+4. Production commands: none reach OCI spot. No CLI flag, dependency, async or pydantic was added. `SpotVM._volume_ok_to_delete` keeps its two-argument form, so the locked `tests/test_oci_spot_vm.py` stays green.
+5. Fail-closed: no `ValueError` path was added. Every uncertain input keeps the volume, and nothing here mutates before the check.
+6. Protected files: `git diff 182466d..HEAD` touches none of `tests/test_oci_spot_vm.py`, `tests/archtest/**`, `tests/legacy/**`, `docs/refactor/PLAN.md`, `STATUS.md`, `BUGS.md`, `CLEANUP_SAFETY.md`, `AGENTS.md`, `ARCHITECTURE.md` or `.cursor/**`.
+7. README: Public API (`VolumeOwner`, `volume_owned`, the owner argument) and Safety Invariants (the BUG-255 rule, compartment scope, keep-on-uncertain, the remaining `filter_tags` / `age` gap) are updated. ARCH-002 passes.
+8. Owner decision: nothing is left unfixed from the rung's list. The `filter_tags` / `age` half of the BUGS.md row text is a description of today's behaviour, not part of the task's fix, and the README says so explicitly.
+9. NIT (`crc/oci/spot_vm/leftovers.py:140-143`): a failed attachment read calls both `record_failure` and `record_skip("not_owned")`, so one volume counts as `failed=1` and `skipped=1` in `RESULT`. The existing `get_volume` failure path (`leftovers.py:166-169`) records only the failure. This does not affect the exit code (`crc/core/logger.py` has no exit-code logic) and it does not change what is deleted. Proposed (optional): in the `except` branch, log the DEBUG reason line and return `False` without `record_skip`, then update the parity reason assertion to match. I left it as is to keep this round minimal.
+10. NIT (not blocking, owner-only file): the optional SAF-044 text proposed under "## Owner action" above is accurate. Proposed `CLEANUP_SAFETY.md` text under SAF-044: "A leftover OCI spot volume is deleted only when it was created at or after the instance's `time_created` and no other instance in the run's compartment has it attached (any state but `DETACHED`); a missing time or a failed attachment read keeps it."
+
+### Gates
+
+- `pip install -r requirements.txt -r requirements-dev.txt`: ok
+- `make check`: passed (`ruff check`: all checks passed; `mypy`: no issues found in 229 source files; import-linter: 5 kept, 0 broken; `pytest -q`: 42474 passed)
+- Test count: 42474 (42444 at 182466d, +30)
+
+ROUND 2 VERDICT: APPROVE
