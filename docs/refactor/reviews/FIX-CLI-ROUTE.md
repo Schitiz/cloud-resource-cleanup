@@ -24,6 +24,11 @@ Optional, `CLEANUP_SAFETY.md`: no destructive invariant is removed. If the owner
 
 None. No production command changes: Jenkins uses `--cloud aws --resource snapshot` and `--cloud aws --resource vm --scan_tag autoclean=false --dry_run`.
 
+Partly left (added in round 2): this rung fixes the cloud routing of `BUG-009` and `BUG-084` (the part the task names). Two other clauses of those rows stay as on `main` and need an owner decision before a later rung touches them:
+- `BUG-009` "hard-coded `age_days=90`": honouring `--age` would delete more for any `--age` below 90 days (direction rule), and the production job passes `--age '{"days": 90}'`, so the selection there is the same either way. Left.
+- `BUG-009` / `BUG-084` "sends nothing to Slack or Influx": adding notifications changes Slack text and InfluxDB points for the production snapshot command (`BUG-040` shape). Left.
+When the driver marks the rows "fixed in FIX-CLI-ROUTE", those two clauses should stay open (for example as a note on the row or under `BUG-040`).
+
 ## New bugs
 
 - `crc/core/selection.py` (`build_selection`, `RESOURCES` use): still selects `snapshot` for every cloud and `vpc` for every cloud, which no longer matches `main()` after this fix. Exists on main: yes (same shape as `BUG-009` / `BUG-084`). Not fixed here (outside the rung); `tests/test_core_selection.py` pins the difference for the two bugs.
@@ -67,4 +72,33 @@ Ran `pip install -r requirements.txt -r requirements-dev.txt && make check`:
 - `pytest -q`: `42468 passed` (up from 42444 on `182466d`, +24 new tests)
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope `git diff 182466d..HEAD` (commits `8b28736`, `dd4ca55`). Round 1 found no blocking issue and made no code change; its three NITs are confirmed and stay non-blocking (the `CRC.delete_vpc` and `build_selection` items are outside `crc/cli/` dispatch routing and already recorded under "New bugs").
+
+### Checks
+
+1. **Bugs fixed, with tests that fail on 182466d.** Copied `tests/test_cli_route_fix.py` into a worktree at `182466d`: 18 failed, 5 passed. The 18 are the six single-cloud raises (`azure`/`gcp`/`oci` x `snapshot`/`vpc`), the two `--cloud all` once-for-AWS cases and the ten blank `--scan_tag` cases; the 5 that pass on both are the unchanged production and scan-path checks, as intended. All 23 pass on `HEAD`.
+   - `BUG-344`: the `--scan_tag` default is `None` (`crc/cli/args.py:266`, no `default=`), so `check_scan_tag` (`crc/cli/inputs.py:148`) only fires for an explicit empty or whitespace value; runs without the flag are untouched.
+   - `BUG-009` / `BUG-084`: `check_aws_only_resources` (`crc/cli/dispatch.py:27`) is called in `main()` before `set_max_age`, so before `make_crc`, `Snapshot` or `VPC`. `--resource all` is only accepted with `--cloud all` (`crc/cli/inputs.py:115`), so no `--resource all` command can hit the new single-cloud raise. `--cloud all --resource all` raises at the AWS disk breaker (first cloud `aws`, first resource `disk`) before snapshot on both `main` and `HEAD`, so it is unchanged.
+2. **Direction rule.** The only behaviour changes are: a `ValueError` before any cleaner (single non-AWS cloud, blank tag), and under `--cloud all` three fewer `Snapshot(...).delete()` / `crc.delete_vpc` passes, all of which ran the same AWS class again. Nothing is deleted that was kept. `CRC` objects for the skipped clouds are still built by `run_dispatch` as on `main` (constructor only, no mutation). Parity: `tests/legacy/` untouched; `diverges()` in `tests/test_cli_main_parity.py` marks a case only when the oracle run actually reached the buggy path, asserts the exact new outcome and inequality with the oracle, and every unmarked case keeps all six equality asserts. `tests/test_core_selection.py` changes are limited to the `snapshot`/`vpc` non-AWS pairs, each named `BUG-009`/`BUG-084`. No global loosening.
+3. **Production commands.** `--cloud aws --resource snapshot --age ... --exception_tags ...` passes both new checks (cloud `aws`, no `--scan_tag`) and reaches `_snapshot` with `cloud == "aws"`, so `_skip_non_aws` returns False and the call sequence is unchanged. `--cloud aws --resource vm --scan_tag autoclean=false --dry_run` passes `check_scan_tag` (non-blank), skips the AWS-only check and exits 0 from `run_scan` as before. Both are covered by unmarked parity cases and `tests/test_cli_route_fix.py`.
+4. **Fail-closed before any SDK mutation.** Both checks run after the Slack/InfluxDB client constructors (no message is sent there) and before `MAX_AGE`, `run_scan` and `run_dispatch`; the tests assert `recorder.events == []` (no `CRC`) and `MAX_AGE` unset.
+5. **Protected files.** `git diff 182466d..HEAD` is empty for `docs/refactor/PLAN.md`, `STATUS.md`, `BUGS.md`, `CLEANUP_SAFETY.md`, `AGENTS.md`, `ARCHITECTURE.md`, `.cursor/`, `tests/archtest/` (including `safety_lock.json`), `tests/legacy/` and the five hash-locked tests.
+6. **README (ARCH-002).** `crc/cli/README.md` lists `check_scan_tag` and `check_aws_only_resources` under Public API, and the Safety Invariants describe the new behaviour and drop `BUG-009`, `BUG-084`, `BUG-344` from the kept-quirk list.
+7. **Unfixed parts.** Round 1 wrote "None" under Owner decision, but the `BUG-009` row also covers the hard-coded `age_days=90` and both rows cover "sends nothing to Slack or Influx", which this rung leaves (correctly: changing them would delete more or change production Slack/Influx output). Fixed in round 2 by recording both clauses under "## Owner decision".
+
+### Findings
+
+- **BLOCKING:** none.
+- **NIT (fixed):** `docs/refactor/reviews/FIX-CLI-ROUTE.md` "## Owner decision" did not mention the parts of `BUG-009` / `BUG-084` left unfixed; added.
+- **NIT (left):** `crc/aws/README.md:72` and `:78` still list `BUG-009` as a snapshot quirk. That is still accurate for the `age_days=90` and no-notification clauses, and `crc/aws/` is outside this rung, so it stays.
+- **NIT (left):** the `--cloud all` warning names one resource per call (`fixed_all` in `tests/test_cli_main_parity.py` builds `resources` from the `--resource` flag). This is correct because `--resource all` never reaches snapshot (disk breaker first), but it would need updating if the breaker ever stopped raising for `--cloud all --resource all`.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check` on `HEAD`: `ruff check .` passed, `mypy` passed, import-linter contracts kept, `pytest -q`: **42468 passed** (42444 at `182466d`, +24).
+
+ROUND 2 VERDICT: APPROVE
 
