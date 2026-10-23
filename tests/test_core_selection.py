@@ -107,6 +107,54 @@ def run_crc_main(
     return calls
 
 
+SUPPORTED_ON = {
+    "keypair": ("aws",),
+    "kms": ("aws",),
+    "nic": ("azure",),
+    "ip": ("aws", "azure", "gcp"),
+}
+
+
+def unsupported_items(items: Any) -> list[tuple[str, str]]:
+    """BUG-017 (FIX-CLI-ALL): the pairs whose CRC method raises for that cloud on main."""
+    return [(c, k) for c, k in items if c not in SUPPORTED_ON.get(k, (c,))]
+
+
+def raises_up_front(cloud: str, items: Any) -> bool:
+    return bool(unsupported_items(items)) and cloud != "all"
+
+
+def run_main_after_fix(  # noqa: PLR0913, PLR0917 - mirrors run_crc_main plus the items
+    crc_cli: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    cloud: str,
+    resource: str,
+    operation: str,
+    options: dict[str, Any],
+    items: Any,
+) -> tuple[list[tuple[str, str]], list[str]]:
+    """Run crc.py main() and return the (pairs reached, warnings) that `items` must give.
+
+    `items` is what `main` on the main branch reached. BUG-017: an unsupported pair of an
+    explicit cloud now raises before anything runs (nothing reached); under `--cloud all` it is
+    skipped with one warning.
+    """
+    bad = unsupported_items(items)
+    if raises_up_front(cloud, items):
+        with pytest.raises(ValueError):
+            run_crc_main(crc_cli, monkeypatch, cloud, resource, operation, options)
+        assert LAST_RECORDED_CALLS == []
+        return [], []
+    with caplog.at_level(logging.WARNING):
+        reached = run_crc_main(crc_cli, monkeypatch, cloud, resource, operation, options)
+    logged = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    expected_skips = [f"{k} is not supported on {c}; skipped under --cloud all" for c, k in bad]
+    assert logged[len(logged) - len(expected_skips) :] == expected_skips
+    assert reached == [item for item in items if item not in bad]
+    return list(items), logged[: len(logged) - len(expected_skips)]
+
+
 # (cloud, resource, operation, options, expected items, expected warning substrings)
 OK_CASES: list[tuple[str, str, Operation, SelectionOptions | None, list[tuple[str, str]], int]] = [
     ("aws", "disk", Operation.DELETE, None, [("aws", "disk")], 0),
@@ -166,11 +214,12 @@ def test_build_selection_matches_crc_main(
             "slack_notify_users": options.slack_notify_users,
             "slack_user_label": options.slack_user_label,
         }
-    with caplog.at_level(logging.WARNING):
-        reached = run_crc_main(crc_cli, monkeypatch, cloud, resource, operation.value, extra)
-    assert reached == expected
-    logged = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
-    assert logged == list(selection.warnings)
+    reached, logged = run_main_after_fix(
+        crc_cli, monkeypatch, caplog, cloud, resource, operation.value, extra, expected
+    )
+    if not raises_up_front(cloud, expected):
+        assert reached == expected
+        assert logged == list(selection.warnings)
 
 
 ERROR_CASES: list[tuple[str, str, Operation, SelectionOptions | None, str]] = [
@@ -251,10 +300,19 @@ def test_all_expansion_order_follows_crc_py(crc_cli: ModuleType) -> None:
 @pytest.mark.parametrize("cloud", ["aws", "azure", "gcp", "oci"])
 @pytest.mark.parametrize("resource", ["ip", "vm", "nic", "keypair", "snapshot", "vpc"])
 def test_single_pair(
-    crc_cli: ModuleType, monkeypatch: pytest.MonkeyPatch, cloud: str, resource: str
+    crc_cli: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    cloud: str,
+    resource: str,
 ) -> None:
     selection = build_selection(cloud, resource)
-    reached = run_crc_main(crc_cli, monkeypatch, cloud, resource, "delete", {})
+    reached, _ = run_main_after_fix(
+        crc_cli, monkeypatch, caplog, cloud, resource, "delete", {}, selection.items
+    )
+    if raises_up_front(cloud, selection.items):
+        assert reached == []
+        return
     assert selection == Selection(tuple(reached))
     assert list(selection.items) == reached
 
@@ -313,8 +371,10 @@ def test_exhaustive_grid_matches_crc_main(
         assert str(ours) == str(theirs.value)
         assert LAST_RECORDED_CALLS == []
         return
-    with caplog.at_level(logging.WARNING):
-        reached = run_crc_main(crc_cli, monkeypatch, cloud, resource, operation.value, extra)
-    logged = tuple(r.getMessage() for r in caplog.records if r.levelno == logging.WARNING)
-    assert list(selection.items) == reached
-    assert selection.warnings == logged
+    reached, logged_list = run_main_after_fix(
+        crc_cli, monkeypatch, caplog, cloud, resource, operation.value, extra, selection.items
+    )
+    logged = tuple(logged_list)
+    if not raises_up_front(cloud, selection.items):
+        assert list(selection.items) == reached
+        assert selection.warnings == logged
