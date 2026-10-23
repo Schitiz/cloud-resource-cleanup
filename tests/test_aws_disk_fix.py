@@ -7,8 +7,10 @@ from typing import Any
 
 import pytest
 
+from crc.aws.disk import Disk, DiskRuntime
 from crc.aws.disk.settings import build_settings
 from crc.aws.disk.volumes import VolumeFilter, tag_map, volume_label
+from crc.core import logger
 
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=datetime.UTC)
 
@@ -49,8 +51,13 @@ def test_bug_282_any_sensitive_folded_yb_task_keeps_the_volume(
     pairs: tuple[tuple[str, Any], ...], caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.DEBUG)
-    assert not _candidate(_volume(tags=_tags(*pairs)), age={"days": 1})
+    logger.begin("aws", "disk", "delete", True, {"age": {"days": 1}})
+    try:
+        assert not _candidate(_volume(tags=_tags(*pairs)), age={"days": 1})
+    finally:
+        logger.finish()
     assert "Skipping volume vol-1: sensitive yb_task=" in caplog.text
+    assert "SKIPPED cloud=aws resource=disk reason=sensitive_yb_task count=1" in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -97,10 +104,15 @@ def test_bug_283_age_and_detach_age_floor_is_their_sum(days: float, expected: bo
 
 def test_bug_283_skip_is_logged_at_debug_and_counted(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG)
-    assert not _candidate(_volume(days=8), **PROD_A)
+    logger.begin("aws", "disk", "delete", True, PROD_A)
+    try:
+        assert not _candidate(_volume(days=8), **PROD_A)
+    finally:
+        logger.finish()
     assert [r.levelno for r in caplog.records if "detach time unknown" in r.getMessage()] == [
         logging.DEBUG
     ]
+    assert "SKIPPED cloud=aws resource=disk reason=detach_unknown_too_young count=1" in caplog.text
 
 
 def test_bug_283_second_production_command_floor_is_37_days() -> None:
@@ -135,3 +147,136 @@ def test_bug_283_single_gate_floors_are_unchanged(
     options: dict[str, Any], days: float, expected: bool
 ) -> None:
     assert _candidate(_volume(days=days), **options) is expected
+
+
+class _FakePaginator:
+    def __init__(self, volumes: list[dict[str, Any]]) -> None:
+        self._volumes = volumes
+
+    def paginate(self, *, Filters: Any) -> list[dict[str, Any]]:
+        assert Filters[0] == {"Name": "status", "Values": ["available"]}
+        return [{"Volumes": self._volumes}]
+
+
+class _FakeEc2:
+    def __init__(self, volumes: list[dict[str, Any]]) -> None:
+        self._volumes = volumes
+        self.deleted: list[str] = []
+
+    def get_paginator(self, name: str) -> _FakePaginator:
+        assert name == "describe_volumes"
+        return _FakePaginator(self._volumes)
+
+    def delete_volume(self, *, VolumeId: str) -> dict[str, Any]:
+        self.deleted.append(VolumeId)
+        return {}
+
+
+class _FakeCloudWatch:
+    def get_metric_data(self, **kwargs: Any) -> dict[str, Any]:
+        return {
+            "MetricDataResults": [
+                {"Id": q["Id"], "StatusCode": "Complete", "Values": []}
+                for q in kwargs["MetricDataQueries"]
+            ]
+        }
+
+
+def test_production_command_1_end_to_end() -> None:
+    volumes = [
+        {**_volume(days=11, tags=_tags(("yb_task", "itest"))), "VolumeId": "vol-old"},
+        {**_volume(days=8, tags=_tags(("yb_task", "itest"))), "VolumeId": "vol-young-detach"},
+        {
+            **_volume(days=15, tags=_tags(("yb_task", "itest"), ("YB-Task", "prod"))),
+            "VolumeId": "vol-folded-prod",
+        },
+        {
+            **_volume(
+                days=5,
+                tags=_tags(("yb_task", "itest"), ("max_retention_age", "{'days': 2}")),
+            ),
+            "VolumeId": "vol-custom-ok",
+        },
+        {
+            **_volume(
+                days=4,
+                tags=_tags(("yb_task", "itest"), ("max_retention_age", "{'days': 2}")),
+            ),
+            "VolumeId": "vol-custom-young",
+        },
+        {
+            **_volume(days=15, tags=_tags(("yb_task", "itest"), ("autoclean", "false"))),
+            "VolumeId": "vol-exc",
+        },
+    ]
+    ec2 = _FakeEc2(volumes)
+    runtime = DiskRuntime(lambda r: ec2, lambda r: _FakeCloudWatch(), lambda: ["us-west-2"])
+    disk = Disk(
+        dry_run=False,
+        filter_tags={
+            "yb_task": [
+                "bug_bash_22_9_2023",
+                "uitest",
+                "itest",
+                "itests",
+                "itest-system",
+                "db-cross-functional",
+                "itest_yba",
+                "ybtest",
+                "dev-itest",
+                "dev-uitest",
+                "itest-keep-universe",
+                "itest-system-keep-universe",
+                "db-cross-functional-keep-universe",
+                "uitest-keep-universe",
+                "dev-itest-keep-universe",
+                "dev-uitest-keep-universe",
+            ]
+        },
+        exception_tags={
+            "autoclean": ["false", "False", "FALSE"],
+            "auto_clean": ["false", "False", "FALSE"],
+            "crc": ["gke"],
+        },
+        age={"days": 7},
+        custom_age_tag_key="max_retention_age",
+        notags=None,
+        detach_age={"days": 3},
+        runtime=runtime,
+        clock=lambda: NOW,
+    )
+    disk.delete()
+    assert ec2.deleted == ["vol-old", "vol-custom-ok"]
+    assert disk.get_deleted == [
+        "us-west-2/vol-old yb_task=itest",
+        "us-west-2/vol-custom-ok yb_task=itest",
+    ]
+
+
+def test_production_command_2_end_to_end() -> None:
+    volumes = [
+        {**_volume(days=38, tags=[]), "VolumeId": "vol-untagged-old"},
+        {**_volume(days=35, tags=[]), "VolumeId": "vol-untagged-young-detach"},
+        {**_volume(days=40, tags=_tags(("yb_task", "itest"))), "VolumeId": "vol-has-yb-task"},
+        {**_volume(days=40, tags=_tags(("crc", "gke"))), "VolumeId": "vol-gke"},
+    ]
+    ec2 = _FakeEc2(volumes)
+    runtime = DiskRuntime(lambda r: ec2, lambda r: _FakeCloudWatch(), lambda: ["us-west-2"])
+    disk = Disk(
+        dry_run=False,
+        filter_tags=None,
+        exception_tags={
+            "autoclean": ["false", "False", "FALSE"],
+            "auto_clean": ["false", "False", "FALSE"],
+            "crc": ["gke"],
+        },
+        age={"days": 30},
+        custom_age_tag_key=None,
+        notags={"yb_task": []},
+        detach_age={"days": 7},
+        runtime=runtime,
+        clock=lambda: NOW,
+    )
+    disk.delete()
+    assert ec2.deleted == ["vol-untagged-old"]
+    assert disk.get_deleted == ["us-west-2/vol-untagged-old"]

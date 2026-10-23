@@ -26,11 +26,64 @@ from tests.log_fix_aws_compute import RULES
 
 FIXED_BUGS = {"BUG-356"}
 
-# Cases whose inputs trigger a fixed bug: id -> (bug id, volume ids still deleted). The oracle
-# (main) deletes more; `_check_divergence` pins the new outcome.
-DIVERGING: Mapping[str, tuple[str, Sequence[str]]] = {
-    "yb-task-key-variants": ("BUG-282", ["f"]),
-    "detach-age-and-age": ("BUG-283", ["a"]),
+@dataclass(frozen=True)
+class Divergence:
+    bug: str
+    old_deleted: Sequence[str]
+    new_deleted: Sequence[str]
+    new_delete_ids: Sequence[str]
+    new_logs: Sequence[tuple[str, int, str]]
+
+
+# Cases whose inputs trigger a fixed bug. The oracle (main) deletes more;
+# `_check_divergence` pins both the oracle's buggy outcome and the exact new outcome.
+DIVERGING: Mapping[str, Divergence] = {
+    "yb-task-key-variants": Divergence(
+        bug="BUG-282",
+        old_deleted=["us-west-2/d yb_task=dev", "us-west-2/e", "us-west-2/f yb_task=dev"],
+        new_deleted=["us-west-2/f yb_task=dev"],
+        new_delete_ids=["f"],
+        new_logs=[
+            ("root", logging.INFO, "Retrieved list of regions: ['us-west-2']"),
+            ("root", logging.DEBUG, "Skipping volume a: sensitive yb_task=prod"),
+            ("root", logging.DEBUG, "Skipping volume b: sensitive yb_task=prod"),
+            ("root", logging.DEBUG, "Skipping volume c: sensitive yb_task=vpn"),
+            ("root", logging.DEBUG, "Skipping volume d: sensitive yb_task=prod"),
+            ("root", logging.DEBUG, "Skipping volume e: sensitive yb_task=prod"),
+            ("root", logging.DEBUG, "No custom_age_tag_key provided to search for."),
+            ("root", logging.INFO, "Deleted volume us-west-2/f yb_task=dev"),
+            ("root", logging.WARNING, "number of AWS EBS volumes deleted: 1"),
+            (
+                "root",
+                logging.WARNING,
+                "List of AWS EBS volumes deleted: ['us-west-2/f yb_task=dev']",
+            ),
+        ],
+    ),
+    "detach-age-and-age": Divergence(
+        bug="BUG-283",
+        old_deleted=["us-west-2/a yb_task=itest", "us-west-2/b yb_task=itest"],
+        new_deleted=["us-west-2/a yb_task=itest"],
+        new_delete_ids=["a"],
+        new_logs=[
+            ("root", logging.INFO, "Retrieved list of regions: ['us-west-2']"),
+            ("root", logging.DEBUG, "No custom_age_tag_key provided to search for."),
+            ("root", logging.DEBUG, "No custom_age_tag_key provided to search for."),
+            (
+                "root",
+                logging.DEBUG,
+                "Skipping volume b: detach time unknown and CreateTime younger than "
+                "age plus detach_age",
+            ),
+            ("root", logging.INFO, "Deleted volume us-west-2/a yb_task=itest"),
+            ("root", logging.WARNING, "number of AWS EBS volumes deleted: 1"),
+            (
+                "root",
+                logging.WARNING,
+                "List of AWS EBS volumes deleted: ['us-west-2/a yb_task=itest']",
+            ),
+        ],
+    ),
 }
 
 ORACLE = Path(__file__).parent / "legacy" / "aws_disk.txt"
@@ -981,10 +1034,12 @@ def test_skip_lines_are_debug_only_in_new_code(
     """BUG-356 (LOG-AWS1): every INFO "Skipping volume ..." line of the oracle is DEBUG now."""
     differing = 0
     for case in CASES:
-        if case.id in DIVERGING:
-            continue
         old = _run(_legacy, case, monkeypatch, caplog, capsys)
         new = _run(_new, case, monkeypatch, caplog, capsys)
+        if case.id in DIVERGING:
+            skip_levels = {lvl for _, lvl, msg in new.logs if msg.startswith("Skipping volume ")}
+            assert skip_levels == {logging.DEBUG}, case.id
+            continue
         assert new.logs == expected_logs(old.logs, FIXED_BUGS, rules=RULES), case.id
         differing += old.logs != new.logs
     assert differing > 0
@@ -1073,20 +1128,62 @@ def _delete_ids(calls: Sequence[tuple[Any, ...]]) -> list[str]:
 
 
 def _check_divergence(case: Case, old: Outcome, new: Outcome) -> None:
-    """The oracle shows the bug, the new code keeps the volumes the bug deleted and nothing
-    else changes (errors, count of regions, kept volumes still deleted)."""
-    bug, kept_ids = DIVERGING[case.id]
+    """The oracle shows the bug, and the new code matches the exact pinned outcome
+    (calls, deleted labels, count, logs, stdout, errors)."""
+    spec = DIVERGING[case.id]
+    bug = spec.bug
     assert new.error == old.error is None, bug
-    old_ids = _delete_ids(old.calls)
-    assert len(old_ids) > len(kept_ids), f"oracle no longer shows {bug}"
-    assert _delete_ids(new.calls) == [i for i in old_ids if i in kept_ids], bug
-    assert len(new.deleted) == len(kept_ids) < len(old.deleted), bug
+    assert new.stdout == old.stdout == "", bug
+    assert old.deleted == list(spec.old_deleted), f"oracle no longer shows {bug}"
+    assert new.deleted == list(spec.new_deleted), bug
+    assert new.count == len(spec.new_deleted), bug
     assert set(new.deleted) < set(old.deleted), bug
-    removed = [i for i in old_ids if i not in kept_ids]
-    flat = _flatten(new)
-    for volume_id in removed:
-        assert f"Skipping volume {volume_id}: " in flat, bug
-        assert f"Deleted volume us-west-2/{volume_id}" not in flat, bug
+    old_ids = _delete_ids(old.calls)
+    assert len(old_ids) > len(spec.new_delete_ids), f"oracle no longer shows {bug}"
+    assert _delete_ids(new.calls) == list(spec.new_delete_ids), bug
+    old_reads = [c for c in old.calls if not _is_delete_call(c)]
+    new_reads = [c for c in new.calls if not _is_delete_call(c)]
+    if case.id == "yb-task-key-variants":
+        assert new_reads == old_reads, bug
+    else:
+        assert new_reads[:-1] == old_reads[:-1], bug
+        assert new_reads[-1][:2] == ("get_metric_data", "us-west-2"), bug
+        assert "'Value': 'a'" in new_reads[-1][2] and "'Value': 'b'" not in new_reads[-1][2], bug
+    assert new.logs == list(spec.new_logs), bug
+
+
+@dataclass(frozen=True)
+class FixedQuirk:
+    case_id: str
+    bug_id: str
+    old_check: Callable[[Outcome], bool]
+    new_check: Callable[[Outcome], bool]
+
+
+FIXED_QUIRKS: Sequence[FixedQuirk] = [
+    FixedQuirk(
+        "yb-task-key-variants",
+        "BUG-282",
+        lambda o: (
+            o.deleted == ["us-west-2/d yb_task=dev", "us-west-2/e", "us-west-2/f yb_task=dev"]
+        ),
+        lambda o: (
+            o.deleted == ["us-west-2/f yb_task=dev"]
+            and "Skipping volume d: sensitive yb_task=prod" in _flatten(o)
+            and "Skipping volume e: sensitive yb_task=prod" in _flatten(o)
+        ),
+    ),
+    FixedQuirk(
+        "detach-age-and-age",
+        "BUG-283",
+        lambda o: o.deleted == ["us-west-2/a yb_task=itest", "us-west-2/b yb_task=itest"],
+        lambda o: (
+            o.deleted == ["us-west-2/a yb_task=itest"]
+            and "Skipping volume b: detach time unknown and CreateTime younger than "
+            "age plus detach_age" in _flatten(o)
+        ),
+    ),
+]
 
 
 QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
@@ -1272,6 +1369,26 @@ def test_quirk_is_preserved(
     new = _run(_new, selected, monkeypatch, caplog, capsys)
     assert check(old), "oracle no longer shows the quirk"
     assert check(new)
+
+
+@pytest.mark.parametrize(
+    "quirk",
+    FIXED_QUIRKS,
+    ids=[f"{q.case_id}-{q.bug_id}" for q in FIXED_QUIRKS],
+)
+def test_fixed_quirk_is_pinned(
+    quirk: FixedQuirk,
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    selected = next(c for c in CASES if c.id == quirk.case_id)
+    old = _run(_legacy, selected, monkeypatch, caplog, capsys)
+    new = _run(_new, selected, monkeypatch, caplog, capsys)
+    assert quirk.old_check(old), f"oracle no longer shows {quirk.bug_id}"
+    assert not quirk.new_check(old), f"oracle unexpectedly satisfies fixed check for {quirk.bug_id}"
+    assert quirk.new_check(new), quirk.bug_id
 
 
 def test_cases_cover_both_dry_run_and_real_runs() -> None:
