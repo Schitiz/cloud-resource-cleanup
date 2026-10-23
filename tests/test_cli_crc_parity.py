@@ -8,11 +8,12 @@ Slack calls, the Influx calls, the printed output and the return value or raised
 equal. A pair no route reaches (`route_for` is None) can only be rejected up front by
 `dispatch.validate_targets` or `argparse`; the case asserts that. A skip-only route
 (`skips.no_options`) must send nothing. The constructor and the Slack helpers (`get_msg`,
-lookups, `ping_on_slack`, `write_influxdb`) are still compared on the `CRC` context object.
+lookups, `ping_on_slack`, `write_influxdb`) are still compared on the `CRC` context object. The
+constructor and `scan_instances_with_tag` are compared in `tests/test_cli_runner_parity.py` and
+`tests/test_cli_scan_parity.py`.
 """
 
 import itertools
-import sys
 from collections.abc import Callable, Iterator
 from types import ModuleType, SimpleNamespace
 from typing import Any
@@ -180,9 +181,11 @@ def compare(oracle_module: ModuleType, case: Case) -> Recorded:
         return compare_notify(oracle_module, case, case.routed.removeprefix("notify:"))
     spec = ROUTED.get(case.routed or "")
     if spec is None:
-        # Only the CRC context object itself (constructor, get_msg, scan) may run on NewCRC.
-        assert case.routed in (None, "scan", "scan_unsupported"), f"{case.name}: no routed spec"
-        new = execute(NewCRC, [sys.modules[NewCRC.scan_instances_with_tag.__module__]], case)
+        # Only the CRC context object itself (get_msg) may run on NewCRC; the constructor
+        # and `scan_instances_with_tag` cases live in `test_cli_runner_parity.py` and
+        # `test_cli_scan_parity.py`.
+        assert case.routed is None, f"{case.name}: no routed spec"
+        new = execute(NewCRC, [], case)
         for key in old:
             assert new[key] == old[key], f"{case.name}: {key} differs"
         return old
@@ -237,8 +240,6 @@ op("delete_vm", ALL, lambda c: c.delete_vm(TAGS, {}, AGE, "age_tag", ["RUNNING"]
 op("delete_vm_default_state", ["aws", "azure"], lambda c: c.delete_vm(TAGS, {}, AGE, None, []))
 op("delete_vm_none_state", ["gcp"], lambda c: c.delete_vm(TAGS, {}, AGE, None, None))
 op("stop_vm", ALL, lambda c: c.stop_vm(TAGS, {}, AGE, "age_tag"))
-op("scan", ALL, lambda c: c.scan_instances_with_tag("auto_clean", "false"))
-op("scan_unsupported", ALL, lambda c: c.scan_instances_with_tag("k", "v"), scan_supported=False)
 op(
     "spot",
     ["aws", "azure", "gcp", "oci", "other"],
@@ -466,16 +467,6 @@ DIRECT_CASES = direct_cases()
 @pytest.mark.parametrize("case", DIRECT_CASES)
 def test_direct_method_matches_main(oracle: ModuleType, case: Case) -> None:
     compare(oracle, case)
-
-
-@pytest.mark.parametrize("cloud", ["aws", "azure", "gcp", "oci", "other"])
-@pytest.mark.parametrize("project_id", [None, "", "proj"])
-@pytest.mark.parametrize("slack", ["off", "on"])
-def test_constructor_matches_main(
-    oracle: ModuleType, cloud: str, project_id: Any, slack: str
-) -> None:
-    scenario = Scenario(dict(FULL), slack=slack, project_id=project_id, influx="no_conn")
-    compare(oracle, Case(f"ctor-{cloud}", cloud, lambda c: None, scenario))
 
 
 def _unrepresentable_disk_run(case: Case, cloud: str, disk_value: Any) -> Recorded:
