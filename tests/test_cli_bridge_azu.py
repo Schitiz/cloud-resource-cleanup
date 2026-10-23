@@ -1,6 +1,6 @@
 """Parity: the Azure kinds routed through `crc.core.engine` against the legacy `CRC` handlers.
 
-Both sides run the real Azure code on the same fake Azure SDK, through `dispatch._run_handler`
+Both sides run the real Azure code on the same fake Azure SDK, through `dispatch._run_pair`
 (RUN START and RESULT around the pass): the legacy side with the route lookup switched off (the
 `HANDLERS` entry, `CRC` method and adapter), the routed side through `bridge.run_routed` and the
 registered cleaner. For every kind, a dry run and a real run, and every Slack and Influx mode, the
@@ -21,10 +21,11 @@ import pytest
 from crc.cli import bridge
 from crc.cli import dispatch as cli_dispatch
 from crc.cli.inputs import Targets, read_options
-from crc.cli.routes import NotifyMode
+from crc.cli.routes import NotifyMode, skips
 from crc.cli.runner import CRC
 from crc.core import logger
 from tests.helpers_cli_azu import KINDS, Kind
+from tests.helpers_legacy_handlers import run_legacy_handler
 from tests.test_cli_crc_parity import FULL, Case, Logs, Scenario, build
 
 PREFIXES = ("RUN START", "REGION", "ACTION", "SKIPPED", "ERRORS", "FAILED", "RESULT")
@@ -66,8 +67,6 @@ def _run(
     azure.install(mp)
     logger.finish()
     mp.setattr(bridge, "datetime", type("D", (), {"now": staticmethod(lambda tz=None: NOW)}))
-    if not routed:
-        mp.setattr(cli_dispatch, "route_for", lambda cloud, resource: None)
     real_run_routed = bridge.run_routed
 
     def counting(*args: Any) -> None:
@@ -95,8 +94,10 @@ def _run(
         with redirect_stdout(out):
             try:
                 crc = _crc(scenario, logs, options)
-                handler_fn = cli_dispatch.HANDLERS.get(kind.resource)
-                cli_dispatch._run_handler(handler_fn, crc, "azure", kind.resource, options, targets)
+                if routed:
+                    cli_dispatch._run_pair(crc, "azure", kind.resource, options, targets)
+                else:
+                    run_legacy_handler(crc, "azure", kind.resource, options, targets)
             except Exception as exc:
                 result = ("error", type(exc).__name__, str(exc))
     finally:
@@ -163,8 +164,10 @@ def test_routed_azure_pair_matches_the_legacy_handler(
 
 
 def test_every_azure_route_is_covered_and_notifies_as_the_legacy_handler() -> None:
-    assert {k.resource for k in KINDS} == set(bridge.TABLES["azure"])
-    modes = {kind: route.notify for kind, route in bridge.TABLES["azure"].items()}
+    table = {k: r for k, r in bridge.TABLES["azure"].items() if r.options is not skips.no_options}
+    assert {k.resource for k in KINDS} == set(table)
+    assert set(bridge.TABLES["azure"]) - set(table) == {"spot_instance_requests"}
+    modes = {kind: route.notify for kind, route in table.items()}
     assert modes.pop("disk") is NotifyMode.REPORT_THEN_RERAISE
     assert set(modes.values()) == {NotifyMode.REPORT}
 

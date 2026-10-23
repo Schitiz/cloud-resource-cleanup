@@ -40,6 +40,7 @@ def _vm(options: Options) -> dict[str, Any]:
 
 
 ROUTES: dict[str, Route] = {
+    "spot_instance_requests": Route(skips.no_options, skip=skips.non_aws_spot_instance_requests),
     "disk": Route(_disk, notify=NotifyMode.REPORT_THEN_RERAISE),
     "vm": Route(_vm),
     "spot_instances": Route(_spot_instances, skip=skips.explicit_cloud_spot),

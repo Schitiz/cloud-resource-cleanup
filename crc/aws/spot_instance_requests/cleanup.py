@@ -169,9 +169,7 @@ def _terminate(
 
 def _delete_leftover_volumes(env: CleanupEnv, client: SpotClient, volumes: list[str]) -> bool:
     deleted_any = False
-    for volume_id in filter_deletable_leftover_volumes(
-        env.settings, client, volumes, env.region
-    ):
+    for volume_id in filter_deletable_leftover_volumes(env.settings, client, volumes, env.region):
         result = wait_volume_available_then_delete(
             env.settings, env.waiter, client, volume_id, env.region
         )

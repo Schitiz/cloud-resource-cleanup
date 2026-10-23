@@ -131,9 +131,7 @@ class RunLog:
         logging must never stop a cleanup halfway.
         """
         if kind not in ACTION_KINDS:
-            self._log(
-                logging.WARNING, f"unknown action kind {kind!r}; use one of {ACTION_KINDS}"
-            )
+            self._log(logging.WARNING, f"unknown action kind {kind!r}; use one of {ACTION_KINDS}")
         self._selected += 1
         if kind in _DONE_KINDS:
             self._done += 1

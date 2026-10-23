@@ -28,6 +28,7 @@ class SnapshotClient(Protocol):
         """Delete one snapshot by id."""
         ...
 
+
 ClientFactory = Callable[[str], SnapshotClient]
 RegionLister = Callable[[], Sequence[str]]
 Clock = Callable[[], datetime.datetime]

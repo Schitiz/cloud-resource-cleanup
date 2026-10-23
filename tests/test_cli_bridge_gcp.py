@@ -1,6 +1,6 @@
 """Parity: the engine bridge against the legacy handlers for the GCP kinds routed in ENG-GCP.
 
-Each case builds the same fake GCP client data twice, runs `dispatch._run_handler` once on the
+Each case builds the same fake GCP client data twice, runs `dispatch._run_pair` once on the
 legacy handler (the adapter classes behind `CRC`) and once through the route, with the same fake
 Slack and Influx clients, and requires equal run-log lines (RUN START, REGION, ACTION, SKIPPED,
 ERRORS, RESULT), Slack calls (text and recipients), Influx points, console output, error and the
@@ -336,5 +336,11 @@ def test_ip_dry_run_logs_each_region_then_its_actions_as_legacy(
 
 
 def test_route_table_routes_every_kind() -> None:
-    assert sorted(bridge.TABLES["gcp"]) == ["disk", "ip", "spot_instances", "vm"]
+    assert sorted(bridge.TABLES["gcp"]) == [
+        "disk",
+        "ip",
+        "spot_instance_requests",
+        "spot_instances",
+        "vm",
+    ]
     assert bridge.route_for("gcp", "spot_instances") is not None

@@ -234,4 +234,3 @@ def test_production_commands_keep_selection_and_list_configured_group(
     assert _calls(azure, "list_by_resource_group") == [("list_by_resource_group", "yugabyte-rg")]
     assert _calls(azure, "begin_delete") == [("begin_delete", "yugabyte-rg", "match-old")]
     assert azure.waited == ["match-old"]
-

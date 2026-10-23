@@ -70,6 +70,7 @@ def _spot_project(crc: Any, options: Options, targets: Targets) -> None:
 
 
 ROUTES: dict[str, Route] = {
+    "spot_instance_requests": Route(skips.no_options, skip=skips.non_aws_spot_instance_requests),
     "ip": Route(_ip),
     "disk": Route(_disk, notify=NotifyMode.REPORT_THEN_RERAISE),
     "vm": Route(_vm),

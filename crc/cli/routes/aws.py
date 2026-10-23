@@ -13,7 +13,7 @@ import crc.aws.vm
 import crc.aws.vpc  # noqa: F401
 from crc.cli.inputs import Options, Targets
 from crc.cli.pairs import AWS_DISK_OPT_IN_MESSAGE
-from crc.cli.routes import NotifyMode, Route
+from crc.cli.routes import NotifyMode, Route, skips
 from crc.core.engine import RunOutcome
 
 SNAPSHOT_AGE_DAYS = 90
@@ -125,4 +125,5 @@ ROUTES: dict[str, Route] = {
     "vm": Route(_vm),
     "spot_instance_requests": Route(_spot_instance_requests),
     "disk": Route(_disk, notify=NotifyMode.REPORT_THEN_RERAISE, precheck=_disk_opt_in),
+    "spot_instances": Route(skips.no_options, skip=skips.aws_spot_instances),
 }

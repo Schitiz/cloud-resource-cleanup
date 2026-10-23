@@ -31,6 +31,7 @@ from crc.cli import clients as cli_clients
 from crc.cli import context as cli_context
 from crc.cli import dispatch as cli_dispatch
 from crc.cli import scan as cli_scan
+from crc.cli.routes import skips
 from crc.core import logger
 from crc.core.cleaner import Candidate, Operation, Plan, Result, RunContext
 from tests.helpers_cli_routes import FakeCleaners, provide_legacy_keypairs
@@ -411,47 +412,52 @@ def snapshot_side_effect(fakes: Fakes) -> Callable[[RunContext], None]:
 def install_routed_fakes(fakes: Fakes, monkeypatch: pytest.MonkeyPatch) -> None:
     """Engine-routed pairs reach a fake cleaner that records what the oracle CRC fake recorded."""
     cleaners = FakeCleaners().install(monkeypatch)
-    for cloud, table in bridge.TABLES.items():
-        for kind in table:
-            call = routed_call(cloud, kind)
-            assert call is not None, f"no ROUTED_CALLS entry for {cloud} {kind}"
-            if kind == "snapshot":
-                cleaners.side_effect[(cloud, kind)] = snapshot_side_effect(fakes)
-                cleaners.plans[(cloud, kind)] = Plan(
-                    candidates=tuple(Candidate(f"snap-{i}") for i in range(3))
+    pairs = [
+        (cloud, kind)
+        for cloud, table in bridge.TABLES.items()
+        for kind, route in table.items()
+        if route.options is not skips.no_options
+    ]
+    for cloud, kind in pairs:
+        call = routed_call(cloud, kind)
+        assert call is not None, f"no ROUTED_CALLS entry for {cloud} {kind}"
+        if kind == "snapshot":
+            cleaners.side_effect[(cloud, kind)] = snapshot_side_effect(fakes)
+            cleaners.plans[(cloud, kind)] = Plan(
+                candidates=tuple(Candidate(f"snap-{i}") for i in range(3))
+            )
+            cleaners.results[(cloud, kind)] = Result(succeeded=("snap-1",))
+            continue
+
+        def record(
+            context: RunContext,
+            cloud: str = cloud,
+            kind: str = kind,
+            call: RoutedCall = call,
+        ) -> None:
+            assert context.dry_run is ("--dry_run" in fakes.case.argv)
+            if kind in {"vpc", "vm", "spot_instance_requests", "spot_instances", "disk"} or (
+                kind == "ip" and cloud in {"aws", "azure"}
+            ):
+                assert "notags" in context.options
+            if cloud == "azure":
+                assert "resource_group" in context.options
+                assert context.options["resource_group"] == option_value(
+                    fakes.case, "--resource_group"
                 )
-                cleaners.results[(cloud, kind)] = Result(succeeded=("snap-1",))
-                continue
+            if context.operation is Operation.STOP:
+                assert "instance_state" not in context.options
+            stop = call.stop if context.operation is Operation.STOP else None
+            method = stop or call.method
+            keys = [key for key in call.keys if key is not None]
+            if stop:
+                keys = keys[:4]
+            args = [norm(context.options.get(key)) for key in keys]
+            fakes.events.append((f"crc.{method}", cloud, args, {}))
+            if fakes.case.crc_fail == method:
+                raise RuntimeError(f"{method} failed")
 
-            def record(
-                context: RunContext,
-                cloud: str = cloud,
-                kind: str = kind,
-                call: RoutedCall = call,
-            ) -> None:
-                assert context.dry_run is ("--dry_run" in fakes.case.argv)
-                if kind in {"vpc", "vm", "spot_instance_requests", "spot_instances", "disk"} or (
-                    kind == "ip" and cloud in {"aws", "azure"}
-                ):
-                    assert "notags" in context.options
-                if cloud == "azure":
-                    assert "resource_group" in context.options
-                    assert context.options["resource_group"] == option_value(
-                        fakes.case, "--resource_group"
-                    )
-                if context.operation is Operation.STOP:
-                    assert "instance_state" not in context.options
-                stop = call.stop if context.operation is Operation.STOP else None
-                method = stop or call.method
-                keys = [key for key in call.keys if key is not None]
-                if stop:
-                    keys = keys[:4]
-                args = [norm(context.options.get(key)) for key in keys]
-                fakes.events.append((f"crc.{method}", cloud, args, {}))
-                if fakes.case.crc_fail == method:
-                    raise RuntimeError(f"{method} failed")
-
-            cleaners.side_effect[(cloud, kind)] = record
+        cleaners.side_effect[(cloud, kind)] = record
 
 
 def base_argv(

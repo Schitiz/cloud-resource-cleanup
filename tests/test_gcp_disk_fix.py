@@ -488,4 +488,3 @@ def test_production_jenkins_flags_selection_unchanged() -> None:
         ("get_operation", "zone", "us-west1-a", "op-itest-ok"),
         ("close",),
     ]
-

@@ -227,8 +227,7 @@ def _act(run: Run, crc: Any, options: Any, targets: Targets) -> None:
     kind = run.kind
     if run.routed:
         assert bridge.route_for("oci", kind.name) is not None
-        handler = dispatch.HANDLERS.get(kind.name)
-        dispatch._run_handler(handler, crc, "oci", kind.name, options, targets)
+        dispatch._run_pair(crc, "oci", kind.name, options, targets)
         return
     logger.begin("oci", kind.name, kind.operation, run.dry, dispatch._run_options(options))
     try:

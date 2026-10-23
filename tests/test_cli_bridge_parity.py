@@ -15,7 +15,7 @@ import pytest
 
 from crc.cli import bridge
 from crc.cli.inputs import Options, Targets, read_options
-from crc.cli.routes import NotifyMode, Route
+from crc.cli.routes import NotifyMode, Route, skips
 from crc.cli.runner import CRC as NewCRC
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext
 from crc.core.registry import Registry
@@ -182,12 +182,13 @@ def test_route_tables_route_the_aws_kinds() -> None:
             "kms",
             "snapshot",
             "spot_instance_requests",
+            "spot_instances",
             "vm",
             "vpc",
         ],
-        "azure": ["disk", "ip", "nic", "spot_instances", "vm"],
-        "gcp": ["disk", "ip", "spot_instances", "vm"],
-        "oci": ["disk", "spot_instances", "vm"],
+        "azure": ["disk", "ip", "nic", "spot_instance_requests", "spot_instances", "vm"],
+        "gcp": ["disk", "ip", "spot_instance_requests", "spot_instances", "vm"],
+        "oci": ["disk", "spot_instance_requests", "spot_instances", "vm"],
     }
     assert bridge.is_routed_kind("keypair")
     assert bridge.is_routed_kind("disk")
@@ -208,5 +209,8 @@ def test_notifiers_follow_the_clients_and_the_notify_flag() -> None:
 
 def test_every_routed_pair_has_a_registered_cleaner() -> None:
     for cloud, table in bridge.TABLES.items():
-        for kind in table:
+        for kind, route in table.items():
+            if route.options is skips.no_options:
+                assert route.skip is not None
+                continue
             assert bridge.build_registry().get(cloud, kind) is not None

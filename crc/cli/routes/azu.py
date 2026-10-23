@@ -8,7 +8,7 @@ import crc.azu.nic
 import crc.azu.spot_vm
 import crc.azu.vm  # noqa: F401
 from crc.cli.inputs import Options, Targets
-from crc.cli.routes import NotifyMode, Route
+from crc.cli.routes import NotifyMode, Route, skips
 
 SPOT_NEEDS_GROUP = "resource_group is required for Azure Spot VM cleanup"
 
@@ -56,6 +56,7 @@ def _spot_group(crc: Any, options: Options, targets: Targets) -> None:
 
 
 ROUTES: dict[str, Route] = {
+    "spot_instance_requests": Route(skips.no_options, skip=skips.non_aws_spot_instance_requests),
     "ip": Route(_ip),
     "nic": Route(_nic),
     "disk": Route(_disk, notify=NotifyMode.REPORT_THEN_RERAISE),

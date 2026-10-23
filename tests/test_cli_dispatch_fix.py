@@ -39,12 +39,6 @@ class Recorder:
                 self.cloud = cloud
                 recorder.calls.append(("CRC", cloud))
 
-        def handler(name: str) -> Any:
-            def run(crc: Any, cloud: Any, options: Options, targets: Targets) -> None:
-                recorder.calls.append((name, cloud))
-
-            return run
-
         def routed(
             crc: Any, cloud: Any, kind: Any, options: Options, targets: Targets, route: Any
         ) -> None:
@@ -52,9 +46,6 @@ class Recorder:
 
         monkeypatch.setattr(dispatch, "make_crc", lambda context, cloud: FakeCRC(cloud))
         monkeypatch.setattr(dispatch, "run_routed", routed)
-        monkeypatch.setattr(
-            dispatch, "HANDLERS", {name: handler(name) for name in dispatch.HANDLERS}
-        )
 
 
 def run(cloud: str, resource: str) -> None:
@@ -152,8 +143,8 @@ def test_bug_017_cloud_all_real_crc_does_not_build_skipped_clouds(
     if adapter_attr is not None:
         monkeypatch.setattr(resource_ops, adapter_attr, FakeAdapter)
     else:
-        FakeCleaners().install(monkeypatch).side_effect[(expected_cloud, resource)] = (
-            lambda ctx: deleted.append(expected_cloud)
+        FakeCleaners().install(monkeypatch).side_effect[(expected_cloud, resource)] = lambda ctx: (
+            deleted.append(expected_cloud)
         )
     options = read_options(
         {
@@ -187,8 +178,8 @@ def test_bug_017_cloud_all_nic_real_crc_deletes_nothing(monkeypatch: pytest.Monk
             deleted.append("azure")
 
     monkeypatch.setattr(resource_ops, "NIC", FakeNIC)
-    FakeCleaners().install(monkeypatch).side_effect[("azure", "nic")] = lambda ctx: (
-        deleted.append("azure")
+    FakeCleaners().install(monkeypatch).side_effect[("azure", "nic")] = lambda ctx: deleted.append(
+        "azure"
     )
     with pytest.raises(ValueError, match=r"NICs operation is only supported on Azure\."):
         run("all", "nic")

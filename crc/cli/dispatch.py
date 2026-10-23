@@ -1,7 +1,6 @@
 """The cloud and resource loops of a cleanup run."""
 
 import logging
-from collections.abc import Callable
 from typing import Any
 
 from crc.cli.bridge import is_routed_kind, route_for, run_routed
@@ -23,94 +22,6 @@ from crc.core import logger
 
 _LOG = logging.getLogger(__name__)
 
-Handler = Callable[[Any, Any, Options, Targets], None]
-
-
-def _disk(crc: Any, cloud: Any, options: Options, targets: Targets) -> None:
-    """Azure, GCP and OCI disks; AWS disks run through the engine (`Route.precheck` is the gate)."""
-    crc.delete_disks(
-        options.filter_tags,
-        options.exception_tags,
-        options.age,
-        options.custom_age_tag_key,
-        options.detach_age,
-        options.name_regex,
-        options.exception_regex,
-        options.slack_notify_users,
-        options.slack_user_label,
-    )
-
-
-def _ip(crc: Any, cloud: Any, options: Options, targets: Targets) -> None:
-    crc.delete_ip(
-        options.filter_tags,
-        options.exception_tags,
-        options.name_regex,
-        options.exception_regex,
-    )
-
-
-def _nic(crc: Any, cloud: Any, options: Options, targets: Targets) -> None:
-    crc.delete_nic(options.name_regex, options.exception_regex)
-
-
-def _vm(crc: Any, cloud: Any, options: Options, targets: Targets) -> None:
-    if options.operation_type == "delete":
-        crc.delete_vm(
-            options.filter_tags,
-            options.exception_tags,
-            options.age,
-            options.custom_age_tag_key,
-            options.resource_states,
-        )
-    elif options.operation_type == "stop":
-        crc.stop_vm(
-            options.filter_tags,
-            options.exception_tags,
-            options.age,
-            options.custom_age_tag_key,
-        )
-
-
-def _spot_instance_requests(crc: Any, cloud: Any, options: Options, targets: Targets) -> None:
-    """Non-AWS clouds only warn; AWS spot instance requests run through the engine."""
-    _LOG.warning(
-        "spot_instance_requests is AWS-only; skipped for %s (use --resource spot_instances)",
-        crc.cloud,
-    )
-
-
-def _spot_instances(crc: Any, cloud: Any, options: Options, targets: Targets) -> None:
-    if crc.cloud == "aws":
-        _LOG.warning(
-            "For AWS use --resource spot_instance_requests "
-            "(cancel request before terminate). Skipping spot_instances."
-        )
-        return
-    if crc.cloud in ("gcp", "oci") and targets.cloud_arg == "all":
-        _LOG.warning(
-            "GCP/OCI spot_instances require explicit --cloud %s "
-            "(not --cloud all); skipped. Azure spot_instances still runs "
-            "under --cloud all for backward compatibility.",
-            crc.cloud,
-        )
-        return
-    # Fail closed: missing --resource_group / --project_id / --age must raise
-    # (do not continue into other clouds under --cloud all).
-    crc.delete_spot_instances(
-        options.filter_tags, options.exception_tags, options.age, options.custom_age_tag_key
-    )
-
-
-HANDLERS: dict[str, Handler] = {
-    "disk": _disk,
-    "ip": _ip,
-    "nic": _nic,
-    "vm": _vm,
-    "spot_instance_requests": _spot_instance_requests,
-    "spot_instances": _spot_instances,
-}
-
 
 def _run_options(options: Options) -> dict[str, Any]:
     """The flags `RUN START` reports; `logger.begin` prints the non-empty ones."""
@@ -127,9 +38,7 @@ def _run_options(options: Options) -> dict[str, Any]:
     }
 
 
-def _run_handler(
-    handler: Handler | None, crc: Any, cloud: Any, resource: Any, options: Options, targets: Targets
-) -> None:
+def _run_pair(crc: Any, cloud: Any, resource: Any, options: Options, targets: Targets) -> None:
     """Run one cloud and resource pass between its RUN START and RESULT lines."""
     logger.begin(
         str(cloud),
@@ -142,8 +51,6 @@ def _run_handler(
         route = route_for(cloud, resource)
         if route is not None:
             run_routed(crc, cloud, resource, options, targets, route)
-        elif handler is not None:
-            handler(crc, cloud, options, targets)
     finally:
         logger.finish()
 
@@ -157,7 +64,7 @@ def validate_targets(targets: Targets) -> list[tuple[Any, Any]]:
     to be skipped only when no supported pair comes after the first one: `main` stopped at that
     pair, so running a later pair (azure for `--cloud all --resource nic`) would delete more.
     """
-    handled = [r for r in targets.resources if r in HANDLERS or is_routed_kind(r)]
+    handled = [r for r in targets.resources if is_routed_kind(r)]
     if "disk" in handled and targets.cloud_arg == "all" and not targets.aws_disk_opt_in:
         raise ValueError(AWS_DISK_OPT_IN_MESSAGE)
     pairs = [(cloud, resource) for cloud in targets.clouds for resource in handled]
@@ -190,12 +97,11 @@ def run_dispatch(context: RunContext, options: Options, targets: Targets) -> Non
     for cloud in targets.clouds:
         crc: Any = None
         for resource in targets.resources:
-            handler = HANDLERS.get(resource)
-            if handler is None and not is_routed_kind(resource):
+            if not is_routed_kind(resource):
                 continue
             if (cloud, resource) in skipped:
                 _skip_pair(cloud, resource, options)
                 continue
             if crc is None:
                 crc = make_crc(context, cloud)
-            _run_handler(handler, crc, cloud, resource, options, targets)
+            _run_pair(crc, cloud, resource, options, targets)

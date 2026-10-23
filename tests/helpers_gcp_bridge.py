@@ -13,11 +13,12 @@ from typing import Any
 import pytest
 from google.api_core.exceptions import GoogleAPIError
 
-from crc.cli import bridge, dispatch
+from crc.cli import dispatch
 from crc.cli.context import RunContext as CliContext
 from crc.cli.context import make_crc
 from crc.cli.inputs import Targets, read_options
 from crc.gcp import _scan
+from tests.helpers_legacy_handlers import run_legacy_handler
 
 RUN_PREFIXES = ("RUN START", "ACTION ", "SKIPPED ", "ERRORS ", "FAILED ", "RESULT ", "REGION ")
 OLD = "2020-01-01T00:00:00.000000+00:00"
@@ -175,9 +176,7 @@ class Outcome:
 
 
 def _lines(caplog: pytest.LogCaptureFixture) -> list[str]:
-    return [
-        r.getMessage() for r in caplog.records if r.getMessage().startswith(RUN_PREFIXES)
-    ]
+    return [r.getMessage() for r in caplog.records if r.getMessage().startswith(RUN_PREFIXES)]
 
 
 def install(monkeypatch: pytest.MonkeyPatch, client: FakeGcp) -> None:
@@ -195,7 +194,6 @@ def install(monkeypatch: pytest.MonkeyPatch, client: FakeGcp) -> None:
     monkeypatch.setattr("crc.service.init_logging", lambda *a, **k: None)
 
 
-
 def run_pair(  # noqa: PLR0913 - the case, the data and the three switches
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -207,11 +205,8 @@ def run_pair(  # noqa: PLR0913 - the case, the data and the three switches
     slack: bool,
     influx: bool,
 ) -> Outcome:
-    """Run `kind` on gcp through `dispatch._run_handler`, routed or on the legacy handler."""
+    """Run `kind` on gcp through `dispatch._run_pair`, routed or on the legacy handler."""
     install(monkeypatch, client)
-    monkeypatch.setattr(
-        dispatch, "route_for", bridge.route_for if routed else lambda cloud, resource: None
-    )
     slack_calls: list[Any] = []
     influx_calls: list[Any] = []
     args = {"cloud": "gcp", "project_id": "proj", "resource": kind, **flags}
@@ -236,11 +231,11 @@ def run_pair(  # noqa: PLR0913 - the case, the data and the three switches
     error = None
     try:
         with redirect_stdout(out):
-            dispatch._run_handler(
-                dispatch.HANDLERS.get(kind), crc, "gcp", kind, options, targets
-            )
+            if routed:
+                dispatch._run_pair(crc, "gcp", kind, options, targets)
+            else:
+                run_legacy_handler(crc, "gcp", kind, options, targets)
     except Exception as e:
         error = f"{type(e).__name__}: {e}"
     stdout = "\n".join(line for line in out.getvalue().splitlines() if "loglevel" not in line)
     return Outcome(_lines(caplog), slack_calls, influx_calls, stdout, error, client.calls)
-
