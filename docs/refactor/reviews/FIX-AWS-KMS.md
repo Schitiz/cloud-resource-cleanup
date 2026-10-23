@@ -1,0 +1,26 @@
+## Coding summary
+
+Rung FIX-AWS-KMS (wave FIX-1, branch `fix/aws-kms`): behaviour fix in `crc/aws/kms.py`.
+
+- **Bugs fixed.** BUG-007, BUG-008, BUG-014, BUG-015, BUG-055. None left.
+  - BUG-014: a filter key with several values matches when the key's tag value is any of them (every filter key is still required).
+  - BUG-007: a filter key with an empty value list matches only keys that carry that tag key (any value). Same semantics as `policy.filter_tags_all_keys` / `crc/aws/vm` (`_key_matches`: key present and, for a non-empty list, value in the list); the check goes through `policy.matches_any_key` per (TagKey, TagValue) pair.
+  - BUG-015: `exception_tags` are read from `TagKey` / `TagValue`; a key with an exception tag is kept before `describe_key` (production `autoclean`, `auto_clean` and `crc` exception tags now work).
+  - BUG-008: the custom age tag is read with the shared `core_age.get_retention_age` on the `TagKey` / `TagValue` tags (via `policy.normalize_tags`), like every other cleaner. **This may select a key earlier when its tag is shorter than `--age`: that is the documented custom-age-tag behaviour of every other cleaner and is allowed for BUG-008 only.** A tag longer than `--age` keeps the key longer; an empty or unparseable tag still falls back to `--age` (fail-open core helper, BUG-004 untouched).
+  - BUG-055: all policy statements of a key are read first and the key is added to the delete list only afterwards, so a key that is skipped (`KEY SKIPPED`, `not_ours` / `unreadable`) is never selected. The run log counts it as skipped (`SKIPPED ... reason=not_ours`). Quirk kept as on main: a policy with two statements naming `kms_user` still selects the key twice (BUG-056).
+- **Behaviour kept.** SDK call order (`list_resource_tags`, `describe_key`, `get_key_policy`, `schedule_key_deletion`) and every input the bugs do not cover are unchanged and still compared with the oracle. A tag without `TagKey` / `TagValue` or with an unhashable value still raises inside the per-key `try` and skips the key (fail closed); a repeated `TagKey` keeps every value; a non-iterable filter value list still skips every key. Slack text, Influx points, exit code and CLI flags are untouched.
+- **Production commands** (`--kms_key_description "Yugabyte Master Key" --kms_user ... --age '{"days": 2|3}' --max_age '{"days": 21}' --exception_tags {...} --custom_age_tag_key max_retention_age`): no `filter_tags`, so BUG-007 and BUG-014 do not change them. Changes: BUG-015 keeps keys tagged `autoclean`/`auto_clean` false or `crc=gke` (on main every tagged key was skipped by the `KeyError`, so on main only untagged keys could be deleted; now keys with other tags are eligible too); BUG-008 lets a `max_retention_age` tag on a key set its age (shorter than `--age` selects earlier, longer keeps); BUG-055 drops mixed-principal keys from the list. A tagged key without an exception tag that is old enough and owned by `kms_user` is now deleted where main skipped it: this follows from the BUG-015 fix as specified (the row is "keeps what it should delete").
+- **Files changed.** `crc/aws/kms.py`, `crc/aws/README.md` (KMS safety invariants), `tests/test_aws_kms.py`, `tests/test_aws_kms_parity.py`, `tests/test_aws_misc_logger.py` (one BUG-055 quirk check), new `tests/test_aws_kms_fix.py`, this review. No locked test, oracle, `PLAN.md`, `STATUS.md`, `BUGS.md` or `CLEANUP_SAFETY.md` touched.
+- **Tests.** Before (182466d): 42444 passed. After: 42463 passed. Parity: 13 cases are marked `diverges="BUG-NNN"` (`FIXED` table); for each the oracle still shows the old outcome, the new code differs and the exact new deleted ids, `describe_key` calls and scheduled ids are asserted; every unmarked case, including all the new ones that are equal to main, still asserts equality with the oracle (calls, error, deleted, logs, stdout). Old quirk checks for the five bugs were replaced by the marked cases; `_should_skip_kms` cases with a non-empty spec and tags assert the TagKey outcome (BUG-015). New focused tests: `tests/test_aws_kms_fix.py` (12) and the updated `tests/test_aws_kms.py` filter/exception tests.
+- **Gates.** `make check` (ruff check, mypy, lint-imports, pytest) green.
+- **Owner action.** None. `CLEANUP_SAFETY.md` has no KMS-specific invariant text that changes. Optional: mark BUG-007, BUG-008, BUG-014, BUG-015 and BUG-055 "fixed in FIX-AWS-KMS" (the driver does this at integration).
+
+## Owner decision
+
+None.
+
+## New bugs
+
+- `crc/aws/kms.py` (`plan_keys`, `except BaseException`; main `crc.py` bare `except:`): `KeyboardInterrupt` / `SystemExit` raised while deciding one key is swallowed as "KEY SKIPPED" and the run continues (existing parity case `policy-keyboard-interrupt-is-swallowed`). Exists on main: yes. Not fixed.
+- `crc/aws/kms.py` (`_select_for_user`): a policy with two statements for `kms_user` selects the key twice; the second `schedule_key_deletion` fails (BUG-056). Unchanged.
+- `crc/aws/kms.py` (`_matches_filter`): a `filter_tags` value given as a plain string (not a list) is iterated per character, as on main (`{"a": "12"}` means values `1` or `2`). Exists on main: yes (there it required both characters as pairs). Not fixed; the CLI always passes lists.

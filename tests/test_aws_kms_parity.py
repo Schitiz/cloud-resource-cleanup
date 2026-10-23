@@ -100,6 +100,7 @@ class Case:
     reject_repeat: bool = False
     max_age: str | None = None
     fails_in_plan: bool = False
+    diverges: str = ""
 
 
 def _many(count: int) -> list[KeySpec]:
@@ -166,11 +167,28 @@ CASES = [
         "filter-multi-value-never-matches",
         [key("k1", tags=tag_list({"a": "1"})), key("k2", tags=tag_list({"a": "2"}))],
         filter_tags={"a": ["1", "2"]},
+        diverges="BUG-014",
     ),
     Case(
         "filter-empty-value-list-adds-no-constraint",
         [key("k1", tags=tag_list({"zzz": "1"})), key("k2")],
         filter_tags={"a": []},
+        diverges="BUG-007",
+    ),
+    Case(
+        "filter-multi-value-no-tag-match",
+        [key("k1", tags=tag_list({"a": "3"}))],
+        filter_tags={"a": ["1", "2"]},
+    ),
+    Case(
+        "filter-empty-value-list-key-present",
+        [
+            key("k1", tags=tag_list({"a": "x"})),
+            key("k2", tags=tag_list({"zzz": "1"})),
+            key("k3"),
+        ],
+        filter_tags={"a": []},
+        diverges="BUG-007",
     ),
     Case(
         "filter-two-keys-all-pairs",
@@ -223,16 +241,19 @@ CASES = [
         "exception-set-tagged-key-keyerror-skips",
         [key("k1", tags=tag_list({"a": "1"})), key("k2")],
         exception_tags={"a": []},
+        diverges="BUG-015",
     ),
     Case(
         "exception-set-value-list",
         [key("k1", tags=tag_list({"b": "1"}))],
         exception_tags={"a": ["1"]},
+        diverges="BUG-015",
     ),
     Case(
         "exception-with-key-and-tagkey-entries",
         [key("k1", tags=[{"TagKey": "t", "TagValue": "v", "Key": "a", "Value": "1"}])],
         exception_tags={"a": ["1"]},
+        diverges="BUG-015",
     ),
     Case(
         "exception-with-key-and-tagkey-entries-no-hit",
@@ -243,6 +264,28 @@ CASES = [
         "exception-with-key-only-key-list",
         [key("k1", tags=[{"TagKey": "t", "TagValue": "v", "Key": "a", "Value": "2"}])],
         exception_tags={"a": []},
+        diverges="BUG-015",
+    ),
+    Case(
+        "exception-multi-value-hit-keeps",
+        [key("k1", tags=tag_list({"a": "2"})), key("k2", tags=tag_list({"a": "3"}))],
+        exception_tags={"a": ["1", "2"]},
+        diverges="BUG-015",
+    ),
+    Case(
+        "exception-production-tags",
+        [
+            key("off", tags=tag_list({"autoclean": "false"})),
+            key("gke", tags=tag_list({"crc": "gke"})),
+            key("other", tags=tag_list({"crc": "other"})),
+            key("untagged"),
+        ],
+        exception_tags={
+            "autoclean": ["false", "False", "FALSE"],
+            "auto_clean": ["false", "False", "FALSE"],
+            "crc": ["gke"],
+        },
+        diverges="BUG-015",
     ),
     Case(
         "exception-none-warns-per-key",
@@ -325,6 +368,20 @@ CASES = [
         "age-tag-never-matches-tagkey-entries",
         [key("k1", tags=tag_list({"crc_age": "{'days': 100}"}), meta=meta(created=MID))],
         age_tag="crc_age",
+        diverges="BUG-008",
+    ),
+    Case(
+        "age-tag-tagkey-short-selects-earlier",
+        [key("k1", tags=tag_list({"crc_age": "{'hours': 1}"}), meta=meta(created=MID))],
+        age_tag="crc_age",
+        age={"days": 100},
+        diverges="BUG-008",
+    ),
+    Case(
+        "age-tag-tagkey-unparseable-falls-back-to-age",
+        [key("k1", tags=tag_list({"crc_age": "nope"}), meta=meta(created=MID))],
+        age_tag="crc_age",
+        diverges="BUG-008",
     ),
     Case(
         "age-tag-without-tags",
@@ -378,6 +435,7 @@ CASES = [
             ),
             key("k2"),
         ],
+        diverges="BUG-055",
     ),
     Case(
         "policy-service-principal-first-skips",
@@ -623,6 +681,40 @@ def debug_logs(caplog: pytest.LogCaptureFixture) -> None:
 
 LOG_BUGS = {"BUG-357"}
 
+FIXED: Mapping[str, tuple[list[str], list[str]]] = {
+    # case id: (deleted, keys whose describe_key was called)
+    "filter-multi-value-never-matches": (["k1", "k2"], ["k1", "k2"]),
+    "filter-empty-value-list-adds-no-constraint": ([], []),
+    "filter-empty-value-list-key-present": (["k1"], ["k1"]),
+    "exception-set-tagged-key-keyerror-skips": (["k2"], ["k2"]),
+    "exception-set-value-list": (["k1"], ["k1"]),
+    "exception-with-key-and-tagkey-entries": (["k1"], ["k1"]),
+    "exception-with-key-only-key-list": (["k1"], ["k1"]),
+    "exception-multi-value-hit-keeps": (["k2"], ["k2"]),
+    "exception-production-tags": (["other", "untagged"], ["other", "untagged"]),
+    "age-tag-never-matches-tagkey-entries": ([], ["k1"]),
+    "age-tag-tagkey-short-selects-earlier": (["k1"], ["k1"]),
+    "age-tag-tagkey-unparseable-falls-back-to-age": (["k1"], ["k1"]),
+    "policy-match-then-statement-without-aws-stays-selected": (["k2"], ["k1", "k2"]),
+}
+
+
+def assert_fixed(case: Case, old: "Outcome", new: "Outcome") -> None:
+    """A case marked with a BUG ID: the oracle (main) still shows the old outcome, the new code
+    differs from it and gives exactly the fixed outcome (BEHAVIOUR_FIX.md section 3)."""
+    deleted, described = FIXED[case.id]
+    assert case.diverges.startswith("BUG-")
+    assert (new.calls, new.deleted, new.logs) != (old.calls, old.deleted, old.logs)
+    assert new.error is None
+    assert new.deleted == deleted
+    assert [c[1] for c in new.calls if c[0] == "describe_key"] == described
+    scheduled = [str(c[1]) for c in new.calls if c[0] == "schedule_key_deletion"]
+    assert scheduled == ([] if case.dry_run else deleted)
+
+
+def test_every_diverging_case_has_an_expected_outcome() -> None:
+    assert {c.id for c in CASES if c.diverges} == set(FIXED)
+
 
 @pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
 def test_matches_main(
@@ -634,6 +726,9 @@ def test_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run(_new, case, monkeypatch, caplog, capsys)
+    if case.diverges:
+        assert_fixed(case, old, new)
+        return
     assert new.calls == old.calls
     assert new.error == old.error
     assert new.deleted == old.deleted
@@ -690,6 +785,9 @@ def test_cleaner_protocol_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run_cleaner(case, monkeypatch, caplog, capsys)
+    if case.diverges:
+        assert_fixed(case, old, new)
+        return
     assert new.error == old.error
     assert new.stdout == old.stdout
     assert _without_client(new.calls) == _without_client(old.calls)
@@ -709,8 +807,6 @@ def _scheduled(o: Outcome) -> list[str]:
 
 
 QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
-    ("filter-multi-value-never-matches", lambda o: o.deleted == []),
-    ("filter-empty-value-list-adds-no-constraint", lambda o: o.deleted == ["k1", "k2"]),
     ("filter-repeated-tag-key-keeps-every-value", lambda o: o.deleted == ["k1"]),
     ("filter-repeated-tag-key-both-values", lambda o: o.deleted == ["k1"]),
     (
@@ -722,19 +818,10 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
         lambda o: o.deleted == [] and ("KEY SKIPPED k1" in [m for _, _, m in o.logs]),
     ),
     ("filter-string-value-iterates-characters", lambda o: o.deleted == ["k1"]),
-    ("exception-set-tagged-key-keyerror-skips", lambda o: o.deleted == ["k2"]),
     ("exception-set-untagged-key-proceeds", lambda o: o.deleted == ["k1"]),
-    (
-        "exception-with-key-and-tagkey-entries",
-        lambda o: o.deleted == [] and ("describe_key", "k1") not in o.calls,
-    ),
     (
         "exception-none-warns-per-key",
         lambda o: [m for _, _, m in o.logs].count("Exception tags and not present") == TWO_KEYS,
-    ),
-    (
-        "age-tag-never-matches-tagkey-entries",
-        lambda o: o.deleted == ["k1"],
     ),
     ("age-tag-found-via-key-entry-keeps", lambda o: o.deleted == []),
     ("age-tag-found-via-key-entry-short-takes", lambda o: o.deleted == ["k1"]),
@@ -747,10 +834,6 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
     (
         "policy-duplicate-statements-second-schedule-rejected",
         lambda o: o.error is not None and _scheduled(o) == ["k1", "k1"] and o.deleted == [],
-    ),
-    (
-        "policy-match-then-statement-without-aws-stays-selected",
-        lambda o: o.deleted == ["k1", "k2"] and ("KEY SKIPPED k1" in [m for _, _, m in o.logs]),
     ),
     ("policy-string-principal-skips", lambda o: o.deleted == []),
     ("policy-keyboard-interrupt-is-swallowed", lambda o: o.deleted == ["k2"]),
@@ -837,6 +920,16 @@ def _skip_outcome(obj: Any, tag_items: Any) -> tuple[str, Any]:
         return (type(e).__name__, str(e))
 
 
+def _expected_skip(spec: Any, tag_items: Any) -> tuple[str, Any]:
+    if any("TagKey" not in tag or "TagValue" not in tag for tag in tag_items):
+        return ("KeyError", "'TagKey'" if "TagKey" not in tag_items[0] else "'TagValue'")
+    hit = any(
+        t["TagKey"] in spec and (not spec[t["TagKey"]] or t["TagValue"] in spec[t["TagKey"]])
+        for t in tag_items
+    )
+    return ("ok", hit)
+
+
 @pytest.mark.parametrize("tag_items", SKIP_TAGS, ids=range(len(SKIP_TAGS)))
 @pytest.mark.parametrize("spec", SKIP_SPECS, ids=range(len(SKIP_SPECS)))
 def test_should_skip_kms_matches_main(
@@ -846,6 +939,10 @@ def test_should_skip_kms_matches_main(
     args: tuple[Any, ...] = (False, {}, spec, DESC, USER, 7, {"days": 1}, "")
     old = _load_oracle().Kms(*args)
     new = Kms(*args)
+    if spec and tag_items:
+        # BUG-015: main reads `Key` / `Value`, the new code reads `TagKey` / `TagValue`.
+        assert _skip_outcome(new, tag_items) == _expected_skip(spec, tag_items)
+        return
     assert _skip_outcome(new, tag_items) == _skip_outcome(old, tag_items)
 
 
@@ -872,7 +969,7 @@ def test_runtime_injection_replaces_boto3(monkeypatch: pytest.MonkeyPatch) -> No
 
 @pytest.mark.parametrize(
     "case_id",
-    ["tag-unhashable-value-skips", "policy-match-then-statement-without-aws-stays-selected"],
+    ["tag-unhashable-value-skips", "policy-service-principal-first-skips"],
 )
 def test_key_skipped_is_debug(
     case_id: str,

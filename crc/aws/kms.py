@@ -37,6 +37,7 @@ _UNREADABLE = "unreadable"
 class _NotOursError(Exception):
     """The key policy has no AWS principal to compare with `kms_user`: not one of ours."""
 
+
 TagSpec = Mapping[str, Sequence[str]]
 Clock = Callable[[], datetime.datetime]
 
@@ -118,24 +119,35 @@ def _log_would_delete(key_ids: Sequence[str]) -> None:
         run.action("would_delete", _DEFAULT_REGION, key_id)
 
 
-def _has_all_pairs(response_tags: Iterable[Mapping[str, Any]], spec: TagSpec | None) -> bool:
-    # One tag at a time: main compares sets of (key, value) pairs, so a repeated TagKey keeps
-    # every one of its values.
-    response_set = {(tag["TagKey"], tag["TagValue"]) for tag in response_tags}
-    filter_set = {(k, v) for k, values in spec.items() for v in values} if spec else set()
+def _tag_pairs(response_tags: Iterable[Mapping[str, Any]]) -> set[tuple[str, str]]:
+    """(TagKey, TagValue) pairs of one key. A tag without `TagKey` / `TagValue` raises KeyError
+    and an unhashable value raises TypeError: the caller skips the key (fail closed). One set,
+    so a repeated TagKey keeps every one of its values."""
+    return {(tag["TagKey"], tag["TagValue"]) for tag in response_tags}
+
+
+def _matches_filter(pairs: set[tuple[str, str]], spec: TagSpec | None) -> bool:
+    """BUG-007, BUG-014: every filter key must be on the key, with any of its listed values; an
+    empty value list means "key present, any value" (as `policy.filter_tags_all_keys` and
+    `crc/aws/vm`). Materialises every value list first, so a non-iterable one raises TypeError
+    (the key is skipped) whatever the other keys say."""
+    wanted = {key: tuple(values) for key, values in spec.items()} if spec else {}
     return all(
-        any(
-            policy.filter_tags_exact_pairs({key: value}, {wanted_key: [wanted]})
-            for key, value in response_set
-        )
-        for wanted_key, wanted in filter_set
+        any(policy.matches_any_key({key: value}, {wanted_key: values}) for key, value in pairs)
+        for wanted_key, values in wanted.items()
     )
+
+
+def _has_exception_tag(pairs: set[tuple[str, str]], spec: TagSpec) -> bool:
+    """BUG-015: a key that has any exception tag (TagKey / TagValue) is kept."""
+    return any(policy.exception_tags_any({key: value}, spec) for key, value in pairs)
 
 
 class KmsCleaner:
     """Schedules deletion of enabled keys whose description contains `kms_key_description`,
-    that are old enough, match `filter_tags` (all (key, value) pairs) and whose default key
-    policy names `kms_user`. Works in `us-west-2` only, as on `main`."""
+    that are old enough, match `filter_tags` (every key present with any of its values), have no
+    exception tag and whose default key policy names `kms_user`. Works in `us-west-2` only, as on
+    `main`."""
 
     cloud = "aws"
     kind = "kms"
@@ -190,22 +202,17 @@ class KmsCleaner:
         return client, kms_keys
 
     def plan_keys(self, client: KmsClient, keys: Sequence[Mapping[str, Any]], clock: Clock) -> Plan:
-        """Decide every key. Any error on one key skips that key (a bare `except:` on `main`),
-        and a key found for the user before the error stays selected."""
+        """Decide every key. Any error on one key skips that key (a bare `except:` on `main`);
+        a skipped key is never selected (BUG-055)."""
         logging.info(f"Total keys found = {len(keys)}")
         started = _regionlog.start()
         active: list[str] = []
         for key in keys:
-            selected_before = len(active)
             try:
                 self._select_key(client, key["KeyId"], active, clock)
             except BaseException as e:
                 logging.debug(f"KEY SKIPPED {key['KeyId']}")
-                # A key appended before the error stays selected: it is not a skip.
-                if len(active) == selected_before:
-                    logger.current().skip(
-                        _NOT_OURS if isinstance(e, _NotOursError) else _UNREADABLE
-                    )
+                logger.current().skip(_NOT_OURS if isinstance(e, _NotOursError) else _UNREADABLE)
         _regionlog.region_done(_DEFAULT_REGION, len(keys), len(active), started)
         logging.info(f"total number of active Jenkins keys = {len(active)}")
         candidates = tuple(
@@ -233,7 +240,8 @@ class KmsCleaner:
 
     def _select_key(self, client: KmsClient, key_id: str, active: list[str], clock: Clock) -> None:
         response_tags = client.list_resource_tags(KeyId=key_id).get("Tags", [])
-        if not _has_all_pairs(response_tags, self._settings.filter_tags):
+        pairs = _tag_pairs(response_tags)
+        if not _matches_filter(pairs, self._settings.filter_tags):
             return
         if self._should_skip(response_tags):
             logger.current().skip("exception_tag")
@@ -242,7 +250,9 @@ class KmsCleaner:
         key_state = metadata["KeyMetadata"]["KeyState"]
         key_des = metadata["KeyMetadata"]["Description"]
         created = metadata["KeyMetadata"]["CreationDate"]
-        retention_age = core_age.get_retention_age(response_tags, self._settings.custom_age_tag_key)
+        retention_age = core_age.get_retention_age(
+            policy.normalize_tags(response_tags), self._settings.custom_age_tag_key
+        )
         if retention_age:
             logging.info(f"Updating age for Key: {key_id}")
         if (
@@ -258,6 +268,7 @@ class KmsCleaner:
 
     def _select_for_user(self, client: KmsClient, key_id: str, active: list[str]) -> None:
         document = client.get_key_policy(KeyId=key_id, PolicyName=_POLICY_NAME)["Policy"]
+        found: list[str] = []
         for statement in json.loads(document)["Statement"]:
             try:
                 user_arn = statement["Principal"]["AWS"]
@@ -265,19 +276,15 @@ class KmsCleaner:
                 raise _NotOursError from e
             if user_arn == self._settings.kms_user:
                 logging.info(f"Key {key_id} found with user {user_arn}")
-                active.append(key_id)
+                found.append(key_id)
+        active.extend(found)
 
     def _should_skip(self, tags: Sequence[Mapping[str, Any]]) -> bool:
         exception_tags = self._settings.exception_tags
         if not exception_tags:
             logging.warning("Exception tags and not present")
             return False
-        for tag in tags:
-            # BUG-015: main reads `Key` / `Value`, but KMS tags carry `TagKey` / `TagValue`.
-            pair = {tag["Key"]: tag["Value"]}
-            if policy.exception_tags_any(pair, exception_tags):
-                return True
-        return False
+        return _has_exception_tag(_tag_pairs(tags), exception_tags)
 
 
 @register("aws", "kms")
