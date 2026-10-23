@@ -31,11 +31,11 @@ class FakeCleaner:
         effect = self._fakes.side_effect.get((self.cloud, self.kind))
         if effect is not None:
             effect(context)
-        return Plan()
+        return self._fakes.plans.get((self.cloud, self.kind), Plan())
 
     def apply(self, plan: Plan, context: RunContext) -> Result:
         self._fakes.applied.append((self.cloud, self.kind))
-        return Result()
+        return self._fakes.results.get((self.cloud, self.kind), Result())
 
 
 class FakeCleaners:
@@ -46,6 +46,8 @@ class FakeCleaners:
         self.contexts: list[RunContext] = []
         self.applied: list[tuple[str, str]] = []
         self.side_effect: dict[tuple[str, str], Callable[[RunContext], None]] = {}
+        self.plans: dict[tuple[str, str], Plan] = {}
+        self.results: dict[tuple[str, str], Result] = {}
         self.registry = Registry()
         for cloud, table in bridge.TABLES.items():
             for kind in table:

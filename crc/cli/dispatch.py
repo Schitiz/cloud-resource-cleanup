@@ -9,6 +9,9 @@ from crc.cli.bridge import is_routed_kind, route_for, run_routed
 from crc.cli.context import RunContext, make_crc
 from crc.cli.inputs import Options, Targets
 from crc.cli.pairs import (
+    AWS_DISK_OPT_IN_MESSAGE as AWS_DISK_OPT_IN_MESSAGE,
+)
+from crc.cli.pairs import (
     SUPPORTED_CLOUDS as SUPPORTED_CLOUDS,
 )
 from crc.cli.pairs import (
@@ -22,13 +25,6 @@ from crc.core import logger
 _LOG = logging.getLogger(__name__)
 
 Handler = Callable[[Any, Any, Options, Targets], None]
-
-AWS_DISK_OPT_IN_MESSAGE = (
-    "AWS EBS volume cleanup requires '--cloud aws --resource disk'. "
-    "Refusing to continue so --cloud all / --resource all does not "
-    "skip EBS and then delete other AWS resources, and so "
-    "--cloud all --resource disk does not reach other clouds' disks."
-)
 
 
 def _disk(crc: Any, cloud: Any, options: Options, targets: Targets) -> None:

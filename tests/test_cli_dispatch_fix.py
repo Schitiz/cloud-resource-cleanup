@@ -131,7 +131,7 @@ def test_bug_017_cloud_all_skips_unsupported_pairs_with_a_warning(
     ("resource", "adapter_attr", "expected_cloud"),
     [
         ("keypair", None, "aws"),
-        ("kms", "Kms", "aws"),
+        ("kms", None, "aws"),
     ],
 )
 def test_bug_017_cloud_all_real_crc_does_not_build_skipped_clouds(

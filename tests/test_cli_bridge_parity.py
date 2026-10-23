@@ -15,7 +15,7 @@ import pytest
 
 from crc.cli import bridge
 from crc.cli.inputs import Options, Targets, read_options
-from crc.cli.routes import Route
+from crc.cli.routes import NotifyMode, Route
 from crc.cli.runner import CRC as NewCRC
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext
 from crc.core.registry import Registry
@@ -173,15 +173,25 @@ def test_bridge_reaches_the_cleaner_with_the_flags(monkeypatch: pytest.MonkeyPat
     assert init_calls == [("logs/crc.log",)]
 
 
-def test_route_tables_route_only_aws_keypair() -> None:
+def test_route_tables_route_the_aws_kinds() -> None:
     assert {cloud: sorted(table) for cloud, table in bridge.TABLES.items()} == {
-        "aws": ["keypair"],
+        "aws": [
+            "disk",
+            "ip",
+            "keypair",
+            "kms",
+            "snapshot",
+            "spot_instance_requests",
+            "vm",
+            "vpc",
+        ],
         "azure": [],
         "gcp": [],
         "oci": [],
     }
     assert bridge.is_routed_kind("keypair")
-    assert not bridge.is_routed_kind("disk")
+    assert bridge.is_routed_kind("disk")
+    assert not bridge.is_routed_kind("nic")
     assert bridge.route_for("azure", "keypair") is None
 
 
@@ -192,7 +202,7 @@ def test_notifiers_follow_the_clients_and_the_notify_flag() -> None:
     assert bridge.build_notifiers(silent, route) == []
     both = NewCRC("aws", False, None, object(), object(), slack_channel="c", influxdb_conn={})
     assert [n.name for n in bridge.build_notifiers(both, route)] == ["slack", "influx"]
-    quiet = Route(route.options, notify=False)
+    quiet = Route(route.options, notify=NotifyMode.NONE)
     assert bridge.build_notifiers(both, quiet) == []
 
 

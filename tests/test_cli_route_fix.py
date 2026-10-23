@@ -12,6 +12,7 @@ from crc.cli import context as cli_context
 from crc.cli import dispatch as cli_dispatch
 from crc.cli import scan as cli_scan
 from crc.cli.main import main
+from tests.helpers_cli_routes import FakeCleaners
 
 PROD_SNAPSHOT = [
     "--cloud",
@@ -74,6 +75,14 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> Recorder:
     monkeypatch.setattr(cli_clients, "WebClient", lambda **_: object())
     monkeypatch.setattr(cli_scan, "notify_cleanup", lambda *a, **k: None)
     monkeypatch.delenv("MAX_AGE", raising=False)
+    cleaners = FakeCleaners().install(monkeypatch)
+
+    def snapshot(context: Any) -> None:
+        rec.events.append(("Snapshot", context.options["age_days"], context.dry_run))
+        rec.events.append(("Snapshot.delete",))
+
+    cleaners.side_effect[("aws", "snapshot")] = snapshot
+    cleaners.side_effect[("aws", "vpc")] = lambda context: rec.events.append(("delete_vpc", "aws"))
     return rec
 
 

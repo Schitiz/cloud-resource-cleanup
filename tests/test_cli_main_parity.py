@@ -31,7 +31,7 @@ from crc.cli import context as cli_context
 from crc.cli import dispatch as cli_dispatch
 from crc.cli import scan as cli_scan
 from crc.core import logger
-from crc.core.cleaner import RunContext
+from crc.core.cleaner import Candidate, Operation, Plan, Result, RunContext
 from tests.helpers_cli_routes import FakeCleaners, provide_legacy_keypairs
 
 provide_legacy_keypairs()
@@ -285,7 +285,9 @@ def run_oracle(case: Case, monkeypatch: pytest.MonkeyPatch) -> Outcome:
     monkeypatch.setattr(module, "WebClient", fakes.WebClient)
     monkeypatch.setattr(module, "InfluxDBClient", fakes.InfluxDBClient)
     monkeypatch.setattr(module, "notify_cleanup", fakes.notify_cleanup)
-    return execute(module.main, case, fakes)
+    outcome = execute(module.main, case, fakes)
+    outcome.events = strip_unused_args(outcome.events)
+    return outcome
 
 
 def run_new(case: Case, monkeypatch: pytest.MonkeyPatch) -> Outcome:
@@ -299,9 +301,88 @@ def run_new(case: Case, monkeypatch: pytest.MonkeyPatch) -> Outcome:
     return execute(NEW_MODULE.main, case, fakes)
 
 
-ROUTED_CALLS: dict[str, tuple[str, tuple[str, ...]]] = {
-    "keypair": ("delete_keypairs", ("name_regex", "exception_regex", "age")),
+@dataclass(frozen=True)
+class RoutedCall:
+    """The oracle `CRC` call of a routed kind, and which of its arguments reach the cleaner.
+
+    `keys` are the `RunContext.options` keys, in the order of the oracle call arguments. A
+    `None` key is an argument the legacy adapter never used (the AWS IP adapter dropped the
+    regexes, the AWS disk adapter the Slack owner flags); the oracle event loses that position.
+    `stop` is the oracle method of a stop run, which takes the first four keys.
+    """
+
+    method: str
+    keys: tuple[str | None, ...]
+    stop: str | None = None
+
+
+ROUTED_CALLS: dict[str, RoutedCall] = {
+    "keypair": RoutedCall("delete_keypairs", ("name_regex", "exception_regex", "age")),
+    "ip": RoutedCall("delete_ip", ("filter_tags", "exception_tags", None, None)),
+    "kms": RoutedCall(
+        "delete_kms",
+        (
+            "filter_tags",
+            "exception_tags",
+            "kms_key_description",
+            "kms_user",
+            "kms_pending_window",
+            "age",
+            "custom_age_tag_key",
+        ),
+    ),
+    "vpc": RoutedCall("delete_vpc", ("filter_tags", "exception_tags")),
+    "vm": RoutedCall(
+        "delete_vm",
+        ("filter_tags", "exception_tags", "age", "custom_age_tag_key", "instance_state"),
+        stop="stop_vm",
+    ),
+    "spot_instance_requests": RoutedCall(
+        "delete_spot_instance_requests",
+        ("filter_tags", "exception_tags", "age", "custom_age_tag_key"),
+    ),
+    "disk": RoutedCall(
+        "delete_disks",
+        (
+            "filter_tags",
+            "exception_tags",
+            "age",
+            "custom_age_tag_key",
+            "detach_age",
+            "name_regex",
+            "exception_regex",
+            None,
+            None,
+        ),
+    ),
+    "snapshot": RoutedCall("Snapshot", ()),
 }
+
+
+def strip_unused_args(events: Events) -> Events:
+    """Drop the oracle call arguments that the routed AWS adapters never read."""
+    inverse = {call.method: call for call in ROUTED_CALLS.values()}
+    kept: Events = []
+    for event in events:
+        call = inverse.get(str(event[0]).removeprefix("crc."))
+        if call is not None and event[0].startswith("crc.") and event[1] == "aws":
+            args = [a for a, key in zip(event[2], call.keys, strict=False) if key is not None]
+            event = (event[0], event[1], args, event[3])
+        kept.append(event)
+    return kept
+
+
+def snapshot_side_effect(fakes: Fakes) -> Callable[[RunContext], None]:
+    def record(context: RunContext) -> None:
+        kwargs = {
+            "dry_run": context.dry_run,
+            "age_days": context.options["age_days"],
+            "exception_tags": context.options["exception_tags"],
+        }
+        fakes.events.append(("Snapshot", [], norm(kwargs)))
+        fakes.events.append(("Snapshot.delete",))
+
+    return record
 
 
 def install_routed_fakes(fakes: Fakes, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -309,13 +390,25 @@ def install_routed_fakes(fakes: Fakes, monkeypatch: pytest.MonkeyPatch) -> None:
     cleaners = FakeCleaners().install(monkeypatch)
     for cloud, table in bridge.TABLES.items():
         for kind in table:
-            method, keys = ROUTED_CALLS[kind]
+            call = ROUTED_CALLS[kind]
+            if kind == "snapshot":
+                cleaners.side_effect[(cloud, kind)] = snapshot_side_effect(fakes)
+                cleaners.plans[(cloud, kind)] = Plan(
+                    candidates=tuple(Candidate(f"snap-{i}") for i in range(3))
+                )
+                cleaners.results[(cloud, kind)] = Result(succeeded=("snap-1",))
+                continue
 
             def record(
-                context: RunContext, cloud: str = cloud, method: str = method, keys: Any = keys
+                context: RunContext, cloud: str = cloud, call: RoutedCall = call
             ) -> None:
                 assert context.dry_run is ("--dry_run" in fakes.case.argv)
-                args = [norm(context.options[key]) for key in keys]
+                stop = call.stop if context.operation is Operation.STOP else None
+                method = stop or call.method
+                keys = [key for key in call.keys if key is not None]
+                if stop:
+                    keys = keys[:4]
+                args = [norm(context.options.get(key)) for key in keys]
                 fakes.events.append((f"crc.{method}", cloud, args, {}))
                 if fakes.case.crc_fail == method:
                     raise RuntimeError(f"{method} failed")
