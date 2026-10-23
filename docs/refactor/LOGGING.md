@@ -56,9 +56,12 @@ without handlers those run `logging.basicConfig()`, which adds a stderr handler 
 (BUG-363). The same holds for every log call that can run before `init_logging` in the CLI path
 (`crc/cli/dispatch.py` uses a module logger). `crc/cli` calls `begin()` before any cleaner is
 built, and logging is only initialised when a cleaner is built (`Service.__init__`), so
-`RUN START` is held until the first run-log line is emitted after the root logger has handlers
-and is then emitted once, before that line. When the run ends without root handlers, `finish()`
-still emits `RUN START` and then `RESULT` through the named logger.
+`RUN START` is held and printed as soon as logging is initialised: `crc.utils.init_logging`
+calls `logger.logging_ready()` after adding the root handlers (BUG-364), so the header comes
+before any line of the cleaner itself. Fallbacks: the first run-log line emitted after the root
+logger has handlers releases a still-held header, and when the run ends without root handlers
+`finish()` still emits `RUN START` and then `RESULT` through the named logger. The header is
+printed once.
 
 ```
 RUN START cloud=<cloud> resource=<resource> operation=<delete|stop> dry_run=<true|false> <key>=<json> ...
@@ -87,6 +90,10 @@ RESULT cloud=<c> resource=<r> operation=<op> dry_run=<true|false> selected=<n> d
   the existing warning line stays.
 - `RunLog.fail(region, resource_id, error)` records a failure; the existing per-resource
   error line stays where it is.
+- `FAILED` is always one line (BUG-365): the exception message is split on line breaks, each
+  part stripped, empty parts dropped and the rest joined with ` | `; the
+  `error=<ExceptionType>: <message>` format is otherwise unchanged. The per-resource error
+  lines are not changed.
 - `finish()` logs, in this order: one INFO `SKIPPED` line per reason sorted by reason; if
   there are failures, ERROR `ERRORS count=<n>` and one ERROR `FAILED` line per failure in
   order; then always INFO `RESULT`.
