@@ -83,3 +83,42 @@ Scope reviewed: `git diff cea0a8a..HEAD` (`crc/aws/_common.py`, `crc/aws/disk/{c
 
 VERDICT: APPROVE
 
+## Round 2 (Opus)
+
+Scope: `git diff cea0a8a..HEAD` (commits `9bd55c4` coder, `e1a6d84` round 1). Round 1 fixes (README double comma, `apply_region()` naming in kms/snapshot READMEs) checked: present and correct. Round 1 findings re-done independently below.
+
+### Checks
+
+1. **No behaviour change.** Compared every function body of the base modules (`keypairs.py`, `elastic_ips.py`, `kms.py`, `snapshot.py`, `disk/*.py` at `cea0a8a`) with the new packages at AST level (docstrings dropped, `_`-prefix renames mapped), plus every module/class level assignment, signature, default and decorator. The only differences are:
+   - `_all_regions` -> `_common.ec2_regions` (same `get_all_regions("ec2", "us-west-2")`), `_skip_region(r, e)` -> `_common.skip_region(r, SKIP_CONTEXT, e)` (same two calls, same order, same context strings), the `by_region` loop -> `_common.group_by_region` (same `setdefault` order), the three `_log_summary` bodies -> `_common.log_deleted_summary(label, ...)` (same f-strings, labels `keypairs` / `Elastic IPs` / `KMS`).
+   - `snapshot` `iter_region`: local variable `used_by_amis` renamed to `used` (pure rename).
+   - `disk`: `DiskCleaner.region_guard` (a `@contextmanager` method) now returns `guard.region_guard(region, self._flag_error)`; the except chain, `flag_error()` before `logging.error` (was `self.had_errors = True`), log texts and the early `return` for unauthorised codes are unchanged. `DiskCleaner.log_summary` delegates to `guard.log_summary` with the same texts. Callers only use it as `with self.region_guard(region):`.
+   - KMS keeps its own `us-west-2` constant (now `_common.DEFAULT_REGION`, same value) and its own skip WARNING text (different from `log_skipped_region`, correctly not folded into `skip_region`).
+   No changed condition, default, SDK call order, exception handling or log text. Nothing BLOCKING.
+2. **Import paths and patch targets.** Imported every base module and the new package and diffed `dir()`: all public names of `crc.aws.{keypairs,elastic_ips,kms,snapshot,disk}` and `crc.aws.disk.cleaner` (`DiskCleaner`, `DiskRuntime`, `build_disk_cleaner`) still resolve. Names no longer on the old paths are only private helpers / re-imported stdlib names (`_boto3_client`, `_all_regions`, `_is_protected`, `_NotOursError`, `boto3_ec2`, ...); `rg` finds no reference to any of them in `tests/`, `crc.py`, `crc/cli`, `crc/core`. String patch targets naming these modules: only `crc.aws.disk.boto3.client` and `crc.aws.disk.get_all_regions`, both on the unchanged `disk/__init__.py`; no `patch.object` / `monkeypatch.setattr` on the moved modules. New `client.py` files call `boto3.client(...)` through the module, so `boto3.client` patches still apply.
+3. **Tests untouched.** `git diff --name-only cea0a8a..HEAD` outside `crc/aws/` is only this review file: no test, no `tests/legacy/*.txt`, no `tests/archtest/**`, no hash-locked test, no guarded doc/config file.
+4. **Size and seams.** Every owned file <= 250 (`wc -l`; largest `disk/cleaner.py` 217, `disk/volumes.py` 214 untouched, `kms/cleaner.py` 207). Splits follow real seams: `client.py` (Protocols, factory, runtime), `cleaner.py` (Cleaner + registry factory), `adapter.py` (legacy class alone, deletable in one move), plus domain modules `kms/settings.py`, `kms/tags.py`, `snapshot/protection.py`, `disk/guard.py`. `_common.py` helpers are each used by 2+ owned packages (`ec2_regions`/`skip_region`: keypairs, elastic_ips, snapshot; `group_by_region`: those three + disk; `log_deleted_summary`: keypairs, elastic_ips, kms).
+5. **READMEs.** `crc/aws/README.md` and the five package READMEs list the public names of their modules (ARCH-002 green) and are short.
+
+### Findings
+
+- **BLOCKING:** none.
+- **NIT (not changed):** the old flat modules' private helpers (`crc.aws.snapshot._is_protected`, `crc.aws.kms._tag_pairs`, ...) no longer import from the old path; nothing in the repo uses them and the contract covers names imported today, so acceptable.
+- No new bugs beyond the coder's `BaseException` note.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt`, then `make check`:
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed! |
+| `mypy` (strict) | Success: no issues found in 268 source files |
+| `lint-imports` | Contracts: 5 kept, 0 broken |
+| `pytest -q` (incl. ARCH-001..005, SAF-LOCK) | 43010 passed in 158.96s |
+
+- Test count: 43010 collected at `cea0a8a` (`pytest --collect-only` in a worktree) and 43010 passed at `HEAD`.
+- `make check` runtime: about 2m40s wall (pytest 2m39s; ruff, mypy and lint-imports under 1s with a warm mypy cache).
+
+ROUND 2 VERDICT: APPROVE
+
