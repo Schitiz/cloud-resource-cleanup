@@ -100,3 +100,89 @@ Scope reviewed: `git diff 182466d..HEAD` (`crc/azu/README.md`, `crc/azu/vm/READM
 Test count: 42444 at `182466d`, 42470 before review, 42474 after review (+4).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 182466d..HEAD`, including the Round 1 (Argon) fixes. Round 1's three nits are in
+the tree and correct: `_power_state` handles `statuses=None` and treats a bare `PowerState/` code as
+no power state; `_oracle_shape` maps only `("list", <expected group>)` back to `list_all`; the vm
+README prose is updated.
+
+### Checks
+
+1. **Each bug is fixed and has a test that fails on `182466d`.** I copied
+   `tests/test_azure_vm_fix.py` and the updated `tests/helpers_azure_vm.py` into a worktree of
+   `182466d`: 15 of 27 tests fail there and all pass now. Every bug has a failing test:
+   - BUG-002: `test_bug_002_*`, all three tests.
+   - BUG-003: `test_bug_003_stop_deallocates_and_never_powers_off`.
+   - BUG-010: `test_bug_010_no_power_state_keeps_the_vm`, all six cases, and
+     `..._found_by_code_not_by_position`.
+   - BUG-198: `test_bug_198_state_is_matched_exactly` for `run`, `runn` and `""`, and
+     `..._compared_case_insensitively`.
+
+   The group is never derived from the VM id (`crc/azu/vm/cleaner.py:202-207`). Delete is
+   unchanged: `test_bug_003_delete_is_unchanged` pins the four delete calls and their order.
+2. **Direction rule.** `tests/legacy/azu_vm.txt` is untouched. The 8 diverging parity cases each
+   carry an in-scope bug ID (BUG-002, BUG-010 or BUG-198). `test_fixed_quirk_diverges_from_main`
+   asserts that the oracle still shows the bug and that both new paths (adapter and `Cleaner`) give
+   the new outcome. Every other case is compared exactly with the oracle: calls, error, selections,
+   counts, logs and stdout.
+
+   The only global change to the parity test is `_oracle_shape`. It renames two calls whose
+   arguments stay the same: `list(<expected group>)` back to `list_all` and `begin_deallocate` back
+   to `begin_power_off`. `test_list_is_the_configured_group_only` and `test_stop_deallocates` pin
+   the new calls, so this does not loosen the comparison.
+   - BUG-002 and BUG-198 are "deletes what it should keep" rows. They only keep more: fewer VMs are
+     listed, and exact match on the code selects a subset of the old substring match on
+     `VM <state>`. When the group is empty they fail closed before any SDK call (see check 4).
+   - BUG-003 and BUG-010 are "keeps what it should delete" rows, so acting on more VMs is allowed
+     for the inputs they cover. See the first nit below.
+3. **Production commands.** All six Jenkins commands reach `delete_vm` (`crc/cli/dispatch.py:58-66`)
+   with the instance state `["running"]` (the default) or `["stopped"]`. For Azure power states, an
+   exact match of `running` or `stopped` on the code selects the same VMs as the old substring test
+   on `VM running` or `VM stopped`. The only intended change is that VMs outside `$RESOURCE_GROUP`
+   are no longer listed (BUG-002). No flag, dependency or async code was added.
+4. **Fail closed.** `list_vms()` raises `ValueError` when the resource group is empty, before
+   `_compute()` and before any SDK call (`test_bug_002_empty_resource_group_fails_closed_...`). On
+   `main` that input acted on nothing either, because every `instance_view("", name)` failed and
+   the VM was kept, so only the exit code changes. That is the allowed fail-closed outcome.
+   Production always passes `--resource_group "$RESOURCE_GROUP"`.
+5. **Protected files.** No change to `safety_lock.json`, the five locked safety tests,
+   `tests/legacy/`, `CLEANUP_SAFETY.md`, `PLAN.md`, `STATUS.md`, `BUGS.md`, `AGENTS.md`,
+   `ARCHITECTURE.md`, `.cursor/**` or `tests/archtest/**`.
+6. **README (ARCH-002).** `crc/azu/README.md` and `crc/azu/vm/README.md` are updated in Purpose,
+   Public API (`list`, `begin_deallocate`, `code`, `state_skip_reason`) and Safety Invariants. The
+   archtest passes.
+7. **Owner decision.** The coder narrowed the "case-insensitive" part of BUG-198 to the Azure code
+   side, so that `["Running"]` still matches nothing and the fix never deletes more than `main`.
+   This is explained, with the exact change the owner would make to accept `Running`.
+8. **Gates.** I ran `pip install -r requirements.txt -r requirements-dev.txt`, then `make check`:
+   ruff passed; mypy found no issues in 229 source files; `lint-imports` kept all 5 contracts;
+   `pytest` ran 42474 tests, all passed (135 s).
+
+### Findings
+
+- No BLOCKING findings.
+- **NIT (recorded here, no code change), `crc/azu/vm/cleaner.py:112-121`:** reading the power state
+  by its code (BUG-010) also acts on two kinds of VM that `main` kept, besides the
+  failed-provisioning ones:
+  - a VM whose `PowerState/` status is not at index 1. Example: a VM with an `OSState/...` or
+    `HibernationState/...` status between the provisioning and power states, where
+    `statuses[1].display_status` does not contain the state.
+  - a VM whose power state status has a code but `display_status=None`. `main` raised
+    `TypeError` and kept it.
+
+  This is allowed. BUG-010 is a "keeps what it should delete" row, and the owner decision says to
+  read the status whose code starts with `PowerState/`. The VM is still acted on only when its real
+  power state equals an allowed state, so production only acts on VMs that are `running` or
+  `stopped`. A follow-up could add parity cases that put the `PowerState/` status at index 2 or
+  give it `display_status=None`. Today the fake (`tests/helpers_azure_vm.py:47-59`) derives the code
+  from the display text, so `status-none-display` models a status with no code.
+- **NIT (recorded here, no code change), BUG-198 code casing:** `PowerState/Running` is
+  lower-cased and matches `running`. On `main` it matched only if the display text contained the
+  same lower-case word. Azure returns lower-case codes, so this changes nothing in practice. This
+  is the "case-insensitive" part of the owner decision.
+
+Test count: 42444 at `182466d`, 42474 now (unchanged by Round 2).
+
+ROUND 2 VERDICT: APPROVE
