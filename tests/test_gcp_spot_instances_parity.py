@@ -34,6 +34,22 @@ UTC = datetime.UTC
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=UTC)
 PROJECT = "proj-1"
 BUGS = {"BUG-358"}
+# BUG-228 (fixed in FIX-GCP-SPOT): an unlabelled Spot VM is kept when filter_labels is empty.
+# case id -> (bug, names of the VMs main deletes and the fixed code keeps, deleted names now).
+DIVERGES: dict[str, tuple[str, tuple[str, ...], list[str]]] = {
+    "labels-none-no-filter": ("BUG-228", ("v",), []),
+    "filter-none": ("BUG-228", ("u",), ["a", "b", "c"]),
+    "untagged-without-filter-included": ("BUG-228", ("u",), []),
+    "exception-skips": ("BUG-228", ("u",), ["b", "c"]),
+    "exception-any-key": ("BUG-228", ("u",), []),
+    "exception-empty-values": ("BUG-228", ("u",), ["c"]),
+    "exception-none": ("BUG-228", ("u",), ["a", "b", "c"]),
+    "exception-untagged-not-protected": ("BUG-228", ("u",), []),
+    "notags-all-keys-skips": ("BUG-228", ("u",), ["b", "c"]),
+    "notags-partial-keeps-deleting": ("BUG-228", ("u",), ["a", "b", "c"]),
+    "notags-single-key": ("BUG-228", ("u",), ["a", "c"]),
+    "notags-none": ("BUG-228", ("u",), ["a", "b", "c"]),
+}
 DAY = {"days": 1}
 LABELS = {"yb_task": "itest"}
 SLEEP = 5
@@ -747,6 +763,35 @@ def debug_logs(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG)
 
 
+NO_VMS = ("root", logging.WARNING, "No GCP Spot/preemptible VMs to delete.")
+
+
+def _assert_diverges(case: Case, old: Outcome, new: Outcome) -> None:
+    bug, removed, deleted = DIVERGES[case.id]
+    assert bug == "BUG-228"
+    assert old.deleted != new.deleted, f"{case.id} no longer shows the oracle behaviour"
+    assert [n for n in old.deleted if n not in removed] == deleted
+    assert new.deleted == deleted
+    assert new.count == len(deleted)
+    assert new.disks == old.disks
+    assert new.error == old.error
+    assert new.stdout == old.stdout
+    assert [c for c in new.calls if c[0] == "instances.delete"] == [
+        c for c in old.calls if c[0] == "instances.delete" and c[3] not in removed
+    ]
+    kept = [
+        entry
+        for entry in expected_logs(old.logs, BUGS, RULES)
+        if not entry[2].startswith("List of GCP")
+        and not any(entry[2] == f"Deleting GCP Spot VM {n}" for n in removed)
+    ]
+    summary = [entry for entry in new.logs if entry[2].startswith("List of GCP")]
+    assert [e for e in new.logs if e not in summary and e[2] != NO_VMS[2]] == kept
+    assert (NO_VMS in new.logs) == (not deleted)
+    assert summary[0][2].startswith(f"List of GCP Spot VMs (Total: {len(deleted)})")
+    assert [n for n in removed if f"Deleting GCP Spot VM {n}" in [e[2] for e in new.logs]] == []
+
+
 @pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
 def test_matches_main(
     case: Case,
@@ -757,6 +802,9 @@ def test_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run(_new, case, monkeypatch, caplog, capsys)
+    if case.id in DIVERGES:
+        _assert_diverges(case, old, new)
+        return
     assert new.calls == old.calls
     assert new.error == old.error
     assert new.deleted == old.deleted
@@ -848,6 +896,15 @@ def test_cleaner_protocol_matches_main(
         assert not [c for c in new.calls if c[0] in {"instances.delete", "disks.delete"}]
         return
     assert old.error is None
+    if case.id in DIVERGES:
+        _, removed, deleted = DIVERGES[case.id]
+        assert new.deleted == deleted != old.deleted
+        assert new.disks == old.disks
+        assert new.stdout == old.stdout
+        assert [c for c in new.calls if c[0] == "instances.delete"] == [
+            c for c in old.calls if c[0] == "instances.delete" and c[3] not in removed
+        ]
+        return
     assert new.deleted == old.deleted
     assert new.disks == old.disks
     assert new.stdout == old.stdout
@@ -896,14 +953,10 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
         "metadata-not-iterable",
         lambda o: o.deleted == [] and _error_logged(o, "Error processing GCP Spot VM v"),
     ),
-    ("untagged-without-filter-included", lambda o: o.deleted == ["u"]),
     ("untagged-with-filter-excluded", lambda o: o.deleted == []),
-    ("exception-untagged-not-protected", lambda o: o.deleted == ["u"]),
     ("filter-all-keys", lambda o: o.deleted == ["a"]),
     ("filter-empty-values-means-present", lambda o: o.deleted == ["a", "b"]),
     ("filter-string-value-is-substring", lambda o: o.deleted == ["a", "b"]),
-    ("notags-all-keys-skips", lambda o: o.deleted == ["b", "c", "u"]),
-    ("notags-partial-keeps-deleting", lambda o: o.deleted == ["a", "b", "c", "u"]),
     (
         "labels-not-a-mapping",
         lambda o: o.deleted == [] and _error_logged(o, "Error processing GCP Spot VM v"),
@@ -1012,6 +1065,89 @@ def test_quirk_is_the_same_on_main_and_new(
     new = _run(_new, case, monkeypatch, caplog, capsys)
     assert check(old), f"main does not show the quirk of {case_id}"
     assert check(new), f"new code does not show the quirk of {case_id}"
+
+
+def test_bug_242_leftover_disk_custom_age_main_deletes_new_code_keeps(
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    labels = {"retention": "{'days': 10}"}
+    young = {"labels": labels, "creationTimestamp": stamp(days=3)}
+    old_disk = {"labels": labels, "creationTimestamp": stamp(days=30)}
+    young_case = Case(
+        "disk-custom-age-young",
+        WITH_DISK,
+        custom_age_tag_key="retention",
+        disk_gets={("z1", "d1"): young},
+    )
+    old_case = Case(
+        "disk-custom-age-old",
+        WITH_DISK,
+        custom_age_tag_key="retention",
+        disk_gets={("z1", "d1"): old_disk},
+    )
+    old = _run(_legacy, young_case, monkeypatch, caplog, capsys)
+    new = _run(_new, young_case, monkeypatch, caplog, capsys)
+    assert old.disks == ["proj-1/z1/d1"]
+    assert len(_calls_named(old, "disks.delete")) == 1
+    assert new.disks == []
+    assert not _calls_named(new, "disks.delete")
+    assert new.deleted == old.deleted == ["v"]
+    old_ok = _run(_legacy, old_case, monkeypatch, caplog, capsys)
+    new_ok = _run(_new, old_case, monkeypatch, caplog, capsys)
+    assert new_ok.calls == old_ok.calls
+    assert new_ok.disks == old_ok.disks == ["proj-1/z1/d1"]
+    expected = expected_logs(old_ok.logs, BUGS, RULES)
+    assert [e for e in new_ok.logs if e[1] > logging.DEBUG] == [
+        e for e in expected if e[1] > logging.DEBUG
+    ]
+
+
+FIXED_QUIRKS: Sequence[tuple[str, str, Callable[[Outcome], bool], Callable[[Outcome], bool]]] = [
+    (
+        "untagged-without-filter-included",
+        "BUG-228",
+        lambda o: o.deleted == ["u"],
+        lambda o: o.deleted == [] and not _calls_named(o, "instances.delete"),
+    ),
+    (
+        "exception-untagged-not-protected",
+        "BUG-228",
+        lambda o: o.deleted == ["u"],
+        lambda o: o.deleted == [] and not _calls_named(o, "instances.delete"),
+    ),
+    (
+        "notags-all-keys-skips",
+        "BUG-228",
+        lambda o: o.deleted == ["b", "c", "u"],
+        lambda o: o.deleted == ["b", "c"],
+    ),
+    (
+        "notags-partial-keeps-deleting",
+        "BUG-228",
+        lambda o: o.deleted == ["a", "b", "c", "u"],
+        lambda o: o.deleted == ["a", "b", "c"],
+    ),
+]
+
+
+@pytest.mark.parametrize("fixed", FIXED_QUIRKS, ids=[f"{q[0]}-{q[1]}" for q in FIXED_QUIRKS])
+def test_fixed_quirk_main_deletes_new_code_keeps(
+    fixed: tuple[str, str, Callable[[Outcome], bool], Callable[[Outcome], bool]],
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    case_id, bug, old_check, new_check = fixed
+    case = _find(case_id)
+    assert DIVERGES[case_id][0] == bug
+    old = _run(_legacy, case, monkeypatch, caplog, capsys)
+    new = _run(_new, case, monkeypatch, caplog, capsys)
+    assert old_check(old), f"main does not show the old behaviour of {case_id}"
+    assert new_check(new), f"new code does not show the fixed behaviour of {case_id} ({bug})"
 
 
 def test_bug_358_leftover_disk_skip_is_debug_not_info(
