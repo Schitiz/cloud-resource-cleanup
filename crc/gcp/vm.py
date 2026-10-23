@@ -10,110 +10,40 @@ and runs the cleaner instance by instance, in the exact call order of the origin
 
 import datetime
 import logging
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+import time
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, ClassVar, Protocol, cast
-
-from google.cloud import compute_v1
-from googleapiclient import discovery
+from typing import ClassVar, cast
 
 from crc.core import age as core_age
 from crc.core import logger, policy
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext
 from crc.core.registry import register
 from crc.gcp._scan import ZoneScan, log_action
+from crc.gcp.vm_client import (
+    _SERVICE_NAME,
+    _SERVICE_VERSION,
+    ComputeVmClient,
+    GcpVmClient,
+    InstanceView,
+)
 from crc.service import Service
 
-_SERVICE_NAME = "compute"
-_SERVICE_VERSION = "v1"
+__all__ = [
+    "VM",
+    "ComputeVmClient",
+    "GcpVmClient",
+    "InstanceView",
+    "VmCleaner",
+    "VmSettings",
+    "build_vm_cleaner",
+]
 _TIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%f%z"
 _DEFAULT_STATE = ("RUNNING",)
+_DEFAULT_WAIT_SEC = 180.0
+_DEFAULT_POLL_SEC = 5.0
 
 Clock = Callable[[], datetime.datetime]
-
-
-class InstanceView(Protocol):
-    """The four fields of a GCP instance this cleaner reads."""
-
-    @property
-    def status(self) -> str:
-        """Instance status, for example `RUNNING`."""
-        ...
-
-    @property
-    def name(self) -> str:
-        """Name of the instance."""
-        ...
-
-    @property
-    def labels(self) -> Mapping[str, str]:
-        """Labels of the instance; empty when unlabelled."""
-        ...
-
-    @property
-    def creation_timestamp(self) -> str:
-        """RFC 3339 creation time."""
-        ...
-
-
-class GcpVmClient(Protocol):
-    """The Compute Engine calls this cleaner uses."""
-
-    def list_zones(self, project_id: str) -> Sequence[Mapping[str, str]]:
-        """The `items` of the zones listing (one page, as dictionaries with a `name`)."""
-        ...
-
-    def list_instances(self, project_id: str, zone: str) -> Iterable[InstanceView]:
-        """Instances of one zone."""
-        ...
-
-    def delete_instance(self, project_id: str, zone: str, instance: str) -> object:
-        """Delete one instance of a zone."""
-        ...
-
-    def stop_instance(self, project_id: str, zone: str, instance: str) -> object:
-        """Stop one instance of a zone."""
-        ...
-
-
-class ComputeVmClient:
-    """`GcpVmClient` on google-api-python-client (zones, deletes, stops) and
-    google-cloud-compute (instance listing). Like `main`, the discovery service is closed as
-    soon as the zones were listed and the instances client was built; deletes and stops still
-    use that service object afterwards."""
-
-    def __init__(self) -> None:
-        self._service: Any = None
-        self._instances: compute_v1.InstancesClient | None = None
-
-    def _compute(self) -> Any:
-        if self._service is None:
-            self._service = discovery.build(_SERVICE_NAME, _SERVICE_VERSION)
-        return self._service
-
-    def list_zones(self, project_id: str) -> Sequence[Mapping[str, str]]:
-        with discovery.build(_SERVICE_NAME, _SERVICE_VERSION) as service:
-            self._service = service
-            request = service.zones().list(project=project_id)
-            zones: Sequence[Mapping[str, str]] = request.execute()["items"]
-            self._instances = compute_v1.InstancesClient()
-        return zones
-
-    def list_instances(self, project_id: str, zone: str) -> Iterable[InstanceView]:
-        if self._instances is None:
-            self._instances = compute_v1.InstancesClient()
-        instances: Iterable[InstanceView] = self._instances.list(project=project_id, zone=zone)
-        return instances
-
-    def delete_instance(self, project_id: str, zone: str, instance: str) -> object:
-        service = self._compute()
-        return (
-            service.instances().delete(project=project_id, zone=zone, instance=instance).execute()
-        )
-
-    def stop_instance(self, project_id: str, zone: str, instance: str) -> object:
-        service = self._compute()
-        return service.instances().stop(project=project_id, zone=zone, instance=instance).execute()
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +57,8 @@ class VmSettings:
     age: core_age.AgeSpec | int
     custom_age_tag_key: str
     instance_state: Sequence[str] = _DEFAULT_STATE
+    wait_sec: float = _DEFAULT_WAIT_SEC
+    poll_sec: float = _DEFAULT_POLL_SEC
 
 
 def _log_summary(
@@ -197,23 +129,55 @@ class VmCleaner:
 
     def plan_zone(self, zone: str, clock: Clock) -> Iterator[Candidate]:
         """List one zone lazily and yield the instances to act on, in the order of `main`:
-        status, exception labels and notags, filter labels, age; then log the REGION line."""
+        status, exception labels and notags, filter labels, age; then log the REGION line.
+        A listing error (also while iterating) is logged and recorded and ends the zone (no
+        REGION line); an error while evaluating one instance is logged and recorded and the
+        instance is kept (BUG-186)."""
         scan = ZoneScan(zone)
-        for instance in self._client.list_instances(self._settings.project_id, zone):
+        try:
+            instances = iter(self._client.list_instances(self._settings.project_id, zone))
+        except Exception as e:
+            self._listing_failed(zone, e)
+            return
+        while True:
+            try:
+                instance = next(instances)
+            except StopIteration:
+                break
+            except Exception as e:
+                self._listing_failed(zone, e)
+                return
             scan.scanned += 1
+            candidate = self._evaluate(instance, zone, clock)
+            if candidate is not None:
+                scan.selected += 1
+                yield candidate
+        scan.finish()
+
+    @staticmethod
+    def _listing_failed(zone: str, error: Exception) -> None:
+        logging.error(f"Zone {zone}: failed listing GCP instances: {error}")
+        logger.current().region_skipped(zone, error)
+        logger.current().fail(zone, "-", error)
+
+    def _evaluate(self, instance: InstanceView, zone: str, clock: Clock) -> Candidate | None:
+        try:
             reason = self._reject(instance, clock)
             if reason is not None:
                 logger.current().skip(reason)
-                continue
-            scan.selected += 1
-            yield Candidate(
+                return None
+            return Candidate(
                 id=instance.name,
                 name=instance.name,
                 region=zone,
                 state=instance.status,
                 tags=policy.normalize_tags(instance.labels),
             )
-        scan.finish()
+        except Exception as e:
+            name = getattr(instance, "name", None) or "?"
+            logging.error(f"Error occurred while evaluating instance {name}: {e}")
+            logger.current().fail(zone, name, e)
+            return None
 
     def _reject(self, instance: InstanceView, clock: Clock) -> str | None:
         if not policy.state_in(instance.status, self._settings.instance_state):
@@ -227,17 +191,12 @@ class VmCleaner:
     def apply_instance(
         self, candidate: Candidate, operation: Operation, recorded: list[str], *, dry_run: bool
     ) -> bool:
-        """Delete or stop one instance (nothing in a dry run) and record it. Any error is
-        logged and the instance is not recorded; returns whether it was recorded."""
-        project_id = self._settings.project_id
+        """Delete or stop one instance (nothing in a dry run), wait for the zone operation and
+        record it. Any error, or an operation that fails or does not finish in time, is logged
+        and the instance is not recorded; returns whether it was recorded (BUG-185)."""
         try:
             if not dry_run:
-                if operation is Operation.DELETE:
-                    self._client.delete_instance(project_id, candidate.region, candidate.id)
-                    logging.info(f"Deleting instance {candidate.id}")
-                else:
-                    self._client.stop_instance(project_id, candidate.region, candidate.id)
-                    logging.info(f"Stopping instance {candidate.id}")
+                self._act(candidate, operation)
             recorded.append(candidate.id)
         except Exception as e:
             logging.error(f"Error occurred while {operation.value} instance {candidate.id}: {e}")
@@ -245,6 +204,35 @@ class VmCleaner:
             return False
         log_action(operation.value, candidate, dry_run=dry_run)
         return True
+
+    def _act(self, candidate: Candidate, operation: Operation) -> None:
+        project_id = self._settings.project_id
+        if operation is Operation.DELETE:
+            result = self._client.delete_instance(project_id, candidate.region, candidate.id)
+            logging.info(f"Deleting instance {candidate.id}")
+        else:
+            result = self._client.stop_instance(project_id, candidate.region, candidate.id)
+            logging.info(f"Stopping instance {candidate.id}")
+        self._wait_operation(candidate.region, result)
+
+    def _wait_operation(self, zone: str, result: object) -> None:
+        """Poll the zone operation until it is DONE; raise when it has no name, ends with an
+        error or is not done within `wait_sec`."""
+        name = result.get("name") if isinstance(result, Mapping) else None
+        if not name:
+            raise RuntimeError("the response has no zone operation name to wait for")
+        settings = self._settings
+        deadline = time.monotonic() + settings.wait_sec
+        while time.monotonic() < deadline:
+            state = self._client.get_zone_operation(settings.project_id, zone, name)
+            status = state.get("status")
+            if status == "DONE":
+                if state.get("error"):
+                    raise RuntimeError(f"zone operation {name} failed: {state['error']}")
+                return
+            logging.info(f"Waiting for GCP zone operation {zone}/{name} (status={status})")
+            time.sleep(settings.poll_sec)
+        raise RuntimeError(f"zone operation {name} not done after {settings.wait_sec}s")
 
     def _should_skip(self, instance: InstanceView) -> bool:
         settings = self._settings

@@ -56,13 +56,17 @@ class FakeClient:
         self.calls.append(("delete_instance", project_id, zone, instance))
         if instance == self.fail_on:
             raise RuntimeError("boom")
-        return {}
+        return {"name": "op"}
 
     def stop_instance(self, project_id: str, zone: str, instance: str) -> object:
         self.calls.append(("stop_instance", project_id, zone, instance))
         if instance == self.fail_on:
             raise RuntimeError("boom")
-        return {}
+        return {"name": "op"}
+
+    def get_zone_operation(self, project_id: str, zone: str, operation: str) -> Mapping[str, Any]:
+        self.calls.append(("get_zone_operation", project_id, zone, operation))
+        return {"status": "DONE"}
 
 
 def settings(**kw: Any) -> VmSettings:
@@ -145,7 +149,9 @@ def test_apply_deletes_in_order_and_records() -> None:
     assert result.succeeded == ("a", "b")
     assert client.calls == [
         ("delete_instance", PROJECT, "z1", "a"),
+        ("get_zone_operation", PROJECT, "z1", "op"),
         ("delete_instance", PROJECT, "z2", "b"),
+        ("get_zone_operation", PROJECT, "z2", "op"),
     ]
 
 
@@ -154,7 +160,10 @@ def test_apply_stops_when_the_operation_is_stop() -> None:
     plan = Plan(candidates=(Candidate(id="a", region="z"),))
     result = cleaner(client).apply(plan, ctx(operation=Operation.STOP))
     assert result.succeeded == ("a",)
-    assert client.calls == [("stop_instance", PROJECT, "z", "a")]
+    assert client.calls == [
+        ("stop_instance", PROJECT, "z", "a"),
+        ("get_zone_operation", PROJECT, "z", "op"),
+    ]
 
 
 def test_apply_skips_a_failed_call_and_logs_it(caplog: pytest.LogCaptureFixture) -> None:
