@@ -28,3 +28,23 @@ None.
 
 - `crc/oci/spot_vm/leftovers.py:attached_volume_ids`: the leftover list is taken before terminate, so a volume that another instance attaches between the read and the delete is only caught by the new ownership read, which is a narrow race that cannot be closed without a lock. Exists on main: yes. Not fixed.
 - The ownership read lists attachments only in the run's compartment (`compartment_id`); a volume attached to an instance of another compartment is not seen. OCI volumes and their attachments normally share the compartment of the instance. Exists on main: yes (it was never checked). Not fixed.
+
+## Round 1 (Argon)
+
+### Findings
+
+1. **BUG-255 fix verified**: `crc/oci/spot_vm/leftovers.py` (`VolumeOwner`, `volume_owned`, `volume_passes_tag_check`, `checked_volumes`), `crc/oci/spot_vm/adapter.py`, and `crc/oci/spot_vm/cleaner.py` verify that after a preemptible instance is selected/terminated and a leftover block volume passes the tag check (`exception_tags` / `notags`), the volume is deleted only when its `time_created` is a `datetime` greater than or equal to the instance's `time_created` and `list_volume_attachments(compartment_id, volume_id=...)` shows no non-`DETACHED` attachment to any other instance. Otherwise the volume is kept with skip reason `not_owned` and a `DEBUG` log line (and `_logger.record_failure` + `ERROR` log when `list_volume_attachments` raises).
+2. **Protocol completeness (fixed in review)**: Added `instance_id` property to `SdkAttachment` and updated `ComputeClient.list_volume_attachments` signature in `crc/oci/spot_vm/client.py` to accept optional `instance_id` and `volume_id` parameters matching the new ownership lookup, and asserted `_logger.record_failure` on attachment read failure in `tests/test_oci_spot_vm_fix.py`.
+3. **Direction rule & parity**: Only keep-more conditions and read-only calls (`list_volume_attachments` per tag-passing volume) were added; nothing is deleted, stopped, or released that was kept before. `tests/legacy/oci_spot_vm.txt` is untouched. All 69 unmarked parity cases in `tests/test_oci_spot_instances_parity.py` assert equality with the oracle (filtering only the new ownership read and its pager call), and the 8 `BUG_255` diverging cases (4 scenarios x live/dry-run across both `SpotVM` and `SpotVmCleaner`) assert that the oracle deletes `v1` while the new code keeps it.
+4. **Production commands**: None reach OCI spot; no CLI flags, dependencies, or public signatures were broken (`SpotVM._volume_ok_to_delete` keeps `owner` optional so existing two-argument callers continue to work).
+5. **Fail-closed paths**: Missing, non-`datetime`, or incomparable `time_created`, volume older than instance, failed `list_volume_attachments`, and non-`DETACHED` attachments to another or unknown instance all fail closed before `delete_volume` is called.
+6. **Protected files & docs**: `tests/test_oci_spot_vm.py`, `tests/archtest/safety_lock.json`, `docs/refactor/PLAN.md`, `docs/refactor/STATUS.md`, `docs/refactor/BUGS.md`, and `CLEANUP_SAFETY.md` are untouched. `crc/oci/spot_vm/README.md` Public API and Safety Invariants are updated (`ARCH-002` passes).
+
+### Gates
+
+- `ruff format --check .`: passed
+- `ruff check .`: passed
+- `mypy`: passed (`Success: no issues found in 147 source files`)
+- `pytest` (including `tests/archtest`): 42474 passed (up from 42444 on `182466d`)
+
+VERDICT: APPROVE

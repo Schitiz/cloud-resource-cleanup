@@ -132,9 +132,16 @@ def test_uncertain_creation_time_keeps_the_volume(
     assert skips == ["not_owned"]
 
 
-def test_failed_attachment_read_keeps_the_volume(skips: list[str]) -> None:
+def test_failed_attachment_read_keeps_the_volume(
+    skips: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    failures: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(
+        "crc.oci._logger.record_failure", lambda r, res, err: failures.append((r, res, str(err)))
+    )
     assert not check(FakeBlock(CREATED), FakeCompute(RuntimeError("down")))
     assert skips == ["not_owned"]
+    assert failures == [("r1", "v1", "down")]
 
 
 def test_exception_tag_still_keeps_before_the_ownership_read(skips: list[str]) -> None:
