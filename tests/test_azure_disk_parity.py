@@ -530,6 +530,8 @@ def _assert_matches(case: Case, old: Outcome, new: Outcome) -> None:
         return
     assert new.deleted == old.deleted
     assert new.count == old.count
+    listing = [c for c in _fix_172(case, old.calls) if c[0] != "begin_delete"]
+    assert new.calls == listing + _only(old.calls, "begin_delete")
     assert _groups(new.logs) == _groups(expected_logs(old.logs, BUGS, RULES))
 
 

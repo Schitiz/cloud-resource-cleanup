@@ -68,3 +68,39 @@ Ran `pip install -r requirements.txt -r requirements-dev.txt` followed by `make 
 
 VERDICT: APPROVE
 
+
+## Round 2 (Opus)
+
+Scope: `git diff 302612d..HEAD` on `wc/azu`, after the round 1 fixes (`d72d873`).
+
+### Round 1 fixes checked
+
+- The disk parity fix holds. `_assert_matches` is shared by `test_matches_main` (engine) and `test_cleaner_protocol_matches_main`. It calls `_assert_diverges` for BUG-172/174 and checks `yield` order, `waited` and `old.count_logs` again. The dead `_expected_calls` (IP) and the `Clock` alias (`crc/azu/disk/client.py`) are gone and nothing references them.
+
+### Findings and fixes made in review (test-only, no production change)
+
+1. **Disk and NIC success paths compared only per-kind projections of the SDK calls.** The adapter tests compared the whole call list. On the engine path the full order is fixed: client, listing, every `yield`, then the deletes in plan order. `_assert_matches` (disk) and `test_matches_main` (NIC) now assert `new.calls == listing + deletes` for every case without an error. This also covers the protocol test for disk. All cases pass.
+2. **IP `new.logs == old.logs[:-1]` dropped the oracle's last line without saying which one.** It is `count of items in deleted_ips: N`, which the oracle logs when the harness reads `.count`; `new.count == old.count` is still asserted. `test_matches_main` now asserts that line explicitly, so the slice cannot hide any other line.
+
+### Checklist
+
+1. **Nothing production uses was deleted.** These are all intact: `crc/cli/scan.py` (`crc.azu.vm.VM`), `crc/cli/routes/azu.py`, the `@register("azure", ip|nic|disk|vm|spot_instances)` factories, `crc.azu.spot_vm.SpotVM` and the other four hash-locked adapters.
+2. **Parity tests use the engine.** `test_azure_{ip,nic,disk}_parity.py` drive the registered cleaner through `crc.core.engine.run` (`tests/helpers_wc_azu_engine.py`) on every oracle case from `tests/legacy/azu_{ip,nic,disk}.txt`. The BUG-013/074/076/077, BUG-111/113/114 and BUG-172/174 divergences are still asserted. The plan-before-apply cases (`fails_in_plan`, `error_phase == "plan"`, `ENGINE_QUIRKS`) assert no delete and no delete log.
+   - Mutation check (reverted, not committed), different from round 1: I reversed the delete order in the disk and NIC `apply()` and changed the IP `Deleted IP address:` log text. That gave 114 failures across `test_matches_main`, `test_cleaner_protocol_matches_main`, `test_quirk_is_preserved`, `test_repeated_run_*` and others in all three files.
+3. **Deleted names and READMEs.** `git grep` finds no `crc.azu.{ip,nic,disk}.adapter` and no `IP`/`NIC`/`Disk` import or constructor outside `tests/legacy`. The package re-exports and README Public API lines match `__all__`. The READMEs have no rung names, refactor history, legacy-path or adapter wording (except for the `VM` adapter, which still exists), and no links to moved docs. `docs/refactor/BUGS.md` has not moved, so those links are valid.
+4. **No protected file touched.** No change to `tests/legacy/*.txt`, `tests/archtest/**`, the five locked test files, `BUGS.md`, `CLEANUP_SAFETY.md`, `AGENTS.md`, `ARCHITECTURE.md`, `.cursor/**`, `pyproject.toml`, `Makefile` or `requirements*.txt`.
+5. **Sizes.** Every lane source file is at most 250 lines (largest in `crc/azu`: `spot_vm/cleaner.py`, 248, not touched). ARCH-004 (functions at most 60 lines) and ARCH-002 (Public API) are green.
+
+### Note for the owner (not a failure of this lane)
+
+- On the engine path the `REGION` line comes before the `ACTION` lines and the `Deleted ...` lines come after all listing. `_groups` (disk) keeps the order within each group. This follows from plan-before-apply and was already the production order before this lane.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt`, then `make check`: ruff, mypy (370 files), lint-imports (5/5 contracts), ARCH rules and SAF-LOCK all pass. **44415 passed in 51.29s** (`make check` wall time 69s). `ARCH-008: 44415 tests, floor 44415`.
+
+## New bugs
+
+None found in round 2.
+
+ROUND 2 VERDICT: APPROVE

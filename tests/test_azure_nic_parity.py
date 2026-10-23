@@ -441,6 +441,8 @@ def test_matches_main(
     )
     assert new.deleted == old.deleted
     assert new.count == old.count
+    listing = [c for c in _normalised(old.calls, case) if c[0] not in ("begin_delete", "result")]
+    assert new.calls == listing + _only(old.calls, "begin_delete", "result")
     assert new.logs == old.logs
 
 

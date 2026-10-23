@@ -394,6 +394,7 @@ def test_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run_engine(case, monkeypatch, caplog, capsys)
+    assert old.logs[-1] == ("root", logging.INFO, f"count of items in deleted_ips: {old.count}")
     if case.id in DIVERGING:
         fix = DIVERGING[case.id]
         assert old.error == fix.old_error, f"{fix.bug}: oracle no longer shows the bug"
