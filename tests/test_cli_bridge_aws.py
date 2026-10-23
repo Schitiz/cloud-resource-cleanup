@@ -304,3 +304,53 @@ def test_extra_notifiers_run_after_slack_and_influx() -> None:
     route = type(base)(base.options, extra_notifiers=lambda crc: [Extra()])
     crc = NewCRC("aws", False, None, object(), object(), slack_channel="c", influxdb_conn={})
     assert [n.name for n in bridge.build_notifiers(crc, route)] == ["slack", "influx", "extra"]
+
+
+@pytest.mark.parametrize("operation", ["delete", "stop"])
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_real_vm_cleaner_through_bridge_matches_oracle_report_names_and_ids(
+    operation: str, dry_run: bool, oracle: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Real `VmCleaner` through `bridge.run_routed` matches `oracle.CRC.delete_vm` / `stop_vm`:
+    instance names in live delete/stop and dry-run delete, instance IDs in dry-run stop."""
+    from datetime import UTC, datetime
+
+    from crc.aws.vm.cleaner import VmCleaner, VmSettings
+    from tests.test_aws_vm import FakeClient, instance
+
+    client = FakeClient([instance("i-1", "vm"), instance("i-2", "vm")])
+    monkeypatch.setattr(bridge, "init_run_logging", lambda: None)
+    monkeypatch.setattr(
+        "crc.aws.vm.cleaner.boto3_client", lambda region: client
+    )
+    monkeypatch.setattr("crc.aws.vm.cleaner.all_regions", lambda: ["us-west-2"])
+    kind = next(k for k in KINDS if k.name == "vm" and k.operation == operation)
+    expected_ids = ["i-1", "i-2"] if (dry_run and operation == "stop") else ["vm-i-1", "vm-i-2"]
+    scenario = Scenario(
+        {**FULL, "get_deleted": expected_ids, "get_stopped": expected_ids},
+        dry_run=dry_run,
+    )
+    case = Case(f"real-vm-{operation}-{dry_run}", "aws", lambda c: None, scenario)
+    old = _run(case, _legacy(kind, oracle, monkeypatch))
+
+    def run_real_vm(case: Case, logs: Logs) -> None:
+        route = bridge.route_for("aws", "vm")
+        assert route is not None
+        options = read_options(_flags(kind, dry_run))
+        targets = Targets("aws", False, ["aws"], ["vm"])
+        registry = Registry()
+        registry.register("aws", "vm")(
+            lambda ctx: VmCleaner(
+                lambda region: client,
+                lambda: ["us-west-2"],
+                VmSettings({}, {}, {}, {"days": 1}, None, ["running"]),
+            )
+        )
+        monkeypatch.setattr(bridge, "build_registry", lambda: registry)
+        now = datetime(2026, 3, 1, 12, tzinfo=UTC)
+        clock = type("D", (), {"now": staticmethod(lambda tz=None: now)})
+        monkeypatch.setattr(bridge, "datetime", clock)
+        bridge.run_routed(build(NewCRC, case, logs), "aws", "vm", options, targets, route)
+
+    new = _run(case, run_real_vm)
+    assert new == old

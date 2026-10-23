@@ -101,8 +101,6 @@ class VpcCleaner:
         """Tear down and delete the planned VPCs, region by region (nothing in a dry run)."""
         ids = [candidate.id for candidate in plan.candidates]
         if context.dry_run:
-            for candidate in plan.candidates:
-                logger.current().action("would_delete", candidate.region, candidate.id)
             return Result(succeeded=tuple(ids))
         by_region: dict[str, list[Candidate]] = {}
         for candidate in plan.candidates:
@@ -165,6 +163,8 @@ class VpcCleaner:
             candidates.append(
                 Candidate(id=vpc_id, name=vpc_id, region=region, extra={PROTECTED: protected})
             )
+            if dry_run:
+                logger.current().action("would_delete", region, vpc_id)
             if protected:
                 logger.current().skip("protected")
                 skipped.append(Skipped(id=vpc_id, reason="matches exception_tags or notags"))

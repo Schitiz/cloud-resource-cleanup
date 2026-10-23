@@ -3,7 +3,7 @@
 import logging
 import os
 import sys
-from typing import Any, ClassVar
+from typing import Any
 
 import pytest
 
@@ -48,22 +48,6 @@ class Recorder:
                 return record
 
         return FakeCRC
-
-    def snapshot_class(self) -> type:
-        recorder = self
-
-        class FakeSnapshot:
-            age_days = 90
-            delete_count = 0
-            get_deleted: ClassVar[list[str]] = []
-
-            def __init__(self, **kwargs: Any) -> None:
-                recorder.events.append(("Snapshot", kwargs["age_days"], kwargs["dry_run"]))
-
-            def delete(self) -> None:
-                recorder.events.append(("Snapshot.delete",))
-
-        return FakeSnapshot
 
 
 @pytest.fixture

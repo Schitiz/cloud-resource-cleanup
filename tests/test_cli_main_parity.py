@@ -399,9 +399,14 @@ def install_routed_fakes(fakes: Fakes, monkeypatch: pytest.MonkeyPatch) -> None:
                 continue
 
             def record(
-                context: RunContext, cloud: str = cloud, call: RoutedCall = call
+                context: RunContext,
+                cloud: str = cloud,
+                kind: str = kind,
+                call: RoutedCall = call,
             ) -> None:
                 assert context.dry_run is ("--dry_run" in fakes.case.argv)
+                if kind in {"ip", "vpc", "vm", "spot_instance_requests", "disk"}:
+                    assert "notags" in context.options
                 stop = call.stop if context.operation is Operation.STOP else None
                 method = stop or call.method
                 keys = [key for key in call.keys if key is not None]

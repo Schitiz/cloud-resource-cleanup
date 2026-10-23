@@ -37,3 +37,38 @@ Lane ENG-1 (branch `eng/aws`): every remaining AWS kind runs through `crc.core.e
 - `crc/cli/bridge.py` `_ReportThenRaise.plan`: for disk, an error while listing a later region now reports the volumes of the earlier regions only in a dry run (they are the ones the cleaner listed); in a real run it reports nothing deleted (nothing was deleted), where `delete_disks` reported the earlier regions it had already deleted. Covered by BUG-391 (fewer deletes), the notification content differs.
 - `crc/cli/routes/aws.py:_snapshot_message`: the dry-run line counts `len(plan.candidates)`, which equals the old `delete_count` only because the plan lists the same ids the adapter listed; no behaviour difference found.
 - `crc/cli/notify.py`: `notify_deleted_vm_via_slack`, `notify_stopped_vm_via_slack`, `notify_deleted_ip_via_slack`, `notify_deleted_kms_via_slack`, `notify_deleted_spot_request_via_slack`, `notify_deleted_disk_via_slack` are dead in production for AWS (still used by Azure, GCP and OCI paths for vm, ip and disk, and by `test_cli_crc_parity.py`); the kms and spot request ones are dead for every cloud.
+
+## Round 1 (Argon)
+
+Scope reviewed: `git diff 6b3d85e..HEAD` on branch `eng/aws` (lane `ENG-1`).
+
+### Findings & fixes made in review
+
+1. **BLOCKING (fixed): `aws` / `vm` dry-run `delete` through `engine.run` reported instance IDs instead of instance names to Slack and InfluxDB, and logged dry-run `ACTION` lines after all regions instead of per region** (`crc/aws/vm/cleaner.py`, `tests/test_aws_vm.py`, `tests/test_aws_vm_parity.py`, `tests/test_cli_bridge_aws.py`):
+   - On `main` (and in `VM.delete()` / `VM.stop()`), a dry-run `delete` populates `get_deleted` with instance `Name` tag values (`dry_run_names(Operation.DELETE, candidates)`), while a dry-run `stop` populates `get_stopped` with instance IDs (`BUG-217`). `engine.run` builds a dry-run `Report` via `Report.from_plan`, which reads `[c.id for c in plan.candidates]`. `VmCleaner.plan()` returned `Candidate(id=instance_id, name=name)` unchanged in dry run, so `--cloud aws --resource vm --dry_run` sent instance IDs (`['i-1', ...]`) instead of instance names (`['vm-1', ...]`) to Slack and InfluxDB.
+   - Fixed `VmCleaner.plan()` so in dry-run mode it logs `note_dry_run(operation, found)` per region right after `note_region` (matching `VM._perform_operation`) and sets each returned candidate's `id` to its `dry_run_names(operation, candidates)` value (`c.name` for `delete`, `c.id` for `stop`). Added `test_real_vm_cleaner_through_bridge_matches_oracle_report_names_and_ids` in `tests/test_cli_bridge_aws.py` and updated `tests/test_aws_vm.py` and `tests/test_aws_vm_parity.py`.
+2. **BLOCKING (fixed): `ElasticIpCleaner`, `KmsCleaner`, `SnapshotCleaner`, and `VpcCleaner` omitted `ACTION would_delete` run-log lines and reported `selected=0` in `RESULT` during a dry run through `engine.run`** (`crc/aws/elastic_ips/cleaner.py`, `crc/aws/kms/cleaner.py`, `crc/aws/snapshot/cleaner.py`, `crc/aws/vpc/cleaner.py`, `tests/test_aws_misc_logger.py`):
+   - `engine.run` calls `plan()` only when `context.dry_run` is `True` and never calls `apply()`. Those four cleaners emitted their `would_delete` run-log actions inside `apply()` / `apply_region()` / `delete_one()` (which the legacy adapters called in dry-run mode), so routing `ip`, `kms`, `snapshot`, and `vpc` through the engine dropped all `ACTION would_delete` lines and left `selected=0` in `RESULT`.
+   - Moved dry-run `would_delete` logging into `plan()` / `plan_region()` for `ElasticIpCleaner`, `KmsCleaner`, `SnapshotCleaner`, and `VpcCleaner` (and guarded `apply()` against double-logging in dry-run unit tests). Added `test_engine_dry_run_logs_would_delete_for_kms_snapshot_ip_and_vpc` in `tests/test_aws_misc_logger.py`.
+3. **Completeness & test tightening (fixed)** (`tests/test_aws_spot_instance_requests_engine.py`, `tests/test_cli_main_parity.py`, `tests/test_cli_route_fix.py`, `crc/aws/README.md`, `crc/aws/disk/README.md`):
+   - Added all remaining locked `SpotInstanceRequests` safety cases (`SAF-030`, `SAF-031`, `SAF-032`, `SAF-033`, and `test_saf_035_retry_already_gone_volume_is_not_recounted`, 13 tests) to `tests/test_aws_spot_instance_requests_engine.py` (now 31 tests covering every SAF ID locked to `tests/test_aws_spot_instance_requests.py`).
+   - Asserted `"notags" in context.options` for `ip`, `vpc`, `vm`, `spot_instance_requests`, and `disk` in `tests/test_cli_main_parity.py::install_routed_fakes`, removed dead `Recorder.snapshot_class` in `tests/test_cli_route_fix.py`, and synced `crc/aws/README.md` and `crc/aws/disk/README.md`.
+
+### Checklist verification
+
+1. **CLI result parity for all routed AWS pairs (`keypair`, `ip`, `kms`, `snapshot`, `vpc`, `vm` delete/stop, `spot_instance_requests`, `disk`)**: selection, mutations and order within each region, `RUN START` / `RESULT` lines, `Service` / `init_logging` startup, Slack text and recipients, Influx points, console and log lines, exceptions and exit codes, `validate_targets` and the AWS disk opt-in gate (`Route.precheck`), `NotifyMode.NONE` (`vpc`, `snapshot`), `NotifyMode.REPORT_THEN_RERAISE` (`disk`), and `--dry_run` non-mutation match the legacy path; the only behaviour change is plan-all-regions-before-apply, recorded in `BUG-391` (`docs/refactor/BUGS.md`) and one clause in `CLEANUP_SAFETY.md`.
+2. **Parity tests non-vacuous**: `test_cli_main_parity.py`, `test_cli_bridge_aws.py`, `test_cli_bridge_parity.py`, `test_cli_crc_parity.py`, `test_cli_args_parity.py`, `test_cli_dispatch_fix.py`, `test_cli_route_fix.py`, `test_cli_merge_fix.py`, and all `test_aws_*_parity.py` files reach real or recording fake cleaners and assert the oracle facts.
+3. **Hash-locked safety tests**: the 5 locked test files and `tests/archtest/safety_lock.json` are untouched and passing; `tests/test_aws_disk_engine.py` (18 tests) and `tests/test_aws_spot_instance_requests_engine.py` (31 tests) cover every SAF case locked to the two AWS files.
+4. **Protected files**: no oracle (`tests/legacy/*.txt`), archtest (`tests/archtest/*.py`), guardrail (`AGENTS.md`, `ARCHITECTURE.md`, `.cursor/**`, `pyproject.toml`, `Makefile`, `docs/refactor/PLAN.md`, `docs/refactor/STATUS.md`), or `requirements*.txt` file was edited; `test_count_floor.txt` raised to `43803` via `make raise-test-floor`.
+5. **Limits & README sync**: all touched non-legacy, non-test files are at most 250 lines and functions at most 60 lines (`ARCH-004`); all package READMEs are in sync (`ARCH-002`).
+
+### Gates & test count
+
+- `python3 -m ruff check .`: passed
+- `python3 -m mypy`: passed (340 source files)
+- `lint-imports`: passed (5 contracts kept, 0 broken)
+- `python3 -m pytest -q -n auto`: **43803 passed in 53.56s**
+- `python3 -m tests.archtest.test_count check`: `ARCH-008: 43803 tests, floor 43803`
+
+VERDICT: APPROVE
+

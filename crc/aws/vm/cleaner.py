@@ -8,6 +8,7 @@ of every region (`describe_instances`, `describe_network_interfaces`) and filter
 `crc.aws.vm.VM` (`adapter.py`) is the legacy adapter `crc.py` uses.
 """
 
+import dataclasses
 import datetime
 import logging
 import time
@@ -126,12 +127,18 @@ class VmCleaner:
                 skip_region(region, operation, e)
                 continue
             note_region(region, started, found, kept)
+            if context.dry_run:
+                note_dry_run(operation, found)
             self._clients[region] = client
             candidates.extend(found)
             skipped.extend(kept)
         if context.dry_run:
-            note_dry_run(operation, candidates)
-            summarise(operation, True, dry_run_names(operation, candidates))
+            names = dry_run_names(operation, candidates)
+            summarise(operation, True, names)
+            candidates = [
+                dataclasses.replace(c, id=name)
+                for c, name in zip(candidates, names, strict=True)
+            ]
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
 
     def apply(self, plan: Plan, context: RunContext) -> Result:

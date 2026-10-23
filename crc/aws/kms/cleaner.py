@@ -64,7 +64,9 @@ class KmsCleaner:
         client, keys = opened
         plan = self.plan_keys(client, keys, lambda: context.now)
         if context.dry_run:
-            log_summary([c.id for c in plan.candidates], dry_run=True)
+            ids = [c.id for c in plan.candidates]
+            log_would_delete(ids)
+            log_summary(ids, dry_run=True)
         return plan
 
     def apply(self, plan: Plan, context: RunContext) -> Result:
@@ -72,11 +74,11 @@ class KmsCleaner:
         if any(s.reason == UNREACHABLE for s in plan.skipped):
             return Result()
         ids = [c.id for c in plan.candidates]
-        if ids and not context.dry_run:
+        if context.dry_run:
+            return Result(succeeded=tuple(ids))
+        if ids:
             self.schedule(self._client_factory(DEFAULT_REGION), ids)
-        elif context.dry_run:
-            log_would_delete(ids)
-        log_summary(ids, dry_run=context.dry_run)
+        log_summary(ids, dry_run=False)
         return Result(succeeded=tuple(ids))
 
     def connect_and_list(self) -> tuple[KmsClient, list[Mapping[str, Any]]] | None:

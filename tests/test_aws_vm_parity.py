@@ -20,7 +20,7 @@ import pytest
 from botocore.exceptions import ClientError, ConnectTimeoutError, EndpointConnectionError
 
 from crc.aws.vm import VM
-from crc.aws.vm.cleaner import VmCleaner, build_vm_cleaner, dry_run_names
+from crc.aws.vm.cleaner import VmCleaner, build_vm_cleaner
 from crc.core import registry
 from crc.core.cleaner import Candidate, Operation, RunContext
 from tests.helpers_log_fix import expected_logs
@@ -590,7 +590,7 @@ def _run_cleaner(
     try:
         plan = cleaner.plan(ctx)
         if case.dry_run:
-            names = dry_run_names(operation, plan.candidates)
+            names = [c.id for c in plan.candidates]
         else:
             names = list(cleaner.apply(plan, ctx).succeeded)
     except Exception as e:

@@ -1,10 +1,9 @@
-"""Cleaner-based copy of the main locked safety cases of `tests/test_aws_spot_instance_requests.py`.
+"""Cleaner-based copy of the locked safety cases of `tests/test_aws_spot_instance_requests.py`.
 
 The locked file builds the `SpotInstanceRequests` adapter; these tests drive `SpotRequestCleaner`
 through `crc.core.engine.run` (or `plan()` for the read-only cases) on the recording fake AWS of
-`tests/test_aws_spot_instance_requests_parity.py`. Covered: SAF-007, 008, 011, 026, 027, 028, 029
-and 035. The tag, volume and terminate-error cases (SAF-030 to SAF-033) stay in the locked file
-until the owner swaps it (see docs/refactor/reviews/ENG-1.md).
+`tests/test_aws_spot_instance_requests_parity.py`. Covered: SAF-007, 008, 011, 026, 027, 028, 029,
+030, 031, 032, 033 and 035.
 """
 
 from typing import Any
@@ -12,7 +11,14 @@ from typing import Any
 import pytest
 
 from crc.aws.spot_instance_requests import SpotRequestCleaner, SpotRuntime
-from crc.aws.spot_instance_requests.model import Waiter
+from crc.aws.spot_instance_requests.model import (
+    LEFTOVER_FROM_TAG,
+    LEFTOVER_INVALID_VALUE,
+    LEFTOVER_SCOPE_PREFIX,
+    SpotSettings,
+    Waiter,
+)
+from crc.aws.spot_instance_requests.rules import scope_tags_for_volume
 from crc.core import engine, registry
 from crc.core.cleaner import Operation, RunContext
 from crc.core.registry import Registry
@@ -23,11 +29,16 @@ from tests.test_aws_spot_instance_requests_parity import (
     QA,
     Case,
     FakeAws,
+    Spec,
     ce,
+    conn,
     inst,
     one,
     req,
     std,
+    swept,
+    tagged,
+    vol,
 )
 
 
@@ -53,7 +64,19 @@ def _runtime(cleaner: Any, case: Case, aws: FakeAws) -> Any:
 def run_engine(
     case: Case, monkeypatch: pytest.MonkeyPatch, *, dry_run: bool
 ) -> tuple[FakeAws, engine.RunOutcome]:
-    aws, cleaner, ctx = _setup(case, monkeypatch, dry_run)
+    aws = FakeAws(case)
+    monkeypatch.setattr("boto3.client", aws.client)
+    monkeypatch.setattr("crc.service.init_logging", lambda *args, **kwargs: None)
+    options = {
+        "filter_tags": case.filter_tags,
+        "exception_tags": case.exception_tags,
+        "notags": case.notags,
+        "age": case.age,
+        "custom_age_tag_key": case.custom,
+    }
+    ctx = RunContext(dry_run, Operation.DELETE, options, NOW)
+    cleaner = registry.get("aws", "spot_instance_requests")(ctx)
+    cleaner.runtime = _runtime(cleaner, case, aws)  # type: ignore[attr-defined]
     local = Registry()
     local.register("aws", "spot_instance_requests")(lambda context: cleaner)
     selection = Selection(items=(("aws", "spot_instance_requests"),))
@@ -170,6 +193,185 @@ def test_saf_035_a_cancelled_request_whose_instance_is_gone_is_skipped(
     assert not MUTATING & set(_methods(aws))
     assert outcome.result is not None
     assert outcome.result.succeeded == ()
+
+
+def test_saf_035_retry_already_gone_volume_is_not_recounted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = Spec([req(state="cancelled")], {"i-1": inst("shutting-down", ("vol-1",))}, {})
+    aws, outcome = run_engine(Case("x", one(spec)), monkeypatch, dry_run=False)
+    assert "delete_volume" not in _methods(aws)
+    assert outcome.result is not None
+    assert outcome.result.succeeded == ()
+    assert outcome.result.related["Disk"] == ()
+
+
+def test_saf_030_scope_tags_overwrite_existing_prefix_keys() -> None:
+    settings = SpotSettings({"yb_owner": ["qa"]}, {}, {}, {"days": 1}, None)
+    tags1 = scope_tags_for_volume(settings, "sir-1", [{"Key": "yb_owner", "Value": "qa"}])
+    assert {"Key": LEFTOVER_SCOPE_PREFIX + "yb_owner", "Value": "qa"} in tags1
+    tags2 = scope_tags_for_volume(settings, "sir-1", [{"Key": "yb_owner", "Value": "qa-new"}])
+    assert {"Key": LEFTOVER_SCOPE_PREFIX + "yb_owner", "Value": "qa-new"} in tags2
+
+
+def test_saf_030_tags_bdm_volumes_when_instance_is_shutting_down(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = Spec(
+        [req(state="cancelled", rtype="one-time")],
+        {"i-1": inst("shutting-down", ("vol-1",))},
+        {"vol-1": vol("available", attached=None)},
+    )
+    aws, outcome = run_engine(Case("x", one(spec)), monkeypatch, dry_run=False)
+    methods = _methods(aws)
+    assert "create_tags" in methods
+    assert "terminate_instances" not in methods
+    assert "delete_volume" in methods
+    assert outcome.result is not None
+    assert outcome.result.related["Disk"] == ("vol-1",)
+
+
+def test_saf_030_retry_uses_tagged_leftover_volumes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = Spec(
+        [req(state="cancelled", rtype="one-time")],
+        {"i-1": inst("terminated", ())},
+        {"vol-1": vol("available", tagged("sir-1"), attached=None)},
+    )
+    aws, outcome = run_engine(Case("x", one(spec)), monkeypatch, dry_run=False)
+    assert "terminate_instances" not in _methods(aws)
+    assert "delete_volume" in _methods(aws)
+    assert outcome.result is not None
+    assert outcome.result.succeeded == ("sir-1",)
+    assert outcome.result.related["Disk"] == ("vol-1",)
+
+
+def test_saf_031_volume_exception_tag_skips_leftover_delete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = std(volumes={"vol-1": vol(tags=[{"Key": "autoclean", "Value": "false"}])})
+    case = Case("x", one(spec), exception_tags={"autoclean": ["false"]})
+    aws, outcome = run_engine(case, monkeypatch, dry_run=False)
+    assert "delete_volume" not in _methods(aws)
+    assert outcome.result is not None
+    assert outcome.result.related["Disk"] == ()
+
+
+def test_saf_031_volume_sensitive_yb_task_skips_leftover_delete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = std(volumes={"vol-1": vol(tags=[{"Key": "yb_task", "Value": "infrastructure"}])})
+    aws, outcome = run_engine(Case("x", one(spec)), monkeypatch, dry_run=False)
+    assert "delete_volume" not in _methods(aws)
+    assert outcome.result is not None
+    assert outcome.result.related["Disk"] == ()
+
+
+def test_saf_031_sweep_skips_volume_own_exception_on_live_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tags = [{"Key": LEFTOVER_FROM_TAG, "Value": "sir-live"}, {"Key": "keep", "Value": "true"}]
+    spec = swept("sir-live", tags=tags, requests=[req("sir-live", None)])
+    case = Case("x", one(spec), exception_tags={"keep": ["true"]})
+    aws, _ = run_engine(case, monkeypatch, dry_run=False)
+    assert "delete_volume" not in _methods(aws)
+
+
+def test_saf_032_terminate_failure_clears_leftover_tag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = std(errors={"terminate_instances": ce("OperationNotPermitted", "TerminateInstances")})
+    aws, _ = run_engine(Case("x", one(spec)), monkeypatch, dry_run=False)
+    methods = _methods(aws)
+    assert "create_tags" in methods
+    assert "delete_tags" in methods
+    assert "delete_volume" not in methods
+
+
+def test_saf_032_cancel_botocore_error_invalidates_marker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = std(errors={"cancel_spot_instance_requests": conn()})
+    aws, _ = run_engine(Case("x", one(spec)), monkeypatch, dry_run=False)
+    methods = _methods(aws)
+    assert "terminate_instances" not in methods
+    assert "delete_tags" in methods
+
+
+def test_saf_032_terminate_failure_writes_sentinel_when_delete_tags_denied(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = std(
+        errors={
+            "terminate_instances": ce("OperationNotPermitted", "TerminateInstances"),
+            "delete_tags": ce("UnauthorizedOperation", "DeleteTags"),
+        }
+    )
+    aws, _ = run_engine(Case("x", one(spec)), monkeypatch, dry_run=False)
+    create_calls = [c for c in aws.calls if c[1] == "create_tags"]
+    assert len(create_calls) == 1 + 1 + 1
+    assert create_calls[-1][2]["Tags"] == [
+        {"Key": LEFTOVER_FROM_TAG, "Value": LEFTOVER_INVALID_VALUE}
+    ]
+
+
+def test_saf_033_botocore_terminate_error_invalidates_marker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = std(errors={"terminate_instances": conn()})
+    aws, _ = run_engine(Case("x", one(spec)), monkeypatch, dry_run=False)
+    methods = _methods(aws)
+    assert "delete_tags" in methods
+    assert "delete_volume" not in methods
+
+
+def test_saf_033_botocore_terminate_error_keeps_marker_if_shutting_down(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = std(
+        volumes={"vol-1": vol("available")},
+        errors={"terminate_instances": conn()},
+        terminate_error_state="shutting-down",
+    )
+    aws, _ = run_engine(Case("x", one(spec)), monkeypatch, dry_run=False)
+    methods = _methods(aws)
+    assert "delete_tags" not in methods
+    assert "delete_volume" in methods
+
+
+def test_saf_033_botocore_terminate_unknown_state_invalidates_marker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = std(errors={"terminate_instances": conn()})
+    aws, cleaner, ctx = _setup(Case("x", one(spec)), monkeypatch, False)
+    plan = cleaner.plan(ctx)
+    aws.case.regions["us-west-2"].errors["describe_instances"] = ce(
+        "UnauthorizedOperation", "DescribeInstances"
+    )
+    # First describe_instances in apply_region succeeds, second (after terminate error) fails:
+    calls = 0
+    real_client = cleaner.runtime.client_factory("us-west-2")
+    real_describe = real_client.describe_instances
+
+    def describe_twice(*, InstanceIds: list[str]) -> Any:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            aws.case.regions["us-west-2"].errors.pop("describe_instances", None)
+            out = real_describe(InstanceIds=InstanceIds)
+            aws.case.regions["us-west-2"].errors["describe_instances"] = ce(
+                "UnauthorizedOperation", "DescribeInstances"
+            )
+            return out
+        return real_describe(InstanceIds=InstanceIds)
+
+    monkeypatch.setattr(real_client, "describe_instances", describe_twice)
+    cleaner._clients["us-west-2"] = real_client
+    cleaner.apply(plan, ctx)
+    methods = _methods(aws)
+    assert "delete_tags" in methods
+    assert "delete_volume" not in methods
 
 
 def test_the_registered_cleaner_is_the_spot_request_cleaner(
