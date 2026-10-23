@@ -126,10 +126,12 @@ def test_saf_041_requires_a_positive_age(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_saf_042_untagged_spot_vm_is_always_skipped() -> None:
-    azure = FakeAzure([vm("untagged", tags={})])
+    no_tags = vm("no-tags")
+    no_tags.tags = None
+    azure = FakeAzure([vm("untagged", tags={}), no_tags])
     plan = _cleaner(azure, filter_tags={}).plan(_ctx())
     assert plan.candidates == ()
-    assert [s.id for s in plan.skipped] == ["untagged"]
+    assert [s.id for s in plan.skipped] == ["untagged", "no-tags"]
 
 
 def test_saf_044_exception_tag_on_the_disk_keeps_it() -> None:

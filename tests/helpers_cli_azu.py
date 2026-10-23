@@ -40,6 +40,7 @@ def _vms(variant: str) -> Any:
         hv.vm("c", tags={}),
         hv.vm("d", tags={"other": "x"}),
         hv.vm("e"),
+        hv.vm("f", tags={"env": "ci", "owner": "x"}),
     ]
     if variant == "empty":
         return hv.FakeAzure([])
@@ -56,6 +57,7 @@ def _ips(variant: str) -> Any:
         hi.ip("b", {"env": "ci"}, config=object()),
         hi.ip("c", {"x": "y"}),
         hi.ip("d", None),
+        hi.ip("f", {"env": "ci", "owner": "x"}),
         hi.ip("e", {"env": "ci"}),
     ]
     if variant == "empty":
@@ -84,6 +86,7 @@ def _disks(variant: str) -> Any:
         hd.disk("b", {"env": "ci"}, state="Reserved"),
         hd.disk("c", {"other": "x"}),
         hd.disk("d", {"env": "ci"}),
+        hd.disk("f", {"env": "ci", "owner": "x"}),
     ]
     if variant == "empty":
         return hd.FakeAzure([])
@@ -101,6 +104,7 @@ def _spots(variant: str) -> Any:
         hs.vm("s3", priority="Regular"),
         hs.vm("s4", tags={"other": "x"}),
         hs.vm("s5"),
+        hs.vm("s6", tags={"yb_task": "itest", "owner": "x"}),
     ]
     power = {"s5": hs.RUNNING}
     if variant == "empty":
@@ -113,7 +117,8 @@ def _spots(variant: str) -> Any:
     return hs.FakeAzure(vms, power=power)
 
 
-COMMON = {"filter_tags": ENV, "exception_tags": {}, "notags": {}, "age": AGE}
+COMMON = {"filter_tags": ENV, "exception_tags": {}, "notags": {"owner": ["x"]}, "age": AGE}
+SPOT = {**COMMON, "filter_tags": {"yb_task": ["itest"]}}
 KINDS = [
     Kind("vm", _vms, {**COMMON, "resource_states": ["running"]}),
     Kind("vm", _vms, {**COMMON, "resource_states": ["stopped", "running"]}, operation="stop"),
@@ -121,5 +126,6 @@ KINDS = [
     Kind("ip", _ips, {**COMMON, "name_regex": ["n"], "exception_regex": ["x"]}),
     Kind("nic", _nics, {"name_regex": ["^nic"], "exception_regex": ["keep"]}),
     Kind("disk", _disks, COMMON),
-    Kind("spot_instances", _spots, {**COMMON, "filter_tags": {"yb_task": ["itest"]}}),
+    Kind("spot_instances", _spots, SPOT),
+    Kind("spot_instances", _spots, {**SPOT, "resource_group": None}, variants=("empty",)),
 ]

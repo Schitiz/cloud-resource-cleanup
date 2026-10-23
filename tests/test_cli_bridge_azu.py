@@ -52,6 +52,13 @@ def _flags(kind: Kind, dry_run: bool) -> dict[str, Any]:
 ROUTED_RUNS: list[str] = []
 
 
+def _crc(scenario: Scenario, logs: Logs, options: Any) -> Any:
+    """The legacy `CRC` with `notags` and `resource_group` from the flags, as in `cli/main.py`."""
+    crc = build(CRC, Case("c", "azure", lambda c: None, scenario), logs)
+    crc.notags, crc.resource_group = options.notags, options.resource_group
+    return crc
+
+
 def _run(
     kind: Kind, variant: str, scenario: Scenario, routed: bool, mp: pytest.MonkeyPatch
 ) -> dict[str, Any]:
@@ -87,7 +94,7 @@ def _run(
     try:
         with redirect_stdout(out):
             try:
-                crc = build(CRC, Case("c", "azure", lambda c: None, scenario), logs)
+                crc = _crc(scenario, logs, options)
                 handler_fn = cli_dispatch.HANDLERS.get(kind.resource)
                 cli_dispatch._run_handler(handler_fn, crc, "azure", kind.resource, options, targets)
             except Exception as exc:

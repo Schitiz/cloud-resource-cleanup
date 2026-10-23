@@ -68,3 +68,38 @@ Scope reviewed: `git diff 6a98441..HEAD` on branch `eng/azu` (lane `ENG-AZU`).
 - `python3 -m tests.archtest.test_count check`: `ARCH-008: 44113 tests, floor 44113`
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 6a98441..HEAD` on `eng/azu`, after the round 1 fixes (`c252ca3`).
+
+### Round 1 fixes checked
+
+- The `test_cli_dispatch_fix.py` NIC fix is correct: `FakeCleaners` records `("azure", "nic")`, so the test fails if the pair runs after `validate_targets` should have raised.
+- The `test_cli_main_parity.py` tightening is non-vacuous: `install_routed_fakes` asserts a `routed_call` entry for every routed pair (`assert call is not None`), the Azure entries live in their own `tests/helpers_routed_azure.py`, and the fake cleaner checks `resource_group` against `--resource_group` and no `instance_state` on stop. The fake `CRC` raises the real spot `ValueError` for Azure without a group, as `vm_ops.delete_spot_instances` does.
+
+### Independent checks
+
+1. Route option mapping against the legacy handlers (`dispatch._ip/_nic/_disk/_vm/_spot_instances`, `adapter_args`, `CRC` constructor fed from the same `Options` in `cli/main.py`): `resource_group` and `notags` come from the same flags on both paths; `instance_state` is passed for delete only and only when non-empty, matching `_delete_vm` (`not instance_state` uses the adapter default) and `stop_vm` (default states); the IP regexes and disk detach/regex/Slack-owner flags were never read by the Azure adapters. `disk` uses report-then-reraise as `delete_disks` does; the spot precheck raises after RUN START and before `Service` and the cleaner, as the legacy method did. `operation_type` is limited to delete/stop by the parser and `stop` is rejected for non-vm resources by `validate_values`, so the routed `Operation(...)` never sees another value.
+2. Parity tests reach a real or fake cleaner: `test_cli_bridge_azu.py` counts `run_routed` calls (0 legacy, 1 routed) and compares real code on both sides; `test_cli_main_parity.py`, `test_cli_dispatch_fix.py`, `test_cli_bridge_parity.py` and `test_core_selection.py` reach `FakeCleaners`. No vacuous fake or patch found.
+3. The hash-locked files and `tests/archtest/safety_lock.json` are untouched (diff empty) and pass. The 7 locked Azure spot tests map to SAF-038, 041, 042 and 044; `tests/test_azu_spot_vm_engine.py` covers each.
+4. Protected files: only `tests/archtest/test_count_floor.txt` changed (via `make raise-test-floor`, allowed); no oracle, archtest code, guardrail, requirements, bridge/dispatch/resource_ops/vm_ops/notify/`crc.py` edit. BUGS.md: one row (BUG-392, end of the low group, counts line updated); CLEANUP_SAFETY.md: one sentence in the engine path bullet.
+5. File and function limits and README Public API sync: ARCH-002/004 green in `make check`.
+
+### Findings and fixes made in review
+
+1. **Fixed (test gap): the bridge parity test never compared the notags filter.** `tests/test_cli_crc_parity.build` builds the legacy `CRC` with `notags={"owner": ["x"]}` and `resource_group` from the scenario, while the routed side read `notags={}` and `resource_group="rg"` from the flags, and no fake resource carried an `owner` tag. So the two paths ran with different notags and the difference could not show. `tests/test_cli_bridge_azu.py` now sets `crc.notags` and `crc.resource_group` from the parsed options (as `cli/main.py` does), `COMMON` uses `notags={"owner": ["x"]}`, and `tests/helpers_cli_azu.py` adds an `owner`-tagged resource to the VM, IP, disk and Spot VM data (the run logs show `SKIPPED reason=exception_or_notags` on both paths).
+2. **Fixed (test gap): spot without `--resource_group` was only tested on the precheck function.** A new `spot_instances` case with `resource_group=None` now runs both full paths through `dispatch._run_handler`: same `ValueError`, same RUN START/RESULT lines, no Slack, no Influx, no SDK call.
+3. **Fixed (copy gap): the engine copy of the locked SAF-042 test used `tags={}` only;** the locked test uses `tags=None`. `test_saf_042_untagged_spot_vm_is_always_skipped` now covers both.
+
+## New bugs (round 2)
+
+- `crc/azu/ip/cleaner.py:71-77` (`plan()`) against the adapter loop: when an IP delete raises in a real run (the IP delete is not isolated per address), the adapter had stopped walking the listing, so the addresses listed after the failing one were never counted; the cleaner counts their skips in `plan()`, so the `SKIPPED` counts and `skipped=` in `RESULT` are higher on the routed path in that error case. Selection, deletes and their order are equal. A consequence of plan-before-apply (BUG-392); count-only. Found by placing a notags-tagged IP after the failing one; the test data keeps it before the failing IP so the grid stays green.
+
+### Gates and test count
+
+- `make check` (after `pip install -r requirements.txt -r requirements-dev.txt`): ruff, mypy strict, lint-imports, ARCH-001..009 and SAF-LOCK green.
+- Before the round 2 changes: 44113 passed in 57.40s (`make check` wall time 1m17s).
+- After: 44123 passed in 52.50s (`make check` wall time 59s); floor raised 44113 -> 44123 with `make raise-test-floor`.
+
+ROUND 2 VERDICT: APPROVE
