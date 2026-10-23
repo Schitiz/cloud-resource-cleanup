@@ -63,3 +63,35 @@ Scope reviewed: `git diff 182466d..HEAD` (`crc/oci/vm/cleaner.py`, `crc/oci/vm/c
 | `pytest -q` | 42467 passed (42444 at `182466d`, +23) |
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 182466d..HEAD`. I re-checked round 1's findings and then ran each check myself. Round 1 made no code changes, and I made none either; this section is the only edit.
+
+### Findings
+
+1. **The bugs are fixed, and the tests prove it.** I copied `tests/test_oci_vm_fix.py` into a worktree at `182466d`: 21 of its 23 tests fail there and all 23 pass at HEAD. The two that pass on the base are regression guards: `test_bug_158_guard_comes_after_the_state_check` and `test_bug_158_instances_without_defined_tags_or_metadata_still_match`.
+   - `BUG-158`: `crc/oci/vm/cleaner.py:235-240` calls the same `policy.oci_is_managed_or_oke_node(freeform_tags, defined_tags, metadata or {})` that `crc/oci/spot_vm/decide.py:63-69` uses, in the same position (right after the state check, before the exception, filter and age checks). It applies even when `filter_tags` is empty, and on both the `VM` adapter path and the registered Cleaner path, because both go through `decide()`.
+   - `BUG-162`: `decide()` (`cleaner.py:176-181`) catches the error, logs it at ERROR, calls `record_failure`, and returns `Skipped` with reason `evaluation failed`, so the instance is kept. The adapter (`adapter.py:140-145`) and `plan()` both keep looping, and `_log_summary` runs.
+2. **Direction rule and parity.** Oracles in `tests/legacy/` are untouched. Only the five `BUG-162` cases are listed in `DIVERGES` (`tests/test_oci_vm_parity.py:565-574`, under a `BUG-162` comment). Each asserts that the oracle still fails and pins the exact new mutations and the ERROR lines. Every other case keeps exact equality on both the adapter and Cleaner paths. `BUGS = {"BUG-358"}` is unchanged, so no log rule was loosened. `BUG-158` only adds a keep branch.
+   - **Correction to round 1, recorded for the owner (NIT, not blocking).** Round 1 says neither fix can act on an instance that was kept before. That is not quite true for `BUG-162`. In cases `unexpected-error-in-later-instance-after-action` (instance `c`, after broken instance `b`) and `unexpected-error-in-later-region` (any healthy instance in `r2` after `b`), the new code terminates or stops instances that main never reached, because main aborted first. This is the intended outcome of the `BUG-162` row ("later instances and regions are not processed") and of the task note ("the loop continues"). Those instances pass every selection gate, and main would have acted on them if the broken instance had not been listed first. The broken instance itself is always kept. No selection rule is widened.
+   - **Exit code (NIT, by design).** On main these errors aborted the run with a non-zero exit, so Jenkins went red. Now the run exits 0. The failure shows up in the ERROR line and in the run-log `ERRORS count=` summary (`crc/core/logger.py:160-163`), the same way per-instance terminate and stop failures already did on main. The task asks for exactly this ("recorded (run-log fail) and the loop continues").
+3. **Production commands.** All five `--cloud oci --resource vm` Jenkins commands use the same flags as before, and no CLI flag or dependency was added. Their selection changes only by keeping OKE and instance-pool members and instances whose evaluation raises. With `--resource_states '["STOPPED"]'` and the `-d --notags` run, the guard comes before the notags check, so OKE nodes are kept there too.
+4. **Fail-closed paths.** None were added. `plan()` makes no mutating call, and the `decide()` catch runs before `act()` for that instance.
+5. **Protected files.** `git diff --name-only` touches none of `safety_lock.json`, the five locked tests, `tests/legacy/`, `tests/archtest/`, `.cursor/`, `PLAN.md`, `STATUS.md`, `BUGS.md` or `CLEANUP_SAFETY.md`.
+6. **README (ARCH-002).** `crc/oci/vm/README.md` updates Public API (`SdkInstance`) and adds Safety Invariants for both bugs. It also narrows the known-bugs list.
+7. **Owner decision.** Not needed; both bugs are fixed. The SAF-045 text under `## Owner action` is correct.
+8. **NIT, run-log key mismatch.** The task requires the skip key `managed`, which `crc/oci/vm` now uses. `crc/oci/spot_vm/decide.py:27` records the same guard as `oke_member`, so dashboards that count both cleaners see two keys for one guard. Not fixed (spot_vm is out of scope). Proposal for a later rung: pick one key for both cleaners.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`:
+
+| Gate | Result |
+|------|--------|
+| `ruff check .` | All checks passed |
+| `mypy` | Success: no issues found in 229 source files |
+| `lint-imports` | Contracts: 5 kept, 0 broken |
+| `pytest -q` | 42467 passed |
+
+ROUND 2 VERDICT: APPROVE
