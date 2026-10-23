@@ -1,5 +1,6 @@
-"""Fakes and a runner for `tests/test_cli_bridge_gcp.py`: the same GCP data run through the legacy
-handler (adapter classes, `crc.cli.runner.CRC`) and through the engine bridge (the Cleaners)."""
+"""Fakes and a runner for `tests/test_cli_bridge_gcp.py`: the same GCP data run through `main`'s
+frozen CLI and adapters (the oracles in `tests/legacy/`, see `tests/helpers_cl2_gcp_oracle.py`)
+and through the engine bridge (the Cleaners)."""
 
 import io
 import itertools
@@ -18,7 +19,7 @@ from crc.cli.context import RunContext as CliContext
 from crc.cli.context import make_crc
 from crc.cli.inputs import Targets, read_options
 from crc.gcp import _scan
-from tests.helpers_legacy_handlers import run_legacy_handler
+from tests.helpers_cl2_gcp_oracle import patch_sdk, run_oracle
 
 RUN_PREFIXES = ("RUN START", "ACTION ", "SKIPPED ", "ERRORS ", "FAILED ", "RESULT ", "REGION ")
 OLD = "2020-01-01T00:00:00.000000+00:00"
@@ -104,8 +105,10 @@ class FakeGcp:
             raise GoogleAPIError("denied")
         return {"name": f"op-{name}"}
 
-    def delete_disk(self, project_id: str, zone: str, disk: str) -> object:
-        return self._delete("delete_disk", zone, disk)
+    def delete_disk(self, project_id: str, *where_and_name: str) -> object:
+        """`(zone, disk)` for the disk cleaner, `(scope, location, disk)` for a Spot VM's leftover
+        disk; both record `("delete_disk", location, disk)`."""
+        return self._delete("delete_disk", where_and_name[-2], where_and_name[-1])
 
     def delete_instance(self, project_id: str, zone: str, instance: str) -> object:
         return self._delete("delete_instance", zone, instance)
@@ -173,6 +176,7 @@ class Outcome:
     stdout: str
     error: str | None
     gcp_calls: list[tuple[str, ...]]
+    key: tuple[str, bool, bool, bool, str] | None = None
 
 
 def _lines(caplog: pytest.LogCaptureFixture) -> list[str]:
@@ -205,24 +209,26 @@ def run_pair(  # noqa: PLR0913 - the case, the data and the three switches
     slack: bool,
     influx: bool,
 ) -> Outcome:
-    """Run `kind` on gcp through `dispatch._run_pair`, routed or on the legacy handler."""
+    """Run `kind` on gcp through `dispatch._run_pair`, or on `main`'s CRC driving the oracles.
+
+    The oracle run logs no run-log lines, so its `run_log` is empty; the test compares the routed
+    lines with the frozen ones in `tests/helpers_cl2_gcp_runlog.py`."""
     install(monkeypatch, client)
+    patch_sdk(monkeypatch, client)
     slack_calls: list[Any] = []
     influx_calls: list[Any] = []
     args = {"cloud": "gcp", "project_id": "proj", "resource": kind, **flags}
     options = read_options(args)
-    crc = make_crc(
-        CliContext(
-            options.dry_run,
-            options.notags,
-            FakeSlack(slack_calls) if slack else None,
-            FakeInflux(influx_calls) if influx else None,
-            "proj",
-            None,
-            "chan",
-            {"bucket": "b"},
-        ),
+    crc_args = (
         "gcp",
+        options.dry_run,
+        options.notags,
+        FakeSlack(slack_calls) if slack else None,
+        FakeInflux(influx_calls) if influx else None,
+        "proj",
+        None,
+        "chan",
+        {"bucket": "b"},
     )
     targets = Targets("gcp", False, ["gcp"], [kind])
     caplog.clear()
@@ -232,10 +238,13 @@ def run_pair(  # noqa: PLR0913 - the case, the data and the three switches
     try:
         with redirect_stdout(out):
             if routed:
+                crc = make_crc(CliContext(*crc_args[1:]), "gcp")
                 dispatch._run_pair(crc, "gcp", kind, options, targets)
             else:
-                run_legacy_handler(crc, "gcp", kind, options, targets)
+                run_oracle(kind, options, crc_args)
     except Exception as e:
         error = f"{type(e).__name__}: {e}"
     stdout = "\n".join(line for line in out.getvalue().splitlines() if "loglevel" not in line)
-    return Outcome(_lines(caplog), slack_calls, influx_calls, stdout, error, client.calls)
+    return Outcome(
+        _lines(caplog) if routed else [], slack_calls, influx_calls, stdout, error, client.calls
+    )
