@@ -9,7 +9,6 @@ from slack_sdk import WebClient
 
 from crc.aws.disk import Disk as AWS_Disk
 from crc.aws.elastic_ips import ElasticIPs
-from crc.aws.keypairs import KeyPairs
 from crc.aws.kms import Kms
 from crc.aws.snapshot import Snapshot
 from crc.aws.spot_instance_requests import SpotInstanceRequests
@@ -81,7 +80,6 @@ __all__ = [
     "GCP_Disk",
     "GCP_SpotVM",
     "InfluxDBClient",
-    "KeyPairs",
     "Kms",
     "OCI_Disk",
     "OCI_SpotVM",

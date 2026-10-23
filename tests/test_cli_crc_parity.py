@@ -22,6 +22,9 @@ import pytest
 
 from crc.cli import resource_ops, vm_ops
 from crc.cli.runner import CRC as NewCRC
+from tests.helpers_cli_routes import provide_legacy_keypairs
+
+provide_legacy_keypairs()
 
 ORACLE = Path(__file__).parent / "legacy" / "crc_main.txt"
 ADAPTERS = [
@@ -293,7 +296,6 @@ op(
     lambda c: c.delete_spot_instance_requests(TAGS, {}, AGE, "age_tag"),
 )
 op("ip", ["aws", "azure", "gcp", "oci"], lambda c: c.delete_ip(TAGS, {}, ["n"], ["x"]))
-op("keypairs", ["aws", "gcp"], lambda c: c.delete_keypairs(["n"], ["x"], AGE))
 op("nic", ["azure", "aws"], lambda c: c.delete_nic(["n"], ["x"]))
 op("disks", ALL, lambda c: c.delete_disks(*DISK_ARGS))
 op(
@@ -453,6 +455,8 @@ def test_delete_disks_result_shapes_match_main(
 
 def test_every_adapter_name_is_patched_in_the_new_modules() -> None:
     for adapter in ADAPTERS:
+        if adapter == "KeyPairs":  # routed through the engine since ENG-0, kept for the oracle
+            continue
         assert hasattr(vm_ops, adapter) or hasattr(resource_ops, adapter), adapter
 
 

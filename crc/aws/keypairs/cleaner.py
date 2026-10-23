@@ -3,8 +3,8 @@
 """AWS EC2 key pair cleaner.
 
 `KeyPairCleaner` implements the `crc.core.cleaner.Cleaner` contract: `plan()` lists key pairs
-(`describe_key_pairs`) and filters them, `apply()` calls `delete_key_pair`. The legacy class
-`crc.py` uses lives in `adapter.py`.
+(`describe_key_pairs`) and filters them, `apply()` calls `delete_key_pair`. `crc/cli` runs it
+through `crc.core.engine` (route `crc/cli/routes/aws.py`).
 """
 
 import datetime
@@ -67,6 +67,8 @@ class KeyPairCleaner:
             except CONNECTIVITY_ERRORS as e:
                 skip_region(region, SKIP_CONTEXT, e)
                 continue
+            if context.dry_run:
+                self._log_dry_run_actions(region_plan.candidates)
             candidates.extend(region_plan.candidates)
             skipped.extend(region_plan.skipped)
         if context.dry_run:
@@ -105,6 +107,13 @@ class KeyPairCleaner:
                 skipped.append(Skipped(id=name, reason=reason, name=name))
         _regionlog.region_done(region, len(keypairs["KeyPairs"]), len(selected), started)
         return Plan(candidates=tuple(selected[name] for name in order), skipped=tuple(skipped))
+
+    @staticmethod
+    def _log_dry_run_actions(candidates: Sequence[Candidate]) -> None:
+        """A dry run never calls `apply()`, so `plan()` logs the would_delete actions per region."""
+        run = logger.current()
+        for candidate in candidates:
+            run.action("would_delete", candidate.region, candidate.id, candidate.name)
 
     def apply_region(
         self,
@@ -156,7 +165,7 @@ def build_keypair_cleaner(context: RunContext) -> Cleaner:
     return KeyPairCleaner(
         client_factory=boto3_client,
         list_regions=ec2_regions,
-        name_regex=list(options.get("name_regex") or ()),
-        exception_regex=list(options.get("exception_regex") or ()),
+        name_regex=options.get("name_regex"),
+        exception_regex=options.get("exception_regex"),
         age=options.get("age"),
     )

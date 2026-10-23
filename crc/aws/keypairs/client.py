@@ -4,12 +4,11 @@
 
 import datetime
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
 from typing import Any, Protocol
 
 import boto3
 
-from crc.aws._common import EC2_SERVICE_NAME, ec2_regions
+from crc.aws._common import EC2_SERVICE_NAME
 
 
 class KeyPairClient(Protocol):
@@ -33,13 +32,3 @@ def boto3_client(region: str) -> KeyPairClient:
     """Default EC2 client factory."""
     client: KeyPairClient = boto3.client(EC2_SERVICE_NAME, region_name=region)
     return client
-
-
-@dataclass(frozen=True, slots=True)
-class KeyPairRuntime:
-    """Injected collaborators of `KeyPairs`: the SDK client factory, the region lister and the
-    clock that supplies `now` (the cleaner itself never reads the clock)."""
-
-    client_factory: ClientFactory = boto3_client
-    list_regions: RegionLister = ec2_regions
-    clock: Clock = datetime.datetime.now

@@ -416,10 +416,13 @@ Related: `docs/refactor/FILTER_VARIANTS.md` (how each module filters, section 7 
 | BUG-385 | `RESOURCES` (what `--resource all` expands to) has no `vpc`, `spot_instance_requests` or `spot_instances`, so `--resource all` never runs them although the help text says it targets all types | `crc.py:40`; refactor `crc/cli/constants.py:5` | yes | keeps what it should delete | low | W2-SAFETY-DOC | open |
 | BUG-386 | `is_old` recognises the bad-age-tag keep marker by equality with `KEEP_AGE` (`{"days": 1000000}`), so a real tag or `--age` of exactly that value is also treated as keep (fail closed, undocumented) | refactor only: `crc/core/age.py` `is_old` | no | keeps what it should delete | low | W2-SAFETY-DOC | open |
 | BUG-387 | The `--detach_age` help text still describes the AWS CreateTime floor before FIX-AWS-DISK: with both `--age` and `--detach_age` the floor is the effective age plus `detach_age` (BUG-283), which the help does not say | refactor only: `crc/cli/args.py` `--detach_age` help | no | cosmetic | low | W2-SAFETY-DOC | open |
+| BUG-388 | The adapter loop listed and deleted region by region, so a listing error in a later region still left earlier regions deleted; through the engine `plan()` lists every region before `apply()` mutates and the pair stops before any mutation (fewer deletes, never more) | `crc.py` adapter loop (`KeyPairs.delete`; the same shape in the other adapters) | yes | keeps what it should delete | low | ENG-0 | fixed in ENG-0 |
+| BUG-389 | Through the engine the age clock is read once per pair (`crc/cli/bridge.py` `datetime.now(UTC)`), where the adapter read it per region: a resource that crosses its age threshold during the run is kept in later regions (fewer deletes, never more) | refactor only: `crc/cli/bridge.py` | no | keeps what it should delete | low | ENG-0 | open |
+| BUG-390 | The AWS keypair Cleaner builds the EC2 client again in `apply()` for each region with candidates (once already in `plan()`), so the SDK call sequence differs from `main` (no mutation) | refactor only: `crc/aws/keypairs/cleaner.py` `apply` | no | cosmetic | low | ENG-0 | open |
 
 ## Counts
 
-387 rows: critical 5, high 27, medium 65, low 290. 57 fixed and 5 partly fixed (the LOG rungs and wave FIX-1); the others are open. BUG-366 to BUG-379 were found by the FIX-1 reviews, BUG-380 to BUG-387 by the W2 reviews.
+390 rows: critical 5, high 27, medium 65, low 293. 58 fixed and 5 partly fixed (the LOG rungs, wave FIX-1 and ENG-0); the others are open. BUG-366 to BUG-379 were found by the FIX-1 reviews, BUG-380 to BUG-387 by the W2 reviews, BUG-388 to BUG-390 by ENG-0.
 
 ## Notes
 

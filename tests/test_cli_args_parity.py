@@ -19,6 +19,9 @@ import pytest
 
 from crc.cli import args as cli_args
 from crc.cli import validate as cli_validate
+from tests.helpers_cli_routes import provide_legacy_keypairs
+
+provide_legacy_keypairs()
 
 ORACLE = Path(__file__).parent / "legacy" / "crc_main.txt"
 ROOT = Path(__file__).resolve().parent.parent

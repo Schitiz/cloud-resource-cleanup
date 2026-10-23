@@ -89,15 +89,11 @@ class FakeNotifier:
             raise self.error
 
 
-def make_registry(
-    events: list[str], pairs: list[tuple[str, str]], **kwargs: object
-) -> Registry:
+def make_registry(events: list[str], pairs: list[tuple[str, str]], **kwargs: object) -> Registry:
     registry = Registry()
     for cloud, kind in pairs:
 
-        def factory(
-            context: RunContext, cloud: str = cloud, kind: str = kind
-        ) -> FakeCleaner:
+        def factory(context: RunContext, cloud: str = cloud, kind: str = kind) -> FakeCleaner:
             return FakeCleaner(cloud, kind, events, **kwargs)  # type: ignore[arg-type]
 
         registry.register(cloud, kind)(factory)
@@ -213,7 +209,6 @@ def test_fail_open_notifier_error_is_logged_and_swallowed(
             lambda c: c.delete_disks({}, {}, {}, None, {}, [], [], False, None),
         ),
         ("aws", "ip", Operation.DELETE, "ElasticIPs", lambda c: c.delete_ip({}, {}, [], [])),
-        ("aws", "keypair", Operation.DELETE, "KeyPairs", lambda c: c.delete_keypairs([], [], {})),
         ("azure", "nic", Operation.DELETE, "NIC", lambda c: c.delete_nic([], [])),
         (
             "aws",

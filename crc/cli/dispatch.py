@@ -5,6 +5,7 @@ from collections.abc import Callable
 from typing import Any
 
 from crc.aws.snapshot import Snapshot
+from crc.cli.bridge import is_routed_kind, route_for, run_routed
 from crc.cli.context import RunContext, make_crc
 from crc.cli.inputs import Options, Targets
 from crc.cli.pairs import (
@@ -54,10 +55,6 @@ def _ip(crc: Any, cloud: Any, options: Options, targets: Targets) -> None:
         options.name_regex,
         options.exception_regex,
     )
-
-
-def _keypair(crc: Any, cloud: Any, options: Options, targets: Targets) -> None:
-    crc.delete_keypairs(options.name_regex, options.exception_regex, options.age)
 
 
 def _nic(crc: Any, cloud: Any, options: Options, targets: Targets) -> None:
@@ -149,7 +146,6 @@ def _snapshot(crc: Any, cloud: Any, options: Options, targets: Targets) -> None:
 HANDLERS: dict[str, Handler] = {
     "disk": _disk,
     "ip": _ip,
-    "keypair": _keypair,
     "nic": _nic,
     "vm": _vm,
     "vpc": _vpc,
@@ -176,7 +172,7 @@ def _run_options(options: Options) -> dict[str, Any]:
 
 
 def _run_handler(
-    handler: Handler, crc: Any, cloud: Any, resource: Any, options: Options, targets: Targets
+    handler: Handler | None, crc: Any, cloud: Any, resource: Any, options: Options, targets: Targets
 ) -> None:
     """Run one cloud and resource pass between its RUN START and RESULT lines."""
     logger.begin(
@@ -187,7 +183,11 @@ def _run_handler(
         _run_options(options),
     )
     try:
-        handler(crc, cloud, options, targets)
+        route = route_for(cloud, resource)
+        if route is not None:
+            run_routed(crc, cloud, resource, options, targets, route)
+        elif handler is not None:
+            handler(crc, cloud, options, targets)
     finally:
         logger.finish()
 
@@ -201,7 +201,7 @@ def validate_targets(targets: Targets) -> list[tuple[Any, Any]]:
     to be skipped only when no supported pair comes after the first one: `main` stopped at that
     pair, so running a later pair (azure for `--cloud all --resource nic`) would delete more.
     """
-    handled = [r for r in targets.resources if r in HANDLERS]
+    handled = [r for r in targets.resources if r in HANDLERS or is_routed_kind(r)]
     if "disk" in handled and targets.cloud_arg == "all" and not targets.aws_disk_opt_in:
         raise ValueError(AWS_DISK_OPT_IN_MESSAGE)
     pairs = [(cloud, resource) for cloud in targets.clouds for resource in handled]
@@ -235,7 +235,7 @@ def run_dispatch(context: RunContext, options: Options, targets: Targets) -> Non
         crc: Any = None
         for resource in targets.resources:
             handler = HANDLERS.get(resource)
-            if handler is None:
+            if handler is None and not is_routed_kind(resource):
                 continue
             if (cloud, resource) in skipped:
                 _skip_pair(cloud, resource, options)
