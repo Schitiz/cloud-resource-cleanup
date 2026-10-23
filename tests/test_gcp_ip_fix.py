@@ -103,12 +103,31 @@ def test_bug_001_excluded_names_are_skipped_with_reason() -> None:
     assert [(s.id, s.reason) for s in plan.skipped] == [("keep-c", "exception_regex")]
 
 
-def test_bug_001_production_selection_without_exception_regex_is_unchanged() -> None:
+@pytest.mark.parametrize(
+    ("name_regex", "exception_regex", "expected"),
+    [
+        (["itest", "itests", "ui-auto"], None, ["itest-1", "ui-auto-2"]),
+        (["itest", "itests", "ui-auto"], [], ["itest-1", "ui-auto-2"]),
+        (["yb-stress-auto"], None, ["yb-stress-auto-1"]),
+        (["yb-stress-auto"], [], ["yb-stress-auto-1"]),
+    ],
+)
+def test_bug_001_production_selection_without_exception_regex_is_unchanged(
+    name_regex: list[str], exception_regex: list[str] | None, expected: list[str]
+) -> None:
     client = Client(
-        {"r": [addr("itest-1"), addr("ui-auto-2"), addr("other"), addr("itest-3", "IN_USE")]}
+        {
+            "r": [
+                addr("itest-1"),
+                addr("ui-auto-2"),
+                addr("yb-stress-auto-1"),
+                addr("other"),
+                addr("itest-3", "IN_USE"),
+            ]
+        }
     )
-    plan = IpCleaner(client, PROJECT, ["itest", "itests", "ui-auto"], None).plan(ctx())
-    assert [c.id for c in plan.candidates] == ["itest-1", "ui-auto-2"]
+    plan = IpCleaner(client, PROJECT, name_regex, exception_regex).plan(ctx())
+    assert [c.id for c in plan.candidates] == expected
 
 
 def test_bug_064_operation_is_awaited_before_the_name_is_recorded(

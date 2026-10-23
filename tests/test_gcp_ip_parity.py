@@ -69,6 +69,7 @@ class Case:
     exception_regex: Any = field(default_factory=list)
     dry_run: bool = False
     delete_errors: Mapping[tuple[str, str], Exception] = field(default_factory=dict)
+    op_errors: Mapping[tuple[str, str], Exception] = field(default_factory=dict)
     regions_error: Exception | IterError | None = None
     regions_ctor_error: Exception | None = None
     fails_in_plan: bool = False
@@ -184,6 +185,7 @@ def _cases() -> list[Case]:
             filter_regex=["keep"],
             delete_errors={("us-east1", "ip-a"): DENIED},
         ),
+        Case("delete-operation-error", ONE, op_errors={("us-east1", "ip-a"): DENIED}),
     ]
 
 
@@ -221,11 +223,59 @@ DIVERGING: dict[str, Fixed] = {
         ["ip-a", "ip-b", "keep-d"],
         [(_EAST, "ip-a"), (_EAST, "ip-b"), (_WEST, "ip-c"), (_WEST, "keep-d")],
     ),
+    "delete-operation-error": Fixed(
+        "BUG-064",
+        ["ip-b", "keep-c"],
+        [(_EAST, "ip-a"), (_EAST, "ip-b"), (_EAST, "keep-c")],
+    ),
 }
 
 
 def _deletes(calls: Sequence[tuple[Any, ...]]) -> list[tuple[str, str]]:
     return [(c[2], c[3]) for c in calls if c[0] == "addresses.delete"]
+
+
+def _expected_diverging_calls(case: Case, fixed: Fixed) -> list[tuple[Any, ...]]:
+    calls: list[tuple[Any, ...]] = [("RegionsClient",), ("regions.list", PROJECT)]
+    for region in case.regions:
+        calls.extend((("AddressesClient",), ("addresses.list", PROJECT, region)))
+        for del_region, address in fixed.deletes:
+            if del_region == region:
+                calls.extend((("AddressesClient",), ("addresses.delete", PROJECT, region, address)))
+    return calls
+
+
+def _expected_diverging_logs(
+    case: Case, fixed: Fixed, *, with_count: bool = True
+) -> list[tuple[str, int, str]]:
+    logs: list[tuple[str, int, str]] = []
+    for region, addresses in case.regions.items():
+        logs.extend(("root", logging.DEBUG, str(address)) for address in addresses)
+        for del_region, address in fixed.deletes:
+            if del_region != region:
+                continue
+            err = case.delete_errors.get((region, address)) or case.op_errors.get((region, address))
+            if err is not None:
+                msg = f"Error occurred while deleting IP address {address}: {err}"
+                logs.append(("root", logging.ERROR, msg))
+            else:
+                logs.append(("root", logging.INFO, f"Deleting IP address: {address}"))
+    if case.dry_run:
+        msg = (
+            f"List of GCP IPs (Total: {len(fixed.deleted)}) "
+            f"which will be deleted: {fixed.deleted}"
+        )
+        logs.append(("root", logging.WARNING, msg))
+    else:
+        logs.extend(
+            (
+                ("root", logging.WARNING, f"number of GCP IPs deleted: {len(fixed.deleted)}"),
+                ("root", logging.WARNING, f"List of GCP IPs deleted: {fixed.deleted}"),
+            )
+        )
+    if with_count:
+        logs.append(("root", logging.INFO, f"count of items in deleted_ips: {len(fixed.deleted)}"))
+    return logs
 
 
 class FakeRegionsClient:
@@ -264,13 +314,21 @@ class FakeAddressesClient:
         error = self.gcp.case.delete_errors.get((region, address))
         if error is not None:
             raise error
-        return types.SimpleNamespace(name="operation", result=lambda: None)
+        op_error = self.gcp.case.op_errors.get((region, address))
+
+        def _result() -> None:
+            self.gcp.awaited.append((region, address))
+            if op_error is not None:
+                raise op_error
+
+        return types.SimpleNamespace(name="operation", result=_result)
 
 
 class FakeGcp:
     def __init__(self, case: Case) -> None:
         self.case = case
         self.calls: list[tuple[Any, ...]] = []
+        self.awaited: list[tuple[str, str]] = []
 
     def regions_client(self) -> FakeRegionsClient:
         return FakeRegionsClient(self)
@@ -282,6 +340,7 @@ class FakeGcp:
 @dataclass
 class Outcome:
     calls: list[tuple[Any, ...]]
+    awaited: list[tuple[str, str]]
     deleted: list[Any]
     count: int
     logs: list[tuple[str, int, str]]
@@ -338,7 +397,19 @@ def _run(
         error = (type(e).__name__, str(e))
     deleted = list(cleaner.get_deleted)
     count = cleaner.count
-    return Outcome(gcp.calls, deleted, count, _logs(caplog), capsys.readouterr().out, error)
+    return Outcome(
+        gcp.calls,
+        gcp.awaited,
+        deleted,
+        count,
+        _logs(caplog),
+        capsys.readouterr().out,
+        error,
+    )
+
+
+def _expected_awaited(case: Case, calls: Sequence[tuple[Any, ...]]) -> list[tuple[str, str]]:
+    return [pair for pair in _deletes(calls) if pair not in case.delete_errors]
 
 
 @pytest.fixture
@@ -356,6 +427,8 @@ def test_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run(_new, case, monkeypatch, caplog, capsys)
+    assert old.awaited == []
+    assert new.awaited == _expected_awaited(case, new.calls)
     if case.id in DIVERGING:
         fixed = DIVERGING[case.id]
         assert (new.deleted, _deletes(new.calls), new.error) != (
@@ -367,6 +440,8 @@ def test_matches_main(
         assert new.deleted == fixed.deleted
         assert new.count == len(fixed.deleted)
         assert _deletes(new.calls) == fixed.deletes
+        assert new.calls == _expected_diverging_calls(case, fixed)
+        assert new.logs == _expected_diverging_logs(case, fixed)
         assert new.stdout == old.stdout
         return
     assert new.calls == old.calls
@@ -405,7 +480,15 @@ def _run_cleaner(
             deleted = list(cleaner.apply(plan, ctx).succeeded)
     except Exception as e:
         error = (type(e).__name__, str(e))
-    return Outcome(gcp.calls, deleted, len(deleted), _logs(caplog), capsys.readouterr().out, error)
+    return Outcome(
+        gcp.calls,
+        gcp.awaited,
+        deleted,
+        len(deleted),
+        _logs(caplog),
+        capsys.readouterr().out,
+        error,
+    )
 
 
 def _only(calls: Sequence[tuple[Any, ...]], name: str) -> list[tuple[Any, ...]]:
@@ -422,11 +505,22 @@ def test_cleaner_protocol_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run_cleaner(case, monkeypatch, caplog, capsys)
+    assert old.awaited == []
+    assert new.awaited == _expected_awaited(case, new.calls)
     if case.id in DIVERGING:
         fixed = DIVERGING[case.id]
+        assert (new.deleted, _deletes(new.calls), new.error) != (
+            old.deleted,
+            _deletes(old.calls),
+            old.error,
+        ), f"{fixed.bug}: oracle no longer shows the bug"
         assert new.error is None
         assert new.deleted == fixed.deleted
         assert _deletes(new.calls) == fixed.deletes
+        assert Counter(new.logs) == Counter(_expected_diverging_logs(case, fixed, with_count=False))
+        if len(case.regions) <= 1:
+            assert new.calls == _expected_diverging_calls(case, fixed)
+            assert new.logs == _expected_diverging_logs(case, fixed, with_count=False)
         assert new.stdout == old.stdout
         return
     old_deletes = _only(old.calls, "addresses.delete")
@@ -542,6 +636,13 @@ FIXED_QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool], Callable[[Outcome],
         "delete-error-second-region-keeps-first",
         lambda o: o.error is not None and o.deleted == ["ip-a", "ip-b"],
         lambda o: o.error is None and o.deleted == ["ip-a", "ip-b", "keep-d"],
+    ),
+    (
+        "delete-operation-error",
+        lambda o: o.error is None and o.deleted == ["ip-a", "ip-b", "keep-c"] and o.awaited == [],
+        lambda o: o.error is None
+        and o.deleted == ["ip-b", "keep-c"]
+        and o.awaited == [(_EAST, "ip-a"), (_EAST, "ip-b"), (_EAST, "keep-c")],
     ),
 ]
 
