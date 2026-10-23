@@ -74,3 +74,36 @@ None in do-not-edit files (`AGENTS.md`, `ARCHITECTURE.md`, `CLEANUP_SAFETY.md`, 
 - `python3 -m pytest -q`: 42450 passed (42444 at `182466d`, +6 net from 18 new tests in `tests/test_oci_disk_fix.py` and 6 parity cases moved from `PARITY_CASES` + `QUIRKS` to `DIVERGES` in `tests/test_oci_disk_parity.py`)
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 182466d..HEAD` on `fix/oci-disk` (commits `26a0bd2` fix, `f70b04f` Round 1). I re-checked the Round 1 tightening of `test_unknown_attachments_keep_the_volumes`: it now asserts exact logs, stdout and `calls == _reads(old.calls)` for every diverging case, and it is correct. No code changes in this round.
+
+### Checks
+
+1. **Bugs fixed, each with a test that fails on `182466d`.** I copied `tests/test_oci_disk_fix.py` and `tests/test_oci_disk_parity.py` into a worktree at `182466d`: 21 failed (15 in the fix file, 6 in `test_unknown_attachments_keep_the_volumes`), 174 passed. On `HEAD` they all pass. The three tests that also pass on `182466d` (`test_known_empty_attachments_still_delete`, `test_non_available_volume_keeps_its_state_reason`, `test_unexpected_attachment_error_still_propagates`) are guards that behaviour stays the same, so they are expected to pass on both.
+   - `BUG-096` (`crc/oci/disk/cleaner.py:188-202`): a `CONNECTIVITY_ERRORS` error from `list_volume_attachments`, including `ServiceError` 401/403, returns `None` and keeps every AVAILABLE block volume of the region.
+   - `BUG-097` (`:204-226`): an error from `list_availability_domains` or from any `list_boot_volume_attachments` call returns `None`, so the attachments already found in earlier domains are thrown away. Every boot volume of the region is kept.
+   - `BUG-098` (`:212-215`): an empty domain list returns `None`. `Base.get_availability_domains` returns a `list`, so `if not domains` is reliable.
+   - The `Cleaner` path (`plan`) and the legacy adapter (`Disk.delete`, `adapter.py:98-113`) share the same helpers and `decide`. Both are covered (`test_adapter_keeps_volumes_with_unknown_attachments`).
+2. **Direction rule and parity.** The only behaviour change is that some volumes are kept. Every read call is still made, in the same order, and only the delete calls disappear. A non-AVAILABLE volume keeps its old reason. A non-connectivity error still propagates. The other volume kind in the same region and all other regions are decided exactly as before. `tests/legacy/` is untouched. `DIVERGES` holds exactly the six cases named in the BUGS.md rows, each tagged with its in-scope bug ID, and the new outcome is asserted. `test_matches_main`, `test_cleaner_protocol_matches_main` and `test_disk_diverges_from_oracle` still run on every other case, so nothing is loosened globally.
+   - Log and run-log differences only appear for inputs the bugs cover: one extra WARNING `Region <r>: keeping every disk|boot disk: ...` for each unknown volume kind, `regions_skipped` incremented once per region, and the skip counter `attachments_unknown`. These match the task ("record region_skipped").
+3. **Production commands.** Both Jenkins `--cloud oci --resource disk` lines run unchanged: no CLI, option or registry change. The selection is the same whenever listing attachments and availability domains succeeds (the 71 parity cases equal the oracle).
+4. **Fail closed before any mutation.** Unknown attachments are resolved inside `plan()` / the per-region loop, before `remove()` is ever called. No candidate is produced for those volumes, so no `delete_volume` / `delete_boot_volume` call can follow.
+5. **Protected files.** The diff does not touch `tests/archtest/**` (including `safety_lock.json`), any hash-locked test, `tests/legacy/**`, `CLEANUP_SAFETY.md`, `docs/refactor/PLAN.md`, `STATUS.md`, `BUGS.md`, `AGENTS.md`, `ARCHITECTURE.md` or `.cursor/**`.
+6. **README.** `crc/oci/disk/README.md` updates the Public API entry (`attached_*_ids` return `None` when the attachments are unknown) and Safety Invariants (the fail-closed rule, and the old "fail open, do not fix" note removed). ARCH-002 passes.
+7. **Owner decision.** None needed; all three bugs are fixed. The proposed `CLEANUP_SAFETY.md` text under "## Owner action" is accurate.
+
+### BLOCKING
+
+None.
+
+### NIT
+
+- `crc/oci/disk/cleaner.py:158` / `adapter.py:113`: a region whose attachments are unknown is counted both in `regions_skipped` (from `_keep_all`) and as a completed region (from `region_done`). This is acceptable for a partial skip and was requested by the task. It is only worth a note in `docs/refactor/LOGGING.md` if the driver wants `regions + regions_skipped` to add up to the number of regions. No change proposed for this rung.
+
+### Gates and test count
+
+`pip install -r requirements.txt -r requirements-dev.txt` then `make check`: ruff `All checks passed!`, mypy `Success: no issues found in 229 source files`, import-linter `5 kept, 0 broken`, pytest **42450 passed** (42444 at `182466d`).
+
+ROUND 2 VERDICT: APPROVE
