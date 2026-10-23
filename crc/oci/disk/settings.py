@@ -1,14 +1,12 @@
 # Copyright (c) Yugabyte, Inc.
 
-"""Settings, runtime dataclasses, skip vocabulary and summary log of the OCI disk cleaner."""
+"""Settings, skip vocabulary and summary log of the OCI disk cleaner."""
 
-import datetime
 import logging
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
 from crc.core import age as core_age
-from crc.oci.disk.api import ApiFactory, RegionLister
 
 # Attachment lifecycle states that mean the volume/boot volume is still in use and
 # must not be deleted. ATTACHING is included alongside ATTACHED since an
@@ -30,7 +28,6 @@ UNKNOWN_REASONS = {
 }
 
 TagSpec = Mapping[str, Sequence[str]]
-Clock = Callable[[], datetime.datetime]
 
 SKIP_KEYS = {
     "state is not AVAILABLE": "state",
@@ -41,16 +38,6 @@ SKIP_KEYS = {
     "does not match filter_tags": "filter_mismatch",
     "not older than age": "too_young",
 }
-
-
-@dataclass(frozen=True, slots=True)
-class DiskRuntime:
-    """Injected collaborators of `Disk`: any of them left as `None` is built from the OCI SDK
-    (through `Base`), and the clock supplies `now` (the cleaner itself never reads the clock)."""
-
-    api_factory: ApiFactory | None = None
-    list_regions: RegionLister | None = None
-    clock: Clock = datetime.datetime.now
 
 
 @dataclass(frozen=True, slots=True)

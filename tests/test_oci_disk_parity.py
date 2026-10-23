@@ -1,9 +1,11 @@
-"""Parity: `crc.oci.disk.Disk` and the registered Cleaner against main's version
-(`tests/legacy/oci_disk.txt`).
+"""Parity: the registered OCI disk Cleaner, run through `crc.core.engine`, against main's
+`Disk` (`tests/legacy/oci_disk.txt`).
 
-All run against the same fake OCI SDK; SDK calls (in order), results, log records, stdout and
-raised errors must be identical for every case. The Cleaner path runs `plan()` then `apply()`,
-so reads happen before deletes: its reads and its deletes are each compared in order.
+Both run against the same fake OCI SDK; SDK calls, results, log records, stdout and raised
+errors must match for every case. The Cleaner runs `plan()` then `apply()`, so reads happen
+before deletes: its reads and its deletes are each compared in order. The one allowed
+difference: `plan()` lists every region before `apply()` deletes, so a later listing error stops
+the run before any delete (fewer deletes, never more).
 """
 
 import datetime
@@ -18,8 +20,11 @@ import oci
 import pytest
 from oci.exceptions import ConnectTimeout, RequestException, ServiceError
 
+from crc.core import engine
 from crc.core.cleaner import Operation, RunContext
-from crc.oci.disk import Disk, DiskRuntime, build_disk_cleaner
+from crc.core.registry import Registry
+from crc.core.selection import Selection
+from crc.oci.disk import build_disk_cleaner
 from tests.helpers_log_fix import expected_logs
 from tests.log_fix_oci import RULES
 
@@ -568,19 +573,6 @@ def _legacy(case: Case) -> Any:
     )
 
 
-def _new(case: Case) -> Any:
-    runtime = DiskRuntime(clock=lambda: NOW)
-    return Disk(
-        case.dry_run,
-        case.filter_tags,
-        case.exception_tags,
-        case.age,
-        case.custom_age_tag_key,
-        case.notags,
-        runtime,
-    )
-
-
 def _prepare(
     case: Case,
     monkeypatch: pytest.MonkeyPatch,
@@ -629,32 +621,8 @@ def debug_logs(caplog: pytest.LogCaptureFixture) -> None:
 PARITY_CASES = [c for c in CASES if c.id not in DIVERGES]
 
 
-@pytest.mark.parametrize("case", PARITY_CASES, ids=[c.id for c in PARITY_CASES])
-def test_matches_main(
-    case: Case,
-    debug_logs: None,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
-    assert new.calls == old.calls
-    assert new.error == old.error
-    assert new.deleted == old.deleted
-    assert new.count == old.count
-    assert new.logs == expected_logs(old.logs, BUGS, RULES)
-    assert new.stdout == old.stdout
-
-
-def _run_cleaner(
-    case: Case,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-    capsys: pytest.CaptureFixture[str],
-) -> Outcome:
-    world = _prepare(case, monkeypatch, caplog, capsys)
-    context = RunContext(
+def _context(case: Case) -> RunContext:
+    return RunContext(
         dry_run=case.dry_run,
         operation=Operation.DELETE,
         options={
@@ -666,6 +634,40 @@ def _run_cleaner(
         },
         now=NOW,
     )
+
+
+def _run_engine(
+    case: Case,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> Outcome:
+    world = _prepare(case, monkeypatch, caplog, capsys)
+    registry = Registry()
+    registry.register("oci", "disk")(build_disk_cleaner)
+    error: tuple[str, str] | None = None
+    deleted: list[str] = []
+    try:
+        (outcome,) = engine.run(Selection((("oci", "disk"),)), _context(case), registry)
+        deleted = (
+            [c.name for c in outcome.plan.candidates]
+            if outcome.result is None
+            else list(outcome.result.succeeded)
+        )
+    except Exception as e:
+        error = (type(e).__name__, str(e))
+    logs = [(r.name, r.levelno, r.getMessage()) for r in caplog.records]
+    return Outcome(world.calls, deleted, len(deleted), logs, capsys.readouterr().out, error)
+
+
+def _run_cleaner(
+    case: Case,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> Outcome:
+    world = _prepare(case, monkeypatch, caplog, capsys)
+    context = _context(case)
     error: tuple[str, str] | None = None
     deleted: list[str] = []
     try:
@@ -695,16 +697,7 @@ def _is_summary_log(log: tuple[str, int, str]) -> bool:
     )
 
 
-@pytest.mark.parametrize("case", PARITY_CASES, ids=[c.id for c in PARITY_CASES])
-def test_cleaner_protocol_matches_main(
-    case: Case,
-    debug_logs: None,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run_cleaner(case, monkeypatch, caplog, capsys)
+def _assert_matches_main(old: Outcome, new: Outcome) -> None:
     assert new.error == old.error
     assert new.stdout == old.stdout
     if old.error is not None:
@@ -712,6 +705,7 @@ def test_cleaner_protocol_matches_main(
         assert [c for c in new.calls if _is_delete(c)] == []
         return
     assert new.deleted == old.deleted
+    assert new.count == old.count
     assert [c for c in new.calls if not _is_delete(c)] == [
         c for c in old.calls if not _is_delete(c)
     ]
@@ -725,6 +719,30 @@ def test_cleaner_protocol_matches_main(
     apply_logs = [log for log in old_logs if _is_apply_log(log)]
     summary_logs = [log for log in old_logs if _is_summary_log(log)]
     assert new.logs == plan_logs + apply_logs + summary_logs
+
+
+@pytest.mark.parametrize("case", PARITY_CASES, ids=[c.id for c in PARITY_CASES])
+def test_matches_main(
+    case: Case,
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    old = _run(_legacy, case, monkeypatch, caplog, capsys)
+    _assert_matches_main(old, _run_engine(case, monkeypatch, caplog, capsys))
+
+
+@pytest.mark.parametrize("case", PARITY_CASES, ids=[c.id for c in PARITY_CASES])
+def test_cleaner_protocol_matches_main(
+    case: Case,
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    old = _run(_legacy, case, monkeypatch, caplog, capsys)
+    _assert_matches_main(old, _run_cleaner(case, monkeypatch, caplog, capsys))
 
 
 QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
@@ -771,6 +789,15 @@ BUG_004_FIXED = frozenset(
 )
 
 
+ENGINE_QUIRKS: Mapping[str, Callable[[Outcome], bool]] = {
+    # Allowed change: plan() lists every region before apply() deletes, so a listing error in
+    # the boot volumes stops the run before the volume of the same region is deleted.
+    "unexpected-error-in-boot-volume-after-volume-delete": lambda o: (
+        o.error is not None and not any(_is_delete(c) for c in o.calls)
+    ),
+}
+
+
 @pytest.mark.parametrize(("case_id", "check"), QUIRKS, ids=[q[0] for q in QUIRKS])
 def test_quirk_is_preserved(
     case_id: str,
@@ -782,13 +809,20 @@ def test_quirk_is_preserved(
 ) -> None:
     case = next(c for c in CASES if c.id == case_id)
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
+    new = _run_engine(case, monkeypatch, caplog, capsys)
     # BUG-004/BUG-016: the oracle class inherits the live crc.service.Service, so it cannot
     # show the old custom-age-tag behaviour here; tests/test_crc_service_parity.py pins it
     # against the frozen crc_service oracle. Fixed cases assert the new outcome only.
     if case_id not in BUG_004_FIXED:
         assert check(old), "oracle no longer shows the quirk"
-    assert check(new)
+    assert ENGINE_QUIRKS.get(case_id, check)(new)
+
+
+def _by_phase(logs: list[tuple[str, int, str]]) -> list[tuple[str, int, str]]:
+    plan = [log for log in logs if not _is_apply_log(log) and not _is_summary_log(log)]
+    apply = [log for log in logs if _is_apply_log(log)]
+    summary = [log for log in logs if _is_summary_log(log)]
+    return plan + apply + summary
 
 
 def test_disk_diverges_from_oracle(
@@ -801,13 +835,18 @@ def test_disk_diverges_from_oracle(
     changed = 0
     for case in PARITY_CASES:
         old = _run(_legacy, case, monkeypatch, caplog, capsys)
-        new = _run(_new, case, monkeypatch, caplog, capsys)
-        if old.logs == new.logs:
+        new = _run_engine(case, monkeypatch, caplog, capsys)
+        if old.error is not None:
+            continue
+        old_logs = _by_phase([log for log in old.logs if not log[2].startswith("count of items")])
+        if old_logs == new.logs:
             continue
         changed += 1
-        assert [log[2] for log in new.logs] == [log[2] for log in old.logs]
-        assert new.calls == old.calls
-        assert {log[1] for log in new.logs if log not in old.logs} == {logging.DEBUG}
+        assert [log[2] for log in new.logs] == [log[2] for log in old_logs]
+        assert [c for c in new.calls if not _is_delete(c)] == [
+            c for c in old.calls if not _is_delete(c)
+        ]
+        assert {log[1] for log in new.logs if log not in old_logs} == {logging.DEBUG}
     assert changed > 0
 
 
@@ -829,7 +868,7 @@ def test_unknown_attachments_keep_the_volumes(
     assert bug in {"BUG-096", "BUG-097", "BUG-098"}
     case = next(c for c in CASES if c.id == case_id)
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
+    new = _run_engine(case, monkeypatch, caplog, capsys)
     planned = _run_cleaner(case, monkeypatch, caplog, capsys)
     keep_msg = (
         "Region r1: keeping every disk: block volume attachments unknown"
@@ -849,17 +888,10 @@ def test_unknown_attachments_keep_the_volumes(
         ("root", logging.WARNING, "List of OCI disk deleted: []"),
     ]
     assert old.deleted == oracle_deleted, "oracle no longer shows the bug"
-    assert new.error is None
-    assert new.deleted == []
-    assert new.count == 0
-    assert new.calls == _reads(old.calls)
-    assert new.logs == [
-        *expected_cleaner_logs,
-        ("root", logging.INFO, "count of items in disk_names_to_delete: 0"),
-    ]
-    assert new.stdout == old.stdout
-    assert planned.error is None
-    assert planned.deleted == []
-    assert planned.calls == _reads(old.calls)
-    assert planned.logs == expected_cleaner_logs
-    assert planned.stdout == old.stdout
+    for outcome in (new, planned):
+        assert outcome.error is None
+        assert outcome.deleted == []
+        assert outcome.count == 0
+        assert outcome.calls == _reads(old.calls)
+        assert outcome.logs == expected_cleaner_logs
+        assert outcome.stdout == old.stdout
