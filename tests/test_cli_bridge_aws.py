@@ -320,7 +320,9 @@ def test_real_vm_cleaner_through_bridge_matches_oracle_report_names_and_ids(
 
     client = FakeClient([instance("i-1", "vm"), instance("i-2", "vm")])
     monkeypatch.setattr(bridge, "init_run_logging", lambda: None)
-    monkeypatch.setattr("crc.aws.vm.cleaner.boto3_client", lambda region: client)
+    monkeypatch.setattr(
+        "crc.aws.vm.cleaner.boto3_client", lambda region: client
+    )
     monkeypatch.setattr("crc.aws.vm.cleaner.all_regions", lambda: ["us-west-2"])
     kind = next(k for k in KINDS if k.name == "vm" and k.operation == operation)
     expected_ids = ["i-1", "i-2"] if (dry_run and operation == "stop") else ["vm-i-1", "vm-i-2"]

@@ -52,15 +52,8 @@ def make_crc(
     slack, influx = Mock(), MagicMock()
     conn = {"bucket": "b", "resource_suffix": suffix}
     instance = crc_cli.CRC(
-        cloud,
-        dry_run,
-        {},
-        slack,
-        influx,
-        project_id="p",
-        resource_group="rg",
-        slack_channel="chan",
-        influxdb_conn=conn,
+        cloud, dry_run, {}, slack, influx,
+        project_id="p", resource_group="rg", slack_channel="chan", influxdb_conn=conn,
     )
     return instance, slack, influx
 
@@ -165,7 +158,9 @@ def test_spot_request_notification(crc_cli: ModuleType, dry_run: bool, volumes: 
     instance.write_influxdb(crc_cli.VMS, request.get_deleted)
     instance.write_influxdb(crc_cli.DISKS, request.volumes_to_delete)
     result = Result(tuple(IDS), related={DISK: tuple(volumes)})
-    report = Report.from_result("aws", SPOT_INSTANCE_REQUEST, result, Operation.DELETE, dry_run)
+    report = Report.from_result(
+        "aws", SPOT_INSTANCE_REQUEST, result, Operation.DELETE, dry_run
+    )
     assert list(report.slack_messages()) == sent(slack)
     assert len(sent(slack)) == (2 if volumes else 1)
     assert [line(crc_cli, p) for p in report.influx_points()] == written_lines(influx)
@@ -192,7 +187,11 @@ def test_spot_vm_notification_and_disk_message(
     monkeypatch.setattr(vm_ops, "GCP_SpotVM", lambda *_a, **_kw: fake_spot)
     monkeypatch.setattr(vm_ops, "OCI_SpotVM", lambda *_a, **_kw: fake_spot)
     instance.delete_spot_instances({}, {}, {"days": 1}, "retention_age")
-    related = {NIC: ("nic-1",), DISK: tuple(disks)} if cloud == "azure" else {DISK: tuple(disks)}
+    related = (
+        {NIC: ("nic-1",), DISK: tuple(disks)}
+        if cloud == "azure"
+        else {DISK: tuple(disks)}
+    )
     result = Result(tuple(IDS), related=related)
     report = Report.from_result(cloud, VM, result, Operation.DELETE, False)
     assert list(report.slack_messages()) == sent(slack)
@@ -298,7 +297,9 @@ def test_owner_grouped_disk_report_matches_crc(
     instance.notify_deleted_disk_via_slack(disk)
     instance.write_influxdb(DISK, disk.get_deleted)
     grouped = {k: tuple(v) for k, v in owners.items()}
-    report = Report.from_result("gcp", DISK, Result(by_owner=grouped), Operation.DELETE, dry_run)
+    report = Report.from_result(
+        "gcp", DISK, Result(by_owner=grouped), Operation.DELETE, dry_run
+    )
     assert report.slack_messages() == ()
     assert report.by_owner == grouped
     pings = [

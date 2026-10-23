@@ -633,7 +633,9 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
 ]
 
 
-@pytest.mark.parametrize("case_id", sorted(DIVERGED), ids=sorted(DIVERGED))
+@pytest.mark.parametrize(
+    "case_id", sorted(DIVERGED), ids=sorted(DIVERGED)
+)
 def test_bug_011_notags_no_longer_raises(
     case_id: str,
     debug_logs: None,

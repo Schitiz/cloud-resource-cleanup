@@ -165,21 +165,13 @@ NOTIFY_CASES: dict[str, tuple[str, SimpleNamespace]] = {
 @pytest.mark.parametrize("cloud", CLOUDS)
 @pytest.mark.parametrize("case", sorted(NOTIFY_CASES))
 def test_notify_methods_match_legacy(
-    legacy: ModuleType,
-    current: ModuleType,
-    case: str,
-    cloud: str,
-    dry_run: bool,
+    legacy: ModuleType, current: ModuleType, case: str, cloud: str, dry_run: bool,
     channel: str | None,
 ) -> None:
     method, obj = NOTIFY_CASES[case]
     assert_same(
-        legacy,
-        current,
-        lambda crc: getattr(crc, method)(obj),
-        cloud=cloud,
-        dry_run=dry_run,
-        channel=channel,
+        legacy, current, lambda crc: getattr(crc, method)(obj),
+        cloud=cloud, dry_run=dry_run, channel=channel,
     )
 
 
@@ -214,11 +206,7 @@ def test_quirks_are_visible_in_the_outcome(legacy: ModuleType, current: ModuleTy
 @pytest.mark.parametrize("cloud", CLOUDS)
 @pytest.mark.parametrize("ids", [[], ["a"], ["a", "b"], None])
 def test_get_msg_matches_legacy(
-    legacy: ModuleType,
-    current: ModuleType,
-    operation: str,
-    dry_run: bool,
-    cloud: str,
+    legacy: ModuleType, current: ModuleType, operation: str, dry_run: bool, cloud: str,
     ids: list[str] | None,
 ) -> None:
     assert_same(
@@ -280,30 +268,21 @@ def test_ping_on_slack_matches_legacy(
     scenario: tuple[str | None, list[dict[str, str]] | None, bool, bool],
 ) -> None:
     assert_same(
-        legacy,
-        current,
-        lambda crc: crc.ping_on_slack("Disk", "Deleted", OWNERS),
-        lookup_setup(*scenario),
-        cloud=cloud,
-        dry_run=dry_run,
+        legacy, current, lambda crc: crc.ping_on_slack("Disk", "Deleted", OWNERS),
+        lookup_setup(*scenario), cloud=cloud, dry_run=dry_run,
     )
 
 
 @pytest.mark.parametrize("channel", ["chan", "#chan", None])
 @pytest.mark.parametrize("groups", [GROUPS, None])
 def test_dict_disks_match_legacy(
-    legacy: ModuleType,
-    current: ModuleType,
-    channel: str | None,
+    legacy: ModuleType, current: ModuleType, channel: str | None,
     groups: list[dict[str, str]] | None,
 ) -> None:
     setup = lookup_setup(None, groups, False, False)
     obj = resource(get_deleted=OWNERS)
     assert_same(
-        legacy,
-        current,
-        lambda crc: crc.notify_deleted_disk_via_slack(obj),
-        setup,
+        legacy, current, lambda crc: crc.notify_deleted_disk_via_slack(obj), setup,
         channel=channel,
     )
 
@@ -385,12 +364,8 @@ def test_write_influxdb_matches_legacy(
     args: tuple[str, Any],
 ) -> None:
     assert_same(
-        legacy,
-        current,
-        lambda crc: crc.write_influxdb(*args),
-        cloud=cloud,
-        dry_run=dry_run,
-        suffix=suffix,
+        legacy, current, lambda crc: crc.write_influxdb(*args),
+        cloud=cloud, dry_run=dry_run, suffix=suffix,
     )
 
 
@@ -415,7 +390,9 @@ def test_write_influxdb_failure_matches_legacy(legacy: ModuleType, current: Modu
     assert out == "Unable to push data to influxDB: down\n"
 
 
-def report_for(cloud: str, dry_run: bool, operation: Operation, sections: list[Section]) -> Report:
+def report_for(
+    cloud: str, dry_run: bool, operation: Operation, sections: list[Section]
+) -> Report:
     return Report(cloud, operation, dry_run, tuple(sections))
 
 
@@ -511,7 +488,9 @@ def test_slack_notifier_matches_legacy_when_slack_fails(
     def fail(slack: Mock) -> None:
         slack.chat_postMessage.side_effect = RuntimeError("slack down")
 
-    old = assert_same(legacy, current, lambda crc: getattr(crc, method)(obj), fail, cloud=cloud)
+    old = assert_same(
+        legacy, current, lambda crc: getattr(crc, method)(obj), fail, cloud=cloud
+    )
     report = report_for(cloud, False, operation, sections(obj))
     calls, out, error = run_slack_notifier(report, "chan", fail)
     assert (calls, out, error) == (old[0], old[2], old[3])
@@ -599,7 +578,6 @@ def test_influx_notifier_matches_legacy_writes(
     write_fails: bool,
 ) -> None:
     """The three writes of a spot VM delete, as `crc.py` issues them one by one."""
-
     def writes(crc: Any) -> None:
         if write_fails:
             crc.influxdb_client.write_api.return_value.write.side_effect = RuntimeError("down")
@@ -626,7 +604,6 @@ def test_engine_with_notifiers_matches_legacy_section_and_owner_flows(
     legacy: ModuleType, current: ModuleType, dry_run: bool, post_fails: bool
 ) -> None:
     """Engine wiring with SlackNotifier(fail_open=False) and InfluxNotifier(fail_open=True)."""
-
     def setup(slack: Mock) -> None:
         lookup_setup("U1", GROUPS, post_fails, False)(slack)
 

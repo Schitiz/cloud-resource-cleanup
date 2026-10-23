@@ -53,7 +53,9 @@ class FakeClient:
     ) -> Any:
         if volume_id:
             self.calls.append(("list_volume_attachments", volume_id))
-            owners = [owner for owner, volumes in self.attachments.items() if volume_id in volumes]
+            owners = [
+                owner for owner, volumes in self.attachments.items() if volume_id in volumes
+            ]
             data = [
                 types.SimpleNamespace(
                     volume_id=volume_id, lifecycle_state="ATTACHED", instance_id=owner

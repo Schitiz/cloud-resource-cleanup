@@ -428,8 +428,17 @@ def install_routed_fakes(fakes: Fakes, monkeypatch: pytest.MonkeyPatch) -> None:
                 call: RoutedCall = call,
             ) -> None:
                 assert context.dry_run is ("--dry_run" in fakes.case.argv)
-                if kind in {"ip", "vpc", "vm", "spot_instance_requests", "disk"}:
+                if kind in {"vpc", "vm", "spot_instance_requests", "spot_instances", "disk"} or (
+                    kind == "ip" and cloud in {"aws", "azure"}
+                ):
                     assert "notags" in context.options
+                if cloud == "azure":
+                    assert "resource_group" in context.options
+                    assert context.options["resource_group"] == option_value(
+                        fakes.case, "--resource_group"
+                    )
+                if context.operation is Operation.STOP:
+                    assert "instance_state" not in context.options
                 stop = call.stop if context.operation is Operation.STOP else None
                 method = stop or call.method
                 keys = [key for key in call.keys if key is not None]

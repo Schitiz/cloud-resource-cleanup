@@ -116,7 +116,7 @@ def _spots(variant: str) -> Any:
 COMMON = {"filter_tags": ENV, "exception_tags": {}, "notags": {}, "age": AGE}
 KINDS = [
     Kind("vm", _vms, {**COMMON, "resource_states": ["running"]}),
-    Kind("vm", _vms, {**COMMON, "resource_states": ["running"]}, operation="stop"),
+    Kind("vm", _vms, {**COMMON, "resource_states": ["stopped", "running"]}, operation="stop"),
     Kind("vm", _vms, {**COMMON, "resource_states": ["stopped", "running"]}),
     Kind("ip", _ips, {**COMMON, "name_regex": ["n"], "exception_regex": ["x"]}),
     Kind("nic", _nics, {"name_regex": ["^nic"], "exception_regex": ["keep"]}),

@@ -29,7 +29,13 @@ from tests.test_cli_crc_parity import FULL, Case, Logs, Scenario, build
 
 PREFIXES = ("RUN START", "REGION", "ACTION", "SKIPPED", "ERRORS", "FAILED", "RESULT")
 NOW = datetime(2026, 3, 1, 12, 0, 0, tzinfo=UTC)
-MODES = [("off", "off"), ("on", "on"), ("post_fail", "write_error"), ("on", "api_error")]
+MODES = [
+    ("off", "off"),
+    ("on", "on"),
+    ("post_fail", "write_error"),
+    ("on", "api_error"),
+    ("no_channel", "on_suffix"),
+]
 
 
 def _flags(kind: Kind, dry_run: bool) -> dict[str, Any]:
@@ -92,12 +98,18 @@ def _run(
         logger.finish()
     lines = [r.getMessage() for r in records if r.getMessage().startswith(PREFIXES)]
     lines = [re.sub(r"(seconds|duration_s)=\d+", r"\1=S", line) for line in lines]
+    console_logs = [
+        (r.levelno, r.getMessage())
+        for r in records
+        if r.levelno >= logging.INFO and not r.getMessage().startswith(PREFIXES)
+    ]
     mutating = [c for c in azure.calls if any(w in str(c[0]) for w in ("delete", "dealloc"))]
     return {
         "result": result,
         "slack": logs.slack,
         "influx": logs.influx,
         "stdout": out.getvalue(),
+        "logs": console_logs,
         "ordered": [x for x in lines if not x.startswith("REGION")],
         "regions": sorted(x for x in lines if x.startswith("REGION")),
         "mutations": mutating,

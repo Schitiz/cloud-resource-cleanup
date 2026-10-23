@@ -36,3 +36,35 @@ Lane ENG-AZU (branch `eng/azu`): every Azure kind runs through `crc.core.engine`
 - `crc/azu/{vm,nic,disk}/cleaner.py` and `crc/azu/spot_vm/cleaner.py` `plan()`: the `REGION` line is logged at the end of `plan()`, before the `ACTION` lines of a real run; the adapters logged it after the actions (cosmetic, same fields; the same cross-order note as ENG-1 round 2 for the AWS cleaners). The parity test therefore compares REGION lines as a set.
 - `crc/azu/vm/cleaner.py` `plan()`: the instance view (read) of every VM is now read before the first delete; the adapter interleaved status read and delete per VM. Read-only difference; a VM whose state changes during the run is judged earlier.
 - `crc/cli/routes/azu.py` `_spot_group` and `crc/cli/vm_ops.py` `delete_spot_instances`: the Azure spot run requires `--resource_group` even when `AZURE_RESOURCE_GROUP` is set (every other Azure kind falls back to the variable via `Base`). Kept as is.
+
+## Round 1 (Argon)
+
+Scope reviewed: `git diff 6a98441..HEAD` on branch `eng/azu` (lane `ENG-AZU`).
+
+### Findings & fixes made in review
+
+1. **BLOCKING (fixed): `tests/test_cli_dispatch_fix.py::test_bug_017_cloud_all_nic_real_crc_deletes_nothing` had a vacuous patch on `resource_ops.NIC`** (`tests/test_cli_dispatch_fix.py`):
+   - After routing `("azure", "nic")` through `crc.cli.bridge`, `dispatch.run_dispatch` invokes `bridge.run_routed` rather than `HANDLERS["nic"]` / `CRC.delete_nic`, so patching `resource_ops.NIC` alone could no longer detect if `("azure", "nic")` ran when `validate_targets` failed to raise.
+   - Installed `FakeCleaners().install(monkeypatch).side_effect[("azure", "nic")] = lambda ctx: deleted.append("azure")` alongside `FakeNIC`, matching `test_bug_017_cloud_all_real_crc_does_not_build_skipped_clouds`.
+2. **Test tightening & merge hygiene (fixed)** (`tests/test_cli_main_parity.py`, `tests/helpers_cli_azu.py`, `tests/test_cli_bridge_azu.py`, and 14 unrelated test files):
+   - In `tests/test_cli_main_parity.py::install_routed_fakes`, added `"spot_instances"` to the `"notags" in context.options` assertion (and scoped the `"ip"` `notags` check to `{"aws", "azure"}` so the parallel GCP lane's `ip` route is not blocked), asserted `"resource_group" in context.options` and that its value equals `option_value(fakes.case, "--resource_group")` for every Azure routed pair, and asserted `"instance_state" not in context.options` on `Operation.STOP`.
+   - In `tests/helpers_cli_azu.py` and `tests/test_cli_bridge_azu.py`, passed `resource_states: ["stopped", "running"]` on the `vm` `stop` case so the bridge parity test verifies that `--resource_states` is ignored on `stop` (skipping stopped VM `b`), added console `INFO`+ log comparison (`logs`) between legacy and routed runs, and added `("no_channel", "on_suffix")` to `MODES`.
+   - Reverted 14 unrelated test files (`test_aws_*`, `test_gcp_*`, `test_oci_*`, `test_notify_*`, `test_core_*`) that `1e4e965` had reformatted with `ruff format`, keeping the branch strictly within `ENG-AZU` scope and avoiding merge conflicts with the parallel GCP and OCI lanes.
+
+### Checklist verification
+
+1. **CLI result parity for all routed Azure pairs (`ip`, `nic`, `disk`, `vm` delete/stop, `spot_instances`)**: selection, mutations and order within the resource group, `RUN START` / `RESULT` / `ACTION` / `SKIPPED` / `ERRORS` / `FAILED` lines (`REGION` lines equal as a set, and `AzureIpCleaner` logs `REGION` after `apply()` deletes so a failed delete leaves `regions=0`), `Service` / `init_logging` startup, Slack text and recipients (including the `NIC` Slack message after the `VM` message via `Section.slack_ids` and the conditional leftover `Disk` message for `spot_instances`), Influx points (`VM`, `NIC`, `Disk`), console and log lines, exceptions and exit codes, `validate_targets`, `_spot_group` `Route.precheck`, `NotifyMode.REPORT_THEN_RERAISE` for `disk`, and `--dry_run` non-mutation match the legacy path; the only behaviour change is plan-before-apply, recorded in `BUG-392` (`docs/refactor/BUGS.md`) and one sentence in `CLEANUP_SAFETY.md`.
+2. **Parity tests non-vacuous**: `test_cli_main_parity.py` (with `tests/helpers_routed_azure.py`), `test_cli_bridge_azu.py` (280 scenarios + route/precheck tests), `test_cli_bridge_parity.py`, `test_cli_crc_parity.py`, `test_cli_args_parity.py`, `test_cli_dispatch_fix.py`, `test_cli_logger.py`, `test_core_selection.py`, and all `test_azure_*_parity.py` files reach real or recording fake cleaners and assert the oracle facts.
+3. **Hash-locked safety tests**: all 5 locked test files and `tests/archtest/safety_lock.json` are untouched and passing; `tests/test_azu_spot_vm_engine.py` (11 tests) covers every SAF case (`SAF-038`, `SAF-041`, `SAF-042`, `SAF-044`) locked to `tests/test_azu_spot_vm.py`.
+4. **Protected files**: no oracle (`tests/legacy/*.txt`), archtest (`tests/archtest/*.py`), guardrail (`AGENTS.md`, `ARCHITECTURE.md`, `.cursor/**`, `pyproject.toml`, `Makefile`), or `requirements*.txt` file was edited; `crc/cli/{bridge,dispatch,resource_ops,vm_ops,notify}.py`, `crc/cli/routes/__init__.py`, and `crc.py` are untouched; `test_count_floor.txt` raised to `44113` via `make raise-test-floor`.
+5. **Limits & README sync**: all touched non-legacy, non-test files are at most 250 lines and functions at most 60 lines (`ARCH-004`); all touched package READMEs (`crc/azu/README.md`, `crc/azu/ip/README.md`, `crc/cli/README.md`, `crc/cli/routes/README.md`) are in sync (`ARCH-002`).
+
+### Gates & test count
+
+- `python3 -m ruff check .`: passed
+- `python3 -m mypy`: passed (349 source files)
+- `lint-imports`: passed (5 contracts kept, 0 broken)
+- `python3 -m pytest -q -n auto`: **44113 passed in 53.47s** (`make check` wall time ~65s)
+- `python3 -m tests.archtest.test_count check`: `ARCH-008: 44113 tests, floor 44113`
+
+VERDICT: APPROVE
