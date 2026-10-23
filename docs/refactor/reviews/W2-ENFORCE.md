@@ -90,3 +90,68 @@ Ran `pip install -r requirements.txt -r requirements-dev.txt && make check`:
 
 VERDICT: APPROVE
 
+
+## Round 2 (Opus)
+
+Reviewed `git diff cea0a8a..HEAD` (coder commit plus round 1 fixes) independently.
+
+### Round 1 fixes
+
+- ARCH-005 sibling scan now walks same-module helpers and multi-hop `self`/`cls` chains at
+  every hop and handles unaliased `import pkg.sibling`; self-tests `via-local-func` and
+  `import-plain` cover it. Confirmed.
+- ARCH-009 `_REF` widened to `\bBUG-(\d+)\b`: correct, but nothing proved it. **Fixed:** added
+  `test_arch009_selftest_fires_on_short_id_typo` (`BUG-1`, `BUG-04`), floor raised to 43072
+  with `make raise-test-floor`.
+- Unused `_SUMMARY` removal in `test_count.py`: fine.
+
+### Findings
+
+1. **Checks enforce their rules.** ARCH-003 `PACKAGE_BANS` filters per package and keeps the
+   allowlist untouched; ARCH-006 catches `async def`/`await`/`async for`/`async with` and
+   plain, dotted and `from` imports of the banned roots (relative imports are not mistaken for
+   them); ARCH-007 reports changed, added and missing files; ARCH-008 counts node ids from
+   `--collect-only -q` (matches pytest's own count: 43070 collected = 43070 passed) and
+   `raise_floor` never lowers; ARCH-009 scans `.py`/`.md` under `crc/` and `tests/` (the
+   `SKIP_DIRS - {"tests"} & parts` expression is `(SKIP_DIRS - {"tests"}) & parts` by
+   precedence, so it is correct). Every rule has firing and non-firing `tmp_path` self-tests and
+   a REMEDIATION that fixes the root cause and forbids weakening the check or running the
+   owner-only updater.
+2. **Nothing weakened, no locked file touched.** `safety_lock.json`, `update_safety_lock.py`,
+   the 5 locked test files (`test_aws_disk.py`, `test_aws_spot_instance_requests.py`,
+   `test_azu_spot_vm.py`, `test_gcp_spot_vm.py`, `test_oci_spot_vm.py`), `tests/legacy/*` and
+   `requirements.txt` have no diff. The ARCH-003 "other packages" self-test swapped `crc/core`
+   (now scanned) for `crc/service.py` and `crc/other/mod.py`: the same thing is still asserted.
+   The edits to `test_cli_args_parity.py`/`test_gcp_disk_fix.py` change only parametrize ids
+   (same values, same count) and `test_log_fix_*.py` builds the same `"BUG-999"` string.
+3. **age.py split changes no behaviour.** An AST comparison of every function in the old
+   `crc/core/age.py` with the ones in `age.py`/`age_spec.py`/`age_tags.py` shows all 13 are
+   identical. `age.py` re-exports every public name; the private helpers that moved
+   (`_normalize_age_values`, `_checked_retention_age`, `_find_tag_value`) are referenced
+   nowhere else; no test patches a `crc.core.age.*` string or a `core_age` attribute.
+   Line counts: 120 / 55 / 145. `MAX_AGE` is still read at call time in `is_old`; leaving it
+   (crc/core env ban under Wave B checks, no allowlist entry) follows the task's fallback.
+4. **Not brittle.** All new checks read the repository only and write only under `tmp_path`;
+   no test depends on order (the archtest suite passes alone and under `-n auto`). ARCH-008
+   runs outside pytest, so `-n auto` cannot change its count.
+5. **Minor, not blocking (noted for Wave B):** ARCH-006 does not see dynamic imports
+   (`importlib.import_module("httpx")`, `__import__`) or `concurrent.futures`; ARCH-005
+   siblings do not follow methods of sibling classes (already listed by the coder).
+
+### New bugs
+
+None found.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt`, then:
+
+- `make check` (before my edit): ruff clean, mypy 262 files clean, lint-imports 5 kept,
+  **43070 passed in 52.6s**, ARCH-008 43070 / 43070; total **1m10.6s** wall clock (4 cores).
+- `make check-fast`: **9370 passed in 18.6s**, total **19.4s** with lint (under 30s).
+- `make test-file F=tests/archtest/test_arch009_bug_refs.py`: 10 passed; without `F` it
+  prints the usage line and exits 2.
+- After my edit: `make check` exit 0: ruff, mypy, lint-imports clean, **43072 passed in 51.2s**
+  (43010 at `cea0a8a`, +62), ARCH-008 43072 / 43072, total **57.5s**.
+
+ROUND 2 VERDICT: APPROVE

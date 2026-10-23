@@ -45,6 +45,15 @@ def test_arch009_selftest_fires_on_unknown_bug(tmp_path: Path, name: str) -> Non
     assert "\n\nREMEDIATION: " in messages[0]
 
 
+@pytest.mark.parametrize("short", ["BUG-" + "1", "BUG-" + "04"])
+def test_arch009_selftest_fires_on_short_id_typo(tmp_path: Path, short: str) -> None:
+    _project(tmp_path)
+    _write(tmp_path, "crc/aws/mod.py", f"# see {short}\n")
+    messages = check_bug_refs(tmp_path)
+    assert len(messages) == 1
+    assert f"mentions {short}," in messages[0]
+
+
 def test_arch009_selftest_accepts_known_bug(tmp_path: Path) -> None:
     _project(tmp_path)
     _write(tmp_path, "crc/aws/mod.py", f'"""Fixes {KNOWN} and mentions {KNOWN}."""\n')
