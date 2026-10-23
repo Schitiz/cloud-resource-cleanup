@@ -41,3 +41,32 @@ Lane CL2-AZU (test-only). `tests/test_cli_bridge_azu.py` no longer runs the lega
 ## New bugs
 
 None.
+
+## Round 1 (Argon)
+
+Scope reviewed: `git diff 2bd8e67..HEAD` on branch `cl2/azu` (lane `CL2-AZU`). No code changes required in this round.
+
+### Findings
+
+1. **No imports or calls to the current legacy CLI layer (Check 1): OK.**
+   - Grepped `tests/test_cli_bridge_azu.py`, `tests/helpers_cli_azu.py`, `tests/helpers_cl2_azu.py`, and `tests/helpers_cl2_azu_frozen.py`: none import `crc.cli.resource_ops`, `crc.cli.vm_ops`, `crc.cli.notify`, `crc.cli.adapter_args`, `crc.cli.report_calls`, `tests.helpers_legacy_handlers`, or `tests.test_cli_crc_parity`.
+   - `crc.cli.runner.CRC` is constructed only as the context object passed to `cli_dispatch._run_pair` and `route.precheck` on the routed path; `delete_*` and `stop_*` are called exclusively on `oracle_module().CRC` from `tests.helpers_oracle.load_legacy_crc("legacy_crc_main_azu")`.
+2. **Parity comparisons, frozen run-log data, and fixed-bug divergences (Check 2): OK.**
+   - All 290 parametrized pair cases (`test_routed_azure_pair_matches_main`) and the 2 existing route/precheck tests remain intact and assert `result`, `slack`, `influx`, `stdout`, `logs`, `ordered`, `regions`, and `mutations`, plus 8 new tests (`test_frozen_divergences_are_all_marked_with_a_bug` and 7 `test_main_logs_what_the_fixed_bugs_removed_and_stop_powers_off` cases), raising `tests/test_cli_bridge_azu.py` from 292 to 300 tests (total suite 44,400 -> 44,408).
+   - Independently verified across all 290 `(kind, variant, dry, slack, influx)` cases that `_expected(kind, variant, dry, slack, influx, old_oracle)` matches the output of the former `run_legacy_handler` byte-for-byte, confirming `RUN_LOG` and `FIXED` in `tests/helpers_cl2_azu_frozen.py` were captured from the former legacy side and not derived from the routed side.
+   - Every fixed-bug divergence from `main`'s oracle (`BUG-003`, `BUG-013`/`BUG-077`, `BUG-113`, `BUG-174`, `BUG-356`, `BUG-358`) is explicitly asserted against `main` (`assert value != view[field]` in `_expected`, `test_frozen_divergences_are_all_marked_with_a_bug`, and `test_main_logs_what_the_fixed_bugs_removed_and_stop_powers_off`) and tagged with its `BUG-NNN`.
+3. **Non-vacuity under deliberate cleaner mutation (Check 3): OK.**
+   - Locally mutated `VmCleaner.apply` in `crc/azu/vm/cleaner.py` to drop one candidate (`plan.candidates[:1]`); `test_routed_azure_pair_matches_main` immediately failed on Slack, console logs, mutations, and run-log assertions (reverted after check).
+4. **File ownership & scope (Check 4): OK.**
+   - Only owned files (`tests/test_cli_bridge_azu.py`, `tests/helpers_cli_azu.py`), new helper files with prefix `tests/helpers_cl2_azu` (`tests/helpers_cl2_azu.py`, `tests/helpers_cl2_azu_frozen.py`), `tests/archtest/test_count_floor.txt` (via `make raise-test-floor`), and `docs/archive/reviews/CL2-AZU.md` were touched. No production code (`crc/**`), `tests/legacy/*.txt`, or hash-locked safety tests were modified.
+
+### Gates & test count
+
+- `python3 -m ruff check .`: passed
+- `python3 -m mypy`: passed (366 source files)
+- `lint-imports`: passed (5 contracts kept, 0 broken)
+- `python3 -m pytest -q -n auto`: **44408 passed in 59.06s** (`make check` wall time ~80s; `tests/test_cli_bridge_azu.py`: 300 passed in 4.59s)
+- `python3 -m tests.archtest.test_count check`: `ARCH-008: 44408 tests, floor 44408`
+
+VERDICT: APPROVE
+
