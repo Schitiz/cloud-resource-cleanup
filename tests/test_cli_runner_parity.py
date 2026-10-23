@@ -28,7 +28,12 @@ def test_constructor_matches_main(
     oracle: ModuleType, cloud: str, project_id: Any, slack: str
 ) -> None:
     scenario = Scenario(dict(FULL), slack=slack, project_id=project_id, influx="no_conn")
-    case = Case(f"ctor-{cloud}", cloud, lambda c: None, scenario)
+    case = Case(
+        f"ctor-{cloud}",
+        cloud,
+        lambda c: (type(c.slack_client).__name__, type(c.influxdb_client).__name__),
+        scenario,
+    )
     old = execute(oracle.CRC, [oracle], case)
     new = execute(NewCRC, [], case)
     for key in old:

@@ -16,7 +16,6 @@ credentials; SDK clients are mocked. Layout:
   needs a current adapter class.
 - `test_cli_args_parity.py`, `test_cli_crc_parity.py`, `test_cli_bridge_parity.py`, `test_cli_main_parity.py`, `test_cli_logger.py`, `test_cli_logging_init.py` (with `helpers_cli_routes.py`): `crc/cli` (flags, the
   `CRC` class, `bridge` to `crc.core.engine`, `main()`, `logger` header/footer wiring and BUG-363 root handler initialisation) against `legacy/crc_main.txt`, on recording fakes.
-- `test_cli_runner_parity.py`, `test_cli_scan_parity.py` (with `helpers_wa2_scan.py`): the `CRC` constructor and `scan_instances_with_tag` against `legacy/crc_main.txt`; the scan side patches the VM classes through `crc.<cloud>.vm`, never a `crc.cli` module.
 - `test_crc_service_parity.py`, `test_crc_service_is_old_parity.py` (with `helpers_crc_service.py`),
   `helpers_log_fix.py`, `test_log_fix_helpers.py` and `test_crc_utils_parity.py`, `test_crc_utils.py`:
   `crc/service.py` and `crc/utils.py` against `legacy/crc_service.txt` and `legacy/crc_utils.txt`, plus the

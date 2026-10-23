@@ -15,3 +15,42 @@ Lane WA-2 (test only): the CLI parity cases for the `CRC` constructor and `scan_
 ## New bugs
 
 None.
+
+## Round 1 (Argon)
+
+Scope reviewed: `git diff fc6fa4d..HEAD` on branch `wa/2` (lane `WA-2`).
+
+### Findings & fixes made in review
+
+1. **Reverted unowned `tests/README.md` edit**:
+   - Commit `b6d06cf` modified `tests/README.md`, which is outside the lane's owned files (`tests/test_cli_crc_parity.py`, `tests/test_cli_scan_parity.py`, `tests/test_cli_runner_parity.py`, `tests/helpers_wa2_*.py`) and risks merge conflicts with parallel lanes. Reverted `tests/README.md` to `fc6fa4d`.
+2. **Strengthened `test_constructor_matches_main` client attribute comparison** (`tests/test_cli_runner_parity.py:27`):
+   - `execute()` filters `"client" not in k` out of `attributes`, so `case.act = lambda c: None` never compared `c.slack_client` or `c.influxdb_client` on `NewCRC`. Updated `case.act` to `lambda c: (type(c.slack_client).__name__, type(c.influxdb_client).__name__)` so both client attributes are compared against `oracle.CRC` via `result`.
+
+### Checklist verification
+
+1. **No legacy CLI imports or calls (`grep`)**:
+   - Grepped `tests/` for `vm_ops`, `resource_ops`, `adapter_args`, `report_calls`, and `__module__`: zero tests import `crc.cli.vm_ops` or patch a name in it.
+   - `tests/helpers_wa2_scan.py` patches the SDK-facing VM classes through `crc.aws.vm`, `crc.azu.vm`, `crc.gcp.vm`, and `crc.oci.vm` (both module attribute `VM` and in-place on the class object), independent of which module defines `CRC.scan_instances_with_tag`. Verified by replacing `CRC.scan_instances_with_tag` with a function whose `__module__` is `crc.cli.scan` and poisoning all `crc.cli.vm_ops.VmOps` methods: all 991 tests in `test_cli_scan_parity.py` and `test_cli_runner_parity.py` pass.
+2. **Parity comparisons, case counts, and assertions preserved**:
+   - All 960 scan cases (`480` `scan` + `480` `scan_unsupported`) in `tests/test_cli_scan_parity.py` and all 30 constructor cases in `tests/test_cli_runner_parity.py` compare every recorded key (`result`, `attributes`, `adapters`, `reads`, `slack`, `influx`, `stdout`) against `tests.helpers_oracle.load_legacy_crc()`.
+   - In `tests/test_cli_crc_parity.py`, only the moved `scan`/`scan_unsupported` operations, `test_constructor_matches_main`, and the `sys.modules[NewCRC.scan_instances_with_tag.__module__]` patch in `compare` were touched; all `get_msg` / Slack / Influx / ping cases owned by lane WA-1 are untouched.
+   - Total suite count rose by 1 (`44411` -> `44412`) from adding `test_scan_cases_are_not_vacuous` in `tests/test_cli_scan_parity.py`; `tests/archtest/test_count_floor.txt` updated to `44412`.
+3. **Non-vacuous (deliberate mutation checks, reverted without committing)**:
+   - Mutating `crc.core.report.get_msg` Slack text (`"the following"` -> `"these"`) fails `tests/test_cli_crc_parity.py` immediately.
+   - Mutating `CRC.scan_instances_with_tag` to pass a wrong `tag_value` fails `tests/test_cli_scan_parity.py` immediately.
+   - Mutating `CRCBase.__init__` to set `self.slack_client = None` fails `tests/test_cli_runner_parity.py` immediately.
+4. **Owned files only**:
+   - `git diff --stat fc6fa4d..HEAD` touches only `tests/test_cli_crc_parity.py`, `tests/test_cli_scan_parity.py`, `tests/test_cli_runner_parity.py`, `tests/helpers_wa2_scan.py`, `tests/archtest/test_count_floor.txt`, and `docs/archive/reviews/WA-2.md`. No production files or other tests touched.
+
+### Gates & test count
+
+Ran `pip install -r requirements.txt -r requirements-dev.txt && make check`:
+- `python3 -m ruff check .`: passed
+- `python3 -m mypy`: passed (377 source files)
+- `lint-imports`: passed (5 contracts kept, 0 broken)
+- `python3 -m pytest -q -n auto`: **44412 passed in 55.70s** (`make check` total 74.9s; `test_cli_scan_parity.py` + `test_cli_runner_parity.py`: **991 passed in 3.09s**)
+- `python3 -m tests.archtest.test_count check`: `ARCH-008: 44412 tests, floor 44412`
+
+VERDICT: APPROVE
+
