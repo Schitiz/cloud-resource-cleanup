@@ -97,6 +97,8 @@ class SnapshotCleaner:
             selected = 0
             for decision in decisions:
                 if isinstance(decision, Candidate):
+                    if context.dry_run:
+                        logger.current().action("would_delete", region, decision.id)
                     candidates.append(decision)
                     selected += 1
                 else:
@@ -107,6 +109,8 @@ class SnapshotCleaner:
     def apply(self, plan: Plan, context: RunContext) -> Result:
         """Delete the planned snapshots region by region (nothing in a dry run). A failed
         delete is logged and kept out of the result, as on main."""
+        if context.dry_run:
+            return Result(succeeded=tuple(c.id for c in plan.candidates))
         deleted: list[str] = []
         failed: list[Failure] = []
         for region, items in group_by_region(plan.candidates).items():

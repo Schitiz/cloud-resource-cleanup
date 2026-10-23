@@ -52,6 +52,7 @@ class DiskCleaner:
         self._runtime = runtime
         self.filter = VolumeFilter(settings)
         self.had_errors = False
+        self.partial_succeeded: list[str] = []
         self._scanned = 0
         self.detach_guard = DetachGuard(runtime.cloudwatch_factory, self._flag_error)
         self._clients: dict[str, Ec2Client] = {}
@@ -67,10 +68,12 @@ class DiskCleaner:
         candidates and logs the dry-run summary, as `main` does."""
         self.had_errors = False
         candidates: list[Candidate] = []
+        self.partial_succeeded = []
         for region in self._runtime.list_regions():
             found = self.plan_region(region, context.now)
             if context.dry_run:
                 self.note_dry_run(region, found)
+                self.partial_succeeded.extend(c.id for c in found)
             candidates.extend(found)
         if context.dry_run:
             self.log_summary([c.id for c in candidates], dry_run=True)
@@ -82,6 +85,7 @@ class DiskCleaner:
         if context.dry_run:
             return Result()
         deleted: list[str] = []
+        self.partial_succeeded = deleted
         failed: list[Failure] = []
         for region, items in group_by_region(plan.candidates).items():
             done, errors = self.apply_region(region, items)

@@ -13,7 +13,6 @@ import pytest
 
 from crc.cli import bridge
 from crc.cli import context as cli_context
-from crc.cli import dispatch as cli_dispatch
 from crc.cli import main as cli_main
 from crc.core.cleaner import Operation
 from crc.core.selection import (
@@ -85,15 +84,6 @@ def run_crc_main(
 
             return record
 
-    class FakeSnapshot:
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            self.age_days = 90
-            self.delete_count = 0
-            self.get_deleted: list[str] = []
-
-        def delete(self) -> None:
-            calls.append((current_cloud, "snapshot"))
-
     args = dict.fromkeys(
         [
             "project_id",
@@ -128,7 +118,6 @@ def run_crc_main(
             fakes.side_effect[(routed_cloud, routed_kind)] = functools.partial(
                 lambda pair, ctx: calls.append(pair), (routed_cloud, routed_kind)
             )
-    monkeypatch.setattr(cli_dispatch, "Snapshot", FakeSnapshot)
     crc_cli.main()
     return calls
 

@@ -3,15 +3,15 @@
 import logging
 import os
 import sys
-from typing import Any, ClassVar
+from typing import Any
 
 import pytest
 
 from crc.cli import clients as cli_clients
 from crc.cli import context as cli_context
-from crc.cli import dispatch as cli_dispatch
 from crc.cli import scan as cli_scan
 from crc.cli.main import main
+from tests.helpers_cli_routes import FakeCleaners
 
 PROD_SNAPSHOT = [
     "--cloud",
@@ -49,31 +49,22 @@ class Recorder:
 
         return FakeCRC
 
-    def snapshot_class(self) -> type:
-        recorder = self
-
-        class FakeSnapshot:
-            age_days = 90
-            delete_count = 0
-            get_deleted: ClassVar[list[str]] = []
-
-            def __init__(self, **kwargs: Any) -> None:
-                recorder.events.append(("Snapshot", kwargs["age_days"], kwargs["dry_run"]))
-
-            def delete(self) -> None:
-                recorder.events.append(("Snapshot.delete",))
-
-        return FakeSnapshot
-
 
 @pytest.fixture
 def recorder(monkeypatch: pytest.MonkeyPatch) -> Recorder:
     rec = Recorder()
     monkeypatch.setattr(cli_context, "CRC", rec.crc_class())
-    monkeypatch.setattr(cli_dispatch, "Snapshot", rec.snapshot_class())
     monkeypatch.setattr(cli_clients, "WebClient", lambda **_: object())
     monkeypatch.setattr(cli_scan, "notify_cleanup", lambda *a, **k: None)
     monkeypatch.delenv("MAX_AGE", raising=False)
+    cleaners = FakeCleaners().install(monkeypatch)
+
+    def snapshot(context: Any) -> None:
+        rec.events.append(("Snapshot", context.options["age_days"], context.dry_run))
+        rec.events.append(("Snapshot.delete",))
+
+    cleaners.side_effect[("aws", "snapshot")] = snapshot
+    cleaners.side_effect[("aws", "vpc")] = lambda context: rec.events.append(("delete_vpc", "aws"))
     return rec
 
 

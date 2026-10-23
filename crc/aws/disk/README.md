@@ -18,7 +18,7 @@ Modules, one per responsibility:
 - `region_guard()`: region level error policy (connectivity and unauthorised errors skip the region, others are logged and flagged).
 - `log_summary()`: the summary lines logged once all regions are done.
 - `Disk`: adapter that crc.py calls (delete(), get_deleted, count, disks_to_delete, age, detach_age); runs the cleaner region by region in the order of main.
-- `DiskCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus plan_region, note_dry_run, apply_region, region_guard and log_summary used by the adapter).
+- `DiskCleaner`: the Cleaner (supports, read-only plan, mutating apply, partial_succeeded for the report-then-reraise bridge mode, plus plan_region, note_dry_run, apply_region, region_guard and log_summary used by the adapter).
 - `DiskRuntime`: frozen dataclass with the injected EC2 and CloudWatch client factories and the region lister.
 - `build_disk_cleaner()`: registry factory behind the aws / disk registration; reads filter_tags, exception_tags, notags, name_regex, exception_regex, custom_age_tag_key, age and detach_age from RunContext.options.
 - `VolumePaginator`: Protocol of the describe_volumes paginator (paginate).

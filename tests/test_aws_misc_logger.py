@@ -15,10 +15,10 @@ import pytest
 from botocore.exceptions import ClientError
 
 from crc.aws import _regionlog
-from crc.aws.elastic_ips import ElasticIpRuntime, ElasticIPs
+from crc.aws.elastic_ips import ElasticIpCleaner, ElasticIpRuntime, ElasticIPs
 from crc.aws.keypairs import KeyPairCleaner
 from crc.aws.kms import Kms, KmsCleaner, KmsRuntime, KmsSettings
-from crc.aws.snapshot import Snapshot, SnapshotRuntime
+from crc.aws.snapshot import Snapshot, SnapshotCleaner, SnapshotRuntime
 from crc.aws.vpc import VPC, VpcCleaner, VpcRuntime
 from crc.core import engine, logger
 from crc.core.cleaner import Operation, RunContext
@@ -527,3 +527,60 @@ def test_unattached_run_logs_nothing_extra(caplog: pytest.LogCaptureFixture) -> 
     _keypairs(kp_t.Aws({"us-west-2": _pairs()}), dry_run=True).delete()
     text = "\n".join(r.getMessage() for r in caplog.records)
     assert not any(word in text for word in ("REGION ", "ACTION ", "RESULT ", "SKIPPED "))
+
+
+def test_engine_dry_run_logs_would_delete_for_kms_snapshot_ip_and_vpc(run_lines: Any) -> None:
+    """Through `engine.run` (`plan()` only in dry run), kms, snapshot, ip and vpc log
+    `ACTION would_delete` and count `selected` in `RESULT`."""
+    begin, lines = run_lines
+    registry = Registry()
+    keys = {"k-denied": kms_t.OLD, "k-other": kms_t.OLD, "k-ok": kms_t.OLD, "k-new": kms_t.YOUNG}
+    registry.register("aws", "kms")(
+        lambda ctx: KmsCleaner(
+            lambda region: MixedKms(keys, []),
+            KmsSettings(
+                kms_key_description="ci",
+                kms_user=kms_t.USER,
+                kms_pending_window=kms_t.WINDOW,
+                age={"days": 1},
+            ),
+        )
+    )
+    snaps = [snap_t.snap("old"), snap_t.snap("young", days=1)]
+    snap_client = snap_t.FakeClient(snaps, [])
+    registry.register("aws", "snapshot")(
+        lambda ctx: SnapshotCleaner(lambda r: snap_client, lambda: ["us-west-2"], 90, None)
+    )
+    eip_aws = eip_t.Aws({"us-west-2": _addresses()})
+    registry.register("aws", "ip")(
+        lambda ctx: ElasticIpCleaner(
+            eip_aws.client, eip_aws.list_regions, {"team": ["qa"]}, {"keep": ["1"]}, None
+        )
+    )
+    vpc_aws = FakeAws(Case("u", {W2: [full("vpc-1")]}, dry_run=True))
+    registry.register("aws", "vpc")(
+        lambda ctx: VpcCleaner(
+            lambda r: FakeClient(vpc_aws, r),
+            lambda r: FakeResource(vpc_aws, r),
+            lambda: [W2],
+            {"env": ["test"]},
+            None,
+            None,
+        )
+    )
+    for kind, expected_id in (
+        ("kms", "k-ok"),
+        ("snapshot", "old"),
+        ("ip", "1.1.1.1"),
+        ("vpc", "vpc-1"),
+    ):
+        begin(kind, dry_run=True)
+        ctx = RunContext(True, Operation.DELETE, {}, kms_t.NOW)
+        engine.run(Selection((("aws", kind),)), ctx, registry)
+        out = lines()
+        assert any(
+            m.startswith(f"ACTION would_delete cloud=aws resource={kind}")
+            and f"id={expected_id}" in m
+            for m in out
+        ), (kind, out)
+        assert "selected=1 done=0 failed=0" in out[-1], (kind, out[-1])

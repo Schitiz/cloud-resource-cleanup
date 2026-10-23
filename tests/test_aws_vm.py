@@ -70,7 +70,8 @@ MUTATING = ("terminate_instances", "stop_instances")
 def test_plan_makes_no_mutating_call(operation: Operation, dry_run: bool) -> None:
     client = FakeClient([instance("a"), instance("b")])
     plan = make(client).plan(ctx(operation, dry_run=dry_run))
-    assert [c.id for c in plan.candidates] == ["a", "b"]
+    expected = ["n-a", "n-b"] if dry_run and operation is Operation.DELETE else ["a", "b"]
+    assert [c.id for c in plan.candidates] == expected
     assert [c.region for c in plan.candidates] == ["us-west-2"] * 2
     assert not [c for c in client.calls if c[0] in MUTATING]
 

@@ -4,10 +4,12 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from crc.aws.snapshot import Snapshot
 from crc.cli.bridge import is_routed_kind, route_for, run_routed
 from crc.cli.context import RunContext, make_crc
 from crc.cli.inputs import Options, Targets
+from crc.cli.pairs import (
+    AWS_DISK_OPT_IN_MESSAGE as AWS_DISK_OPT_IN_MESSAGE,
+)
 from crc.cli.pairs import (
     SUPPORTED_CLOUDS as SUPPORTED_CLOUDS,
 )
@@ -23,18 +25,9 @@ _LOG = logging.getLogger(__name__)
 
 Handler = Callable[[Any, Any, Options, Targets], None]
 
-AWS_DISK_OPT_IN_MESSAGE = (
-    "AWS EBS volume cleanup requires '--cloud aws --resource disk'. "
-    "Refusing to continue so --cloud all / --resource all does not "
-    "skip EBS and then delete other AWS resources, and so "
-    "--cloud all --resource disk does not reach other clouds' disks."
-)
-
 
 def _disk(crc: Any, cloud: Any, options: Options, targets: Targets) -> None:
-    """Circuit breaker: AWS EBS is opt-in, so any other aws and disk pair raises."""
-    if cloud == "aws" and not targets.aws_disk_opt_in:
-        raise ValueError(AWS_DISK_OPT_IN_MESSAGE)
+    """Azure, GCP and OCI disks; AWS disks run through the engine (`Route.precheck` is the gate)."""
     crc.delete_disks(
         options.filter_tags,
         options.exception_tags,
@@ -79,31 +72,11 @@ def _vm(crc: Any, cloud: Any, options: Options, targets: Targets) -> None:
         )
 
 
-def _vpc(crc: Any, cloud: Any, options: Options, targets: Targets) -> None:
-    crc.delete_vpc(options.filter_tags, options.exception_tags)
-
-
-def _kms(crc: Any, cloud: Any, options: Options, targets: Targets) -> None:
-    crc.delete_kms(
-        options.filter_tags,
-        options.exception_tags,
-        options.kms_key_description,
-        options.kms_user,
-        options.kms_pending_window,
-        options.age,
-        options.custom_age_tag_key,
-    )
-
-
 def _spot_instance_requests(crc: Any, cloud: Any, options: Options, targets: Targets) -> None:
-    if crc.cloud != "aws":
-        _LOG.warning(
-            "spot_instance_requests is AWS-only; skipped for %s (use --resource spot_instances)",
-            crc.cloud,
-        )
-        return
-    crc.delete_spot_instance_requests(
-        options.filter_tags, options.exception_tags, options.age, options.custom_age_tag_key
+    """Non-AWS clouds only warn; AWS spot instance requests run through the engine."""
+    _LOG.warning(
+        "spot_instance_requests is AWS-only; skipped for %s (use --resource spot_instances)",
+        crc.cloud,
     )
 
 
@@ -129,30 +102,13 @@ def _spot_instances(crc: Any, cloud: Any, options: Options, targets: Targets) ->
     )
 
 
-def _snapshot(crc: Any, cloud: Any, options: Options, targets: Targets) -> None:
-    dry_run = options.dry_run
-    snapshot = Snapshot(dry_run=dry_run, age_days=90, exception_tags=options.exception_tags)
-    snapshot.delete()
-    if dry_run:
-        msg = (
-            f"DRY RUN: AWS Snapshots eligible for deletion (>{snapshot.age_days} days): "
-            f"{snapshot.delete_count}"
-        )
-    else:
-        msg = crc.get_msg("Snapshot", "Deleted", snapshot.get_deleted)
-    print(msg)
-
-
 HANDLERS: dict[str, Handler] = {
     "disk": _disk,
     "ip": _ip,
     "nic": _nic,
     "vm": _vm,
-    "vpc": _vpc,
-    "kms": _kms,
     "spot_instance_requests": _spot_instance_requests,
     "spot_instances": _spot_instances,
-    "snapshot": _snapshot,
 }
 
 

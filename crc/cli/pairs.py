@@ -21,6 +21,13 @@ SUPPORTED_CLOUDS: dict[str, tuple[str, ...]] = {
 
 AWS_ONLY_RESOURCES = ("snapshot", "vpc")
 
+AWS_DISK_OPT_IN_MESSAGE = (
+    "AWS EBS volume cleanup requires '--cloud aws --resource disk'. "
+    "Refusing to continue so --cloud all / --resource all does not "
+    "skip EBS and then delete other AWS resources, and so "
+    "--cloud all --resource disk does not reach other clouds' disks."
+)
+
 
 def is_supported_pair(cloud: Any, resource: Any) -> bool:
     """False for a (cloud, resource) pair whose `CRC` method raises for that cloud."""

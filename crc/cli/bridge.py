@@ -10,13 +10,13 @@ from datetime import UTC, datetime
 from typing import Any
 
 from crc.cli.inputs import Options, Targets
-from crc.cli.routes import Route
+from crc.cli.routes import NotifyMode, Route
 from crc.cli.routes import aws as aws_routes
 from crc.cli.routes import azu as azu_routes
 from crc.cli.routes import gcp as gcp_routes
 from crc.cli.routes import oci as oci_routes
 from crc.core import engine, registry
-from crc.core.cleaner import Operation, RunContext
+from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext
 from crc.core.selection import Selection
 from crc.notify.influx import InfluxNotifier
 from crc.notify.slack import SlackNotifier
@@ -51,13 +51,70 @@ def build_registry() -> registry.Registry:
 
 
 def build_notifiers(crc: Any, route: Route) -> list[engine.Notifier]:
-    """Slack when a client is set, then Influx when a client is set; none for `notify=False`."""
+    """Slack, Influx (each only when its client is set), then the route's extras; none for NONE."""
+    if route.notify is NotifyMode.NONE:
+        return []
     notifiers: list[engine.Notifier] = []
-    if route.notify and crc.slack_client:
+    if crc.slack_client:
         notifiers.append(SlackNotifier(crc.slack_client, crc.slack_channel))
-    if route.notify and crc.influxdb_client:
+    if crc.influxdb_client:
         notifiers.append(InfluxNotifier(crc.influxdb_client, crc))
+    if route.extra_notifiers is not None:
+        notifiers.extend(route.extra_notifiers(crc))
     return notifiers
+
+
+class _ReportThenRaise:
+    """Wraps a cleaner so its error is reported (notifiers) before it is raised again.
+
+    `plan()` and `apply()` keep the first error and return what the cleaner exposes as
+    `partial_succeeded` (a plan of those ids, or a result with them), else nothing;
+    `run_routed` raises the error after `engine.run` ran the notifiers.
+    """
+
+    def __init__(self, inner: Cleaner) -> None:
+        self.inner = inner
+        self.cloud = inner.cloud
+        self.kind = inner.kind
+        self.error: Exception | None = None
+
+    def supports(self, operation: Operation) -> bool:
+        return self.inner.supports(operation)
+
+    def plan(self, context: RunContext) -> Plan:
+        try:
+            return self.inner.plan(context)
+        except Exception as e:
+            self.error = e
+            return Plan(candidates=tuple(Candidate(id=i) for i in self._partial()))
+
+    def apply(self, plan: Plan, context: RunContext) -> Result:
+        if self.error is not None:
+            return Result()
+        try:
+            return self.inner.apply(plan, context)
+        except Exception as e:
+            self.error = e
+            return Result(succeeded=tuple(self._partial()))
+
+    def _partial(self) -> list[str]:
+        return list(getattr(self.inner, "partial_succeeded", ()))
+
+
+def _deferring(
+    base: registry.Registry, cloud: str, kind: str
+) -> tuple[registry.Registry, list[_ReportThenRaise]]:
+    """A registry whose `(cloud, kind)` cleaner is wrapped in `_ReportThenRaise`."""
+    wrapped = registry.Registry()
+    made: list[_ReportThenRaise] = []
+
+    def factory(context: RunContext) -> Cleaner:
+        cleaner = _ReportThenRaise(base.get(cloud, kind)(context))
+        made.append(cleaner)
+        return cleaner
+
+    wrapped.register(cloud, kind)(factory)
+    return wrapped, made
 
 
 def run_routed(
@@ -74,4 +131,13 @@ def run_routed(
         now=datetime.now(UTC),
     )
     selection = Selection(items=((str(cloud), str(kind)),))
-    engine.run(selection, context, build_registry(), build_notifiers(crc, route))
+    cleaners = build_registry()
+    deferred: list[_ReportThenRaise] = []
+    if route.notify is NotifyMode.REPORT_THEN_RERAISE:
+        cleaners, deferred = _deferring(cleaners, str(cloud), str(kind))
+    outcomes = engine.run(selection, context, cleaners, build_notifiers(crc, route))
+    for cleaner in deferred:
+        if cleaner.error is not None:
+            raise cleaner.error
+    if route.after is not None:
+        route.after(crc, options, outcomes)

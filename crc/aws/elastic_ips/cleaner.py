@@ -70,6 +70,11 @@ class ElasticIpCleaner:
             except CONNECTIVITY_ERRORS as e:
                 skip_region(region, SKIP_CONTEXT, e)
                 continue
+            if context.dry_run:
+                for candidate in region_plan.candidates:
+                    logger.current().action(
+                        "would_delete", candidate.region, candidate.id, candidate.name
+                    )
             candidates.extend(region_plan.candidates)
             skipped.extend(region_plan.skipped)
         if context.dry_run:

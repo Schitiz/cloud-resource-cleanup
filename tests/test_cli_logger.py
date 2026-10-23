@@ -31,6 +31,7 @@ def _targets(clouds: list[str], resources: list[str], opt_in: bool = False) -> T
 @pytest.fixture(autouse=True)
 def _fake_crc(monkeypatch: pytest.MonkeyPatch) -> Mock:
     crc = Mock()
+    FakeCleaners().install(monkeypatch)
     monkeypatch.setattr(dispatch, "make_crc", lambda context, cloud: crc)
     logger.finish()
     return crc

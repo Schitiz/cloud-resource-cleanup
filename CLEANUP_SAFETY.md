@@ -51,9 +51,9 @@ reused. `tests/archtest/safety_lock.json` maps IDs to the tests that lock them.
   still raise out of `AWS_Disk.delete`, and `CRC.delete_disks` re-raises them.
 - [SAF-005] Azure `SpotVM.delete` re-raises when the **list** call fails. Per-VM delete
   failures are logged and skipped.
-- Engine path (BUG-388): a cleaner's `plan()` lists every region before `apply()` mutates,
+- Engine path (BUG-388, BUG-391): a cleaner's `plan()` lists every region before `apply()` mutates,
   so a listing error in a later region stops the pair before any mutation (fewer deletes,
-  never more); the legacy adapter loop deleted region by region.
+  never more); the legacy adapter loop deleted region by region. Every AWS kind runs this way.
 
 ---
 
