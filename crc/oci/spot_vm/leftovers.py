@@ -7,18 +7,34 @@ instance is waited on until `TERMINATED`, and each volume is tag-checked before 
 Every read here is safe in `plan()`; `delete_leftover` is the only mutating call.
 """
 
+import datetime
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from typing import Any
 
 from oci.exceptions import ServiceError
 
 from crc.oci import _logger
-from crc.oci.spot_vm.client import BlockClient, ComputeClient, Pager
+from crc.oci.spot_vm.client import BlockClient, ComputeClient, Pager, SdkVolume
 from crc.oci.spot_vm.decide import SpotVmSettings, tags_protect
 
 _DETACHED = {"DETACHED", "DETACHING"}
+_NOT_ATTACHED = {"DETACHED"}
 _HTTP_NOT_FOUND = 404
+
+
+@dataclass(frozen=True, slots=True)
+class VolumeOwner:
+    """The terminated instance a leftover volume is judged against (BUG-255): the volume is only
+    deleted when it was created at or after `created` and no other instance has it attached."""
+
+    list_attachments: Callable[..., Any]
+    compartment_id: str
+    instance_id: str
+    created: datetime.datetime | None
+    pager: Pager
 
 
 def attached_volume_ids(
@@ -95,13 +111,56 @@ def wait_terminated(
     return False
 
 
+def _not_owned(volume_id: str, why: str) -> bool:
+    logging.debug("Skipping leftover volume %s: not owned by the instance (%s)", volume_id, why)
+    _logger.record_skip("not_owned")
+    return False
+
+
+def volume_owned(
+    volume: SdkVolume, volume_id: str, owner: VolumeOwner, region: str | None = None
+) -> bool:
+    """True only when the volume was created at or after the instance and is attached to no other
+    instance. Anything uncertain (missing or incomparable times, failed read) keeps the volume."""
+    volume_created = getattr(volume, "time_created", None)
+    if not isinstance(volume_created, datetime.datetime) or not isinstance(
+        owner.created, datetime.datetime
+    ):
+        return _not_owned(volume_id, "creation time unknown")
+    try:
+        older = volume_created < owner.created
+    except TypeError:
+        return _not_owned(volume_id, "creation times not comparable")
+    if older:
+        return _not_owned(volume_id, "created before the instance")
+    try:
+        attachments = owner.pager(
+            owner.list_attachments,
+            compartment_id=owner.compartment_id,
+            volume_id=volume_id,
+        ).data
+    except Exception as e:
+        logging.error("Failed to list attachments of volume %s (keeping it): %s", volume_id, e)
+        _logger.record_failure(region, volume_id, e)
+        return _not_owned(volume_id, "attachment list failed")
+    for attachment in attachments:
+        lifecycle = (getattr(attachment, "lifecycle_state", "") or "").upper()
+        if lifecycle in _NOT_ATTACHED:
+            continue
+        if getattr(attachment, "instance_id", None) != owner.instance_id:
+            return _not_owned(volume_id, "attached to another instance")
+    return True
+
+
 def volume_passes_tag_check(
     block: BlockClient,
     volume_id: str,
     settings: SpotVmSettings,
     region: str | None = None,
+    owner: VolumeOwner | None = None,
 ) -> bool:
-    """Read the volume and keep it when it cannot be read or its tags protect it."""
+    """Read the volume and keep it when it cannot be read, its tags protect it or (when `owner`
+    is given) it is not owned by the terminated instance."""
     try:
         volume = block.get_volume(volume_id).data
     except Exception as e:
@@ -112,6 +171,8 @@ def volume_passes_tag_check(
         logging.debug("Skipping leftover volume %s: exception_tags/notags", volume_id)
         _logger.record_skip("leftover_exception_tag")
         return False
+    if owner is not None:
+        return volume_owned(volume, volume_id, owner, region)
     return True
 
 
@@ -133,6 +194,7 @@ def checked_volumes(
     volume_ids: Sequence[str],
     settings: SpotVmSettings,
     region: str | None = None,
+    owner: VolumeOwner | None = None,
 ) -> list[str]:
-    """The volumes of `volume_ids` that pass the tag check, in order."""
-    return [v for v in volume_ids if volume_passes_tag_check(block, v, settings, region)]
+    """The volumes of `volume_ids` that pass the tag and ownership check, in order."""
+    return [v for v in volume_ids if volume_passes_tag_check(block, v, settings, region, owner)]

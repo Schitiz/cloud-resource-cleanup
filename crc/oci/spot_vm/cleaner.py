@@ -226,9 +226,10 @@ class SpotVmCleaner:
             resource_id=candidate.id,
             name=candidate.name,
         )
+        owner = self._owner(clients, candidate)
         for volume_id in leftover:
             if leftovers.volume_passes_tag_check(
-                clients.block, volume_id, self._settings, candidate.region
+                clients.block, volume_id, self._settings, candidate.region, owner
             ):
                 before = len(deleted)
                 leftovers.delete_leftover(clients.block, volume_id, deleted, candidate.region)
@@ -241,11 +242,24 @@ class SpotVmCleaner:
                         name=None,
                     )
 
+    def _owner(self, clients: RegionClients, candidate: Candidate) -> leftovers.VolumeOwner:
+        return leftovers.VolumeOwner(
+            clients.compute.list_volume_attachments,
+            clients.compartment_id,
+            candidate.id,
+            candidate.launch_time,
+            self._pager,
+        )
+
     def _checked(self, clients: RegionClients, candidate: Candidate, dry_run: bool) -> Candidate:
         if not dry_run:
             return candidate
         volumes = leftovers.checked_volumes(
-            clients.block, candidate.extra["leftover"], self._settings, candidate.region
+            clients.block,
+            candidate.extra["leftover"],
+            self._settings,
+            candidate.region,
+            self._owner(clients, candidate),
         )
         return Candidate(
             id=candidate.id,

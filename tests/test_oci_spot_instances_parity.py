@@ -28,6 +28,8 @@ from tests.helpers_log_fix import expected_logs
 from tests.log_fix_oci import RULES
 
 BUGS = {"BUG-358"}
+OWNERSHIP_READ = "list_volume_attachments_of_volume"
+LATE = datetime.datetime(2026, 12, 31, tzinfo=datetime.UTC)
 ORACLE = Path(__file__).parent / "legacy" / "oci_spot_vm.txt"
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)
 NOW_UTC = NOW.astimezone(datetime.UTC)
@@ -93,6 +95,8 @@ class Region:
     attachments: Mapping[str, Any] = field(default_factory=dict)
     states: Mapping[str, Sequence[Any]] = field(default_factory=dict)
     volumes: Mapping[str, Any] = field(default_factory=dict)
+    volume_created: Mapping[str, Any] = field(default_factory=dict)
+    volume_attachment_errors: Mapping[str, Exception] = field(default_factory=dict)
     terminate_errors: Mapping[str, Exception] = field(default_factory=dict)
     delete_errors: Mapping[str, Exception] = field(default_factory=dict)
     client_error: Exception | None = None
@@ -408,6 +412,17 @@ CASES = [
         notags={"k1": ["v"], "k2": ["v"]},
     ),
     Case("leftover-volume-untagged-deleted", spot(volumes={"v1": None})),
+    Case(
+        "leftover-volume-created-with-instance-deleted",
+        spot(volume_created={"v1": NOW_UTC - datetime.timedelta(hours=100)}),
+    ),
+    Case(
+        "leftover-volume-other-attachment-detached-deleted",
+        spot(
+            instances=[inst("a"), inst("x", preemptible=False)],
+            attachments={"a": [att("v1")], "x": [att("v1", "DETACHED")]},
+        ),
+    ),
     Case("leftover-volume-get-error-kept", spot(volumes={"v1": RuntimeError("gone")})),
     Case(
         "leftover-volume-get-error-dry-run",
@@ -529,7 +544,24 @@ class FakeCompute:
             raise outcome
         return types.SimpleNamespace(data=outcome)
 
-    def list_volume_attachments(self, compartment_id: str, instance_id: str) -> Any:
+    def list_volume_attachments(
+        self, compartment_id: str, instance_id: str = "", volume_id: str = ""
+    ) -> Any:
+        if volume_id:
+            self.world.calls.append((OWNERSHIP_READ, self.region, compartment_id, volume_id))
+            region = self.world.region(self.region)
+            if volume_id in region.volume_attachment_errors:
+                raise region.volume_attachment_errors[volume_id]
+            found = [
+                types.SimpleNamespace(
+                    volume_id=a.volume_id, lifecycle_state=a.lifecycle_state, instance_id=owner
+                )
+                for owner, listed in region.attachments.items()
+                if not isinstance(listed, Exception)
+                for a in listed
+                if a.volume_id == volume_id
+            ]
+            return types.SimpleNamespace(data=found)
         self.world.calls.append(
             ("list_volume_attachments", self.region, compartment_id, instance_id)
         )
@@ -567,7 +599,10 @@ class FakeBlock:
         outcome = self.world.region(self.region).volumes.get(volume_id, {})
         if isinstance(outcome, Exception):
             raise outcome
-        return types.SimpleNamespace(data=types.SimpleNamespace(freeform_tags=outcome))
+        created = self.world.region(self.region).volume_created.get(volume_id, LATE)
+        return types.SimpleNamespace(
+            data=types.SimpleNamespace(freeform_tags=outcome, time_created=created)
+        )
 
     def delete_volume(self, volume_id: str) -> None:
         self.world.calls.append(("delete_volume", self.region, volume_id))
@@ -732,7 +767,7 @@ def test_adapter_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run(_new, case, monkeypatch, caplog, capsys)
-    assert new.calls == old.calls
+    assert _without_ownership_reads(new.calls) == old.calls
     assert new.error == old.error
     assert new.acted == old.acted
     assert new.volumes == old.volumes
@@ -778,6 +813,20 @@ def _run_cleaner(
     return Outcome(world.calls, acted, volumes, logs, capsys.readouterr().out, error)
 
 
+def _without_ownership_reads(calls: list[tuple[Any, ...]]) -> list[tuple[Any, ...]]:
+    """BUG-255 adds one read per leftover volume (and its pager call); drop them to compare the
+    rest of the calls with the oracle."""
+    kept: list[tuple[Any, ...]] = []
+    for index, call in enumerate(calls):
+        following = calls[index + 1][0] if index + 1 < len(calls) else None
+        if call[0] == OWNERSHIP_READ or (
+            call[0] == "list_call_get_all_results" and following == OWNERSHIP_READ
+        ):
+            continue
+        kept.append(call)
+    return kept
+
+
 def _of(calls: list[tuple[Any, ...]], names: Sequence[str]) -> list[tuple[Any, ...]]:
     return [c for c in calls if c[0] in names]
 
@@ -811,9 +860,10 @@ def test_cleaner_protocol_matches_main(
         return
     assert new.acted == old.acted
     assert new.volumes == old.volumes
-    names = {c[0] for c in old.calls} | {c[0] for c in new.calls}
+    new_calls = _without_ownership_reads(new.calls)
+    names = {c[0] for c in old.calls} | {c[0] for c in new_calls}
     for name in sorted(names):
-        assert _of(new.calls, [name]) == _of(old.calls, [name]), name
+        assert _of(new_calls, [name]) == _of(old.calls, [name]), name
     assert _of(new.calls, MUTATING) == _of(old.calls, MUTATING)
     old_logs = expected_logs(old.logs, BUGS, RULES)
     assert Counter(new.logs) == Counter(old_logs)
@@ -852,7 +902,7 @@ def test_repeated_delete_accumulates_as_main(
     world = _prepare(case, monkeypatch, caplog, capsys)
     new = _sequence(_new, case, world)
     assert new == old
-    assert world.calls == old_calls
+    assert _without_ownership_reads(world.calls) == old_calls
     assert [(r.levelno, r.getMessage()) for r in caplog.records] == expected_logs(
         old_logs, BUGS, RULES
     )
@@ -921,6 +971,61 @@ def test_spot_vm_diverges_from_oracle(
             continue
         changed += 1
         assert [log[2] for log in new.logs] == [log[2] for log in old.logs]
-        assert new.calls == old.calls
+        assert _without_ownership_reads(new.calls) == old.calls
         assert {log[1] for log in new.logs if log not in old.logs} == {logging.DEBUG}
     assert changed > 0
+
+
+BUG_255 = {
+    "leftover-volume-older-than-instance": (
+        spot(volume_created={"v1": NOW_UTC - datetime.timedelta(hours=200)}),
+        "created before the instance",
+    ),
+    "leftover-volume-creation-time-missing": (
+        spot(volume_created={"v1": None}),
+        "creation time unknown",
+    ),
+    "leftover-volume-attached-to-other-instance": (
+        spot(
+            instances=[inst("a"), inst("x", preemptible=False)],
+            attachments={"a": [att("v1")], "x": [att("v1")]},
+        ),
+        "attached to another instance",
+    ),
+    "leftover-volume-attachment-read-fails": (
+        spot(volume_attachment_errors={"v1": RuntimeError("down")}),
+        "attachment list failed",
+    ),
+}
+
+
+@pytest.mark.parametrize("dry_run", [False, True], ids=["live", "dry-run"])
+@pytest.mark.parametrize("case_id", sorted(BUG_255))
+def test_bug_255_volume_not_owned_is_kept(
+    case_id: str,
+    dry_run: bool,
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """BUG-255 diverges from the oracle: the instance is still terminated, the volume is kept."""
+    regions, reason = BUG_255[case_id]
+    case = Case(case_id, regions, dry_run=dry_run)
+    old = _run(_legacy, case, monkeypatch, caplog, capsys)
+    for outcome in (
+        _run(_new, case, monkeypatch, caplog, capsys),
+        _run_cleaner(case, monkeypatch, caplog, capsys),
+    ):
+        assert old.volumes == ["v1"], "oracle no longer shows the bug"
+        assert outcome.error is None
+        assert outcome.acted == ["a"]
+        assert outcome.volumes == []
+        assert ("delete_volume", "r1", "v1") not in outcome.calls
+        assert [c for c in outcome.calls if c[0] == "terminate_instance"] == (
+            [] if dry_run else [("terminate_instance", "r1", "a", False)]
+        )
+        assert any(
+            reason in message and level == logging.DEBUG for _, level, message in outcome.logs
+        )
+        assert not any(message.startswith("Deleted leftover") for _, _, message in outcome.logs)

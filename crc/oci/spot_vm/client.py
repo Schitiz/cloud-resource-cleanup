@@ -99,11 +99,16 @@ class SdkInstanceState(Protocol):
 
 
 class SdkVolume(Protocol):
-    """The attribute read from a leftover volume."""
+    """The attributes read from a leftover volume."""
 
     @property
     def freeform_tags(self) -> Mapping[str, str] | None:
         """Freeform tags, or `None`."""
+        ...
+
+    @property
+    def time_created(self) -> datetime.datetime | None:
+        """Creation time (the volume is kept when it is missing)."""
         ...
 
 

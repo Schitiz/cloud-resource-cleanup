@@ -22,7 +22,7 @@ Modules, split by responsibility:
 - `SdkInstance`: Protocol of the attributes read from an OCI compute instance.
 - `SdkAttachment`: Protocol of the attributes read from a volume attachment.
 - `SdkInstanceState`: Protocol of the lifecycle state read while waiting for termination.
-- `SdkVolume`: Protocol of the freeform tags read from a leftover volume.
+- `SdkVolume`: Protocol of the freeform tags and creation time read from a leftover volume.
 - `ComputeClient`: Protocol of the four compute calls used (list instances, list volume attachments, get instance, terminate instance); the SDK client satisfies it and tests pass fakes.
 - `BlockClient`: Protocol of the two block storage calls used (get volume, delete volume).
 - `RegionClients`: frozen dataclass with the compute client, block storage client and compartment of one region.
@@ -38,9 +38,11 @@ Modules, split by responsibility:
 - `skip_reason()`: why an instance is kept, or None; state, preemptible, OKE, tags, filter, age in the order of main.
 - `attached_volume_ids()`: attached, not detaching volume ids of an instance, or None when listing failed.
 - `wait_terminated()`: waits (monotonic deadline, 180 s, 5 s poll) until the instance is TERMINATED or gone (404).
-- `volume_passes_tag_check()`: reads a leftover volume and keeps it when unreadable or protected by tags.
+- `VolumeOwner`: frozen dataclass naming the terminated instance (id, creation time, the attachment lister of the compute client, compartment, pager) a leftover volume is judged against.
+- `volume_owned()`: BUG-255 check: True only when the volume was created at or after the instance and no other instance has it attached; anything uncertain keeps the volume.
+- `volume_passes_tag_check()`: reads a leftover volume and keeps it when unreadable, protected by tags or (with an owner) not owned by the instance.
 - `delete_leftover()`: the only volume delete; a failure is logged and the volume left out.
-- `checked_volumes()`: the volumes that pass the tag check, in order.
+- `checked_volumes()`: the volumes that pass the tag and ownership check, in order.
 - `log_summary()`: the closing "No OCI preemptible instances..." and list warnings of main.
 - `log_instance_error()`: the per-instance "Error processing OCI preemptible instance" line.
 - `SpotVmCleaner`: the Cleaner (supports delete only, read-only plan, mutating apply, plus list_region, consider and terminate used by the adapter).
@@ -54,7 +56,8 @@ Modules, split by responsibility:
 - `plan()` only lists and decides (ARCH-005). In a dry run it also reads the leftover volumes to report them; no mutating call is made.
 - `apply()` is the only caller of `terminate_instance` (with `preserve_boot_volume=False`) and `delete_volume`. Order per instance: terminate, wait for `TERMINATED` when volumes were attached, delete the tag-checked volumes. A failed wait still tries the volume deletes (as on main).
 - A failure on one instance or volume is logged and skipped, never raised, as on main. A failed region list is skipped; the region list itself (`get_all_regions`) falls back to the home region on connectivity and auth errors.
-- Known bugs and quirks (do not fix outside a behaviour-fix rung): `docs/refactor/BUGS.md` (`BUG-255` to `BUG-271`).
+- BUG-255 (fixed in FIX-OCI-SPOT): a leftover volume is deleted only when it was created at or after the instance's `time_created` and is attached to no other instance (an attachment that is not `DETACHED` counts; the lookup is `list_volume_attachments(compartment_id, volume_id=...)`, so only the run's compartment is seen). Otherwise it is kept with skip reason `not_owned` (DEBUG log with the cause). A missing or incomparable creation time, or a failed attachment read, keeps the volume. The terminated instance itself is ignored in the attachment list. The check runs after the tag check, in `plan()` of a dry run and in `apply()`; it only adds reads.
+- Known bugs and quirks (do not fix outside a behaviour-fix rung): `docs/refactor/BUGS.md` (`BUG-256` to `BUG-271`; `BUG-255` is fixed). BUG-255 still leaves `filter_tags` and `age` unapplied to the volume: only ownership was added.
 - Do not call real cloud APIs in tests; use fakes for `ComputeClient` and `BlockClient`.
 
 ## Extension Rules

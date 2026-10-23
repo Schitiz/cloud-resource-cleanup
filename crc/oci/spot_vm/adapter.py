@@ -138,9 +138,14 @@ class SpotVM(Service, Base):
             compute_client, instance_id, self._settings(), self._region
         )
 
-    def _volume_ok_to_delete(self, blockstorage_client: BlockClient, volume_id: str) -> bool:
+    def _volume_ok_to_delete(
+        self,
+        blockstorage_client: BlockClient,
+        volume_id: str,
+        owner: leftovers.VolumeOwner | None = None,
+    ) -> bool:
         return leftovers.volume_passes_tag_check(
-            blockstorage_client, volume_id, self._settings(), self._region
+            blockstorage_client, volume_id, self._settings(), self._region, owner
         )
 
     def _delete_volume(self, blockstorage_client: BlockClient, volume_id: str) -> None:
@@ -223,7 +228,14 @@ class SpotVM(Service, Base):
             resource_id=instance.id,
             name=instance.display_name,
         )
+        owner = leftovers.VolumeOwner(
+            clients.compute.list_volume_attachments,
+            clients.compartment_id,
+            instance.id,
+            instance.time_created,
+            self._pager(),
+        )
         for volume_id in leftover:
-            if self._volume_ok_to_delete(clients.block, volume_id):
+            if self._volume_ok_to_delete(clients.block, volume_id, owner):
                 self._delete_volume(clients.block, volume_id)
         return 1
