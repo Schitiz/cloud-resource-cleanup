@@ -193,14 +193,15 @@ class ElasticIpCleaner:
     def _should_skip(self, tags: Sequence[Mapping[str, Any]]) -> bool:
         if not self._exception_tags and not self._notags:
             return False
+        all_tags: dict[str, str] = {}
         for tag in tags:
             pair = _pair(tag, self._exception_tags)
             if self._exception_tags and policy.aws_eip_should_skip(pair, self._exception_tags):
                 return True
             if self._notags:
-                # BUG-011: main evaluates all(<bool>,) here, which raises this TypeError.
-                raise TypeError("'bool' object is not iterable")
-        return False
+                all_tags[tag["Key"]] = tag["Value"]
+        # BUG-011: notags keeps an address when every notags key matches, as for AWS VMs.
+        return policy.notags_all(all_tags, self._notags or {})
 
     def _select_on_filter(
         self, eip: Mapping[str, Any], tags: Sequence[Mapping[str, Any]], selected: dict[str, str]
