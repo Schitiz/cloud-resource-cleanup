@@ -38,10 +38,11 @@ copyright comment and declares no export list.
 - `build_nic_cleaner()`: registry factory behind @register("azure", "nic"); reads resource_group, name_regex and exception_regex from RunContext.options and builds the client from `Base`.
 - `NIC`: adapter crc.py calls (delete(), get_deleted, delete_count, nics_names_to_delete, base); runs the cleaner NIC by NIC in the order of main.
 - `SdkDisk`: Protocol of the Azure disk fields read (name, tags, time_created, disk_state).
+- `DeletePoller` (disk.py): Protocol of the poller disks.begin_delete returns (result()).
 - `DiskOperations`: Protocol of the two disks calls used, list_by_resource_group and begin_delete (positional arguments); tests pass fakes.
 - `DiskComputeClient`: Protocol of the compute client part used (the disks operations).
 - `DiskSettings`: frozen dataclass of the filters and age gate (filter_tags, exception_tags, notags, age, custom_age_tag_key, disk_states).
-- `AzureDiskCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus list_disks, decide and delete_disk used by the adapter); the client factory is injected through the constructor.
+- `AzureDiskCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus list_disks, decide and delete_disk used by the adapter; delete_disk returns None or the error text and never raises); the client factory is injected through the constructor.
 - `build_disk_cleaner()`: registry factory behind @register("azure", "disk"); reads resource_group, filter_tags, exception_tags, notags, age and custom_age_tag_key from RunContext.options and builds the client from `Base`.
 - `Disk`: adapter crc.py calls (delete(), get_deleted, count, disks_names_to_delete, base, clock); runs the cleaner disk by disk in the order of main, reading the clock once per listed disk (main reads it once per tag-matching disk).
 - `started()`, `region_done()`, `skip()`, `acted()`, `failed()`, `reason_slug()` (module _logger, rung LOG-AZU): thin Azure helpers over the current run of crc.core.logger. Azure has no regions, so `region_done()` logs one REGION line per resource group, with the resource group as region; `skip()` counts a skipped resource under a short snake_case reason (`reason_slug()`), `acted()` logs one ACTION line, `failed()` records a swallowed per-resource error. They only report, never decide.

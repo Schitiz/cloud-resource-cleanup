@@ -68,3 +68,70 @@ Rung FIX-AZU-DISK (wave FIX-1): behaviour fixes in `crc/azu/disk.py`. Status: co
 
 VERDICT: APPROVE
 
+
+## Round 2 (Opus)
+
+### Round 1 fixes checked
+
+- `crc/azu/README.md` `## Purpose` / `## Public API` updates match `crc/azu/disk.py`.
+- `tests/test_azure_disk_fix.py::test_production_commands_keep_selection_and_list_configured_group`
+  runs the three Jenkins commands through `crc.cli.main.main` with the same flags; it asserts the
+  same selection (`match-old` only; autoclean, `crc: gke`, attached and other-task disks kept).
+- Parity summary-line asserts in `_assert_diverges` / `_assert_cleaner_diverges` are correct.
+
+### Independent checks
+
+1. Bugs fixed. Copied `tests/test_azure_disk_fix.py` and `tests/helpers_azure_disk.py` onto a
+   182466d worktree: 9 of 12 fail there (both BUG-172 tests, the four BUG-174 isolation / poller /
+   run-log / adapter tests, the three production-command tests, which fail only on the listing
+   call, while the old code selects the same `['match-old']`). The 3 that pass on both are
+   meant to: listing error propagates, dry run never deletes or waits, selection errors propagate.
+2. Direction rule. BUG-172: a disk of the configured group was deleted when any listed disk with
+   its name passed the filters; now only when the disk itself passes, so the deleted set is a
+   subset of today's. `decide()` is unchanged. BUG-174: a failed poller now keeps the disk out of
+   the deleted list (reports less). Continuing after a failed delete does delete later candidates
+   that today's crashed run left behind; the task notes approve this explicitly ("the loop
+   continues with the next disk"), and those disks pass the same selection, so they would be
+   deleted on the next run today. Parity: `tests/legacy/azu_disk.txt` untouched; the only global
+   mapping is `_fix_172` (`("list",)` -> `("list_by_resource_group", <group>)`), which is the
+   BUG-172 call itself and leaves every other call, result, log and error compared exactly; the
+   five diverging cases carry `diverges="BUG-174"` and assert the exact new outcome in `DIVERGING`
+   plus the old oracle error, so a changed oracle fails.
+3. Production commands: same flags, same selection inside `$RESOURCE_GROUP` (point 1). They go
+   through the `Disk` adapter (`crc/cli/resource_ops.py:177`), which is covered by
+   `test_bug_174_adapter_continues_and_lists_only_deleted` and the parity `test_matches_main`.
+4. Fail-closed: listing errors (including a group the SDK rejects) and selection errors raise in
+   `plan()` / the adapter loop before any `begin_delete`.
+5. Protected files: `git diff 182466d..HEAD` touches none of the locked safety tests,
+   `tests/archtest/**`, `safety_lock.json`, `tests/legacy/**`, PLAN.md, STATUS.md, BUGS.md,
+   CLEANUP_SAFETY.md, AGENTS.md, ARCHITECTURE.md or `.cursor/**`.
+6. README. Fixed in review: `crc/azu/README.md` `## Public API` did not list the new disk
+   `DeletePoller` Protocol (the name check passed only because `nic.py` has a Protocol with the same
+   name); added it, and noted that `delete_disk` returns None or the error text and never raises.
+   Safety Invariants line for AZ-3 is correct.
+7. Owner decision section covers the parts left as today (selection-error propagation, exit code).
+
+### Findings
+
+- NIT (owner decision already recorded, agree): a failed delete no longer makes `crc.py` exit
+  non-zero; the run log `RESULT ... failed=N` and the ERROR line are the only signals. If Jenkins
+  should go red on `failed>0`, that belongs to a CLI rung, not this one.
+- NIT: if `Base.resource_group` resolves to `""` (`--resource_group ""` and
+  `AZURE_RESOURCE_GROUP=""`), a dry run that used to list the whole subscription now fails at
+  `list_by_resource_group("")` in the SDK. That is fail-closed, before any mutation, and no
+  production command does it. No change.
+- NIT: `delete_disk` wraps `_logger.acted` and the `"Deleted disk: " + name` log in the same
+  `try` as the delete, so an error after a successful `.result()` records a deleted disk as failed
+  (only reachable with a `None` name, already listed under "New bugs"). Reports less, never
+  deletes more. No change.
+- No BLOCKING findings.
+
+### Gates
+
+- `pip install -r requirements.txt -r requirements-dev.txt`: ok.
+- `make check` (ruff, mypy, lint-imports 5 contracts kept, pytest): green, 42457 passed
+  (42444 at 182466d).
+- After the README edit: `ruff check .` clean; `tests/archtest`, `tests/test_azure_disk.py`,
+  `tests/test_azure_disk_fix.py`, `tests/test_azure_disk_parity.py`: 309 passed.
+
+ROUND 2 VERDICT: APPROVE
