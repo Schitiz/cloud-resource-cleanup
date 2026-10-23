@@ -23,7 +23,7 @@ from crc.cli.routes import NotifyMode
 from crc.cli.runner import CRC as NewCRC
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext
 from crc.core.registry import Registry
-from tests.test_cli_crc_parity import (
+from tests.helpers_cl2_aws import (
     AGE,
     EMPTY,
     FULL,
