@@ -590,7 +590,13 @@ def test_engine_dry_run_never_releases(
     new = _run_cleaner(dry, monkeypatch, caplog, capsys)
     assert not [c for c in new.calls if c[0] == "release_address"]
     assert not [c for c in old.calls if c[0] == "release_address"]
-    assert new.error == old.error or case.diverges or case.fails_in_plan
+    if case.diverges:
+        assert old.error == BUG_011_OLD
+        return
+    assert new.error == old.error
+    assert new.stdout == old.stdout
+    if new.error is None:
+        assert new.deleted == old.deleted
 
 
 def _without_client(calls: Sequence[tuple[Any, ...]]) -> list[tuple[Any, ...]]:

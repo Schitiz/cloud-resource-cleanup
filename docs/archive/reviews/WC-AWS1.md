@@ -51,3 +51,53 @@ None found.
 None found.
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 302612d..HEAD` (lane commits `b183614`, `9a8a566`, round 1 `a8da301`).
+
+### Round 1 fixes checked
+
+- Removing `ElasticIpRuntime` / `KmsRuntime` is correct: no use is left in `crc/`, `crc.py` or `tests/`. The `ClientFactory`, `RegionLister` and `Clock` aliases are still used by the cleaners.
+- The tighter error-case and `fails_in_plan` assertions in `tests/test_aws_ip_parity.py::test_cleaner_protocol_matches_main` are correct and pass.
+
+### Findings and fixes made in review
+
+1. **Weak replacement tests** (`tests/test_aws_ip_parity.py::test_engine_dry_run_never_releases`, `tests/test_aws_kms_parity.py::test_engine_dry_run_never_schedules`). These replace the deleted adapter-vs-oracle `test_matches_main` cases, but they asserted little against the oracle:
+   - The IP test let an error mismatch through for every `fails_in_plan` case (`... or case.fails_in_plan`).
+   - The KMS test never ran the oracle at all.
+
+   Both now run the oracle in dry run and assert:
+   - no mutation on either side;
+   - an identical error;
+   - identical selected ids (and, for IP, identical stdout).
+
+   BUG-011 cases are asserted to still raise on the oracle, and divergent KMS cases are excluded (they are covered by `assert_fixed`). Case count is unchanged.
+2. **Stale wording** (`crc/aws/README.md:7`). The line still listed `ElasticIPs` and `Kms` among the legacy adapter classes that "stay importable". I removed those two names and left the rest of the line alone, since it belongs to other lanes.
+
+### Checklist
+
+- **(1) Production intact:** `crc/cli/scan.py`, `crc/cli/routes/aws.py`, the `build_elastic_ip_cleaner` / `build_kms_cleaner` registrations and the five hash-locked adapters (aws `Disk`, `SpotInstanceRequests`, azure/gcp/oci `SpotVM`) are untouched.
+- **(2) Parity tests drive the engine:** `test_aws_ip_parity.py` and `test_aws_kms_parity.py` run the registered factory through `crc.core.engine.run` (a local `Registry` plus a `Selection`) on every case in `tests/legacy/aws_elastic_ips.txt` and `tests/legacy/aws_kms.txt`.
+  - KMS: SDK calls (ignoring client creation), logs (`expected_logs`), stdout, errors and results are exact.
+  - IP: releases are compared in order. Single-region calls and logs are exact. In multi-region cases the logs are compared as a multiset, which is the allowed plan-before-apply change.
+  - Fixed bugs are marked: BUG-011 (`FIXED_MAIN` / `ENGINE_FIXED`) and the KMS `assert_fixed` BUG ids.
+  - Constructor-only `_should_skip_*` cases are ported to the factory-built `should_skip`.
+  - Sabotage check (not committed): I reversed the release order in `ElasticIpCleaner.apply_region` and dropped the last key in `KmsCleaner.schedule`. Result: 52 failures (6 in the IP protocol test, 45 in the KMS protocol test, 1 in the KMS repeated-runs test). Both changes were reverted.
+- **(3) Deleted names and READMEs:** `ElasticIPs`, `Kms`, `ElasticIpRuntime`, `KmsRuntime`, and the `adapter.py` modules are gone.
+  - The names survive only as oracle class-name strings in `tests/helpers_cl2_crc.py`, `tests/test_cli_bridge_aws.py`, `tests/test_core_engine.py` (outside the lane) and in the oracle loaders of the parity tests.
+  - The package READMEs have no rung, refactor, adapter or moved-doc links. "legacy" appears only in the oracle path `tests/legacy/...`.
+- **(4) No locked, oracle or archtest files touched.**
+- **(5) Size limits and Public API:** the largest lane file in `crc/` is 209 lines (`crc/aws/kms/cleaner.py`). ARCH-004 and ARCH-002 are green, and both Public API sections match `__all__`.
+- **(6) Gates:** `pip install -r requirements.txt -r requirements-dev.txt`, then `make check`:
+  - ruff: all checks passed;
+  - mypy: no issues (371 files);
+  - lint-imports: 5 contracts kept, 0 broken;
+  - pytest: **44415 passed in 56.27s** (1m18s wall clock for the whole of `make check`);
+  - ARCH-008: 44415 tests against a floor of 44415.
+
+## New bugs
+
+None found.
+
+ROUND 2 VERDICT: APPROVE

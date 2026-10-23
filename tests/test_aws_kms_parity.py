@@ -794,8 +794,13 @@ def test_engine_dry_run_never_schedules(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     dry = Case(**{**case.__dict__, "dry_run": True})
+    old = _run(_legacy, dry, monkeypatch, caplog, capsys)
     new = _run_cleaner(dry, monkeypatch, caplog, capsys)
     assert not [c for c in new.calls if c[0] == "schedule_key_deletion"]
+    assert not [c for c in old.calls if c[0] == "schedule_key_deletion"]
+    if not case.diverges:
+        assert new.error == old.error
+        assert new.deleted == old.deleted
 
 
 def _find(case_id: str) -> Case:
