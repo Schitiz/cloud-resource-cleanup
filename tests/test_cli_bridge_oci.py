@@ -1,12 +1,16 @@
-"""Parity: the engine bridge with the real OCI cleaners against the legacy adapters.
+"""Parity: the engine bridge with the real OCI cleaners against main's frozen oracles.
 
-The oracle `CRC` (`tests/legacy/crc_main.txt`) runs the real `Disk`, `VM` and `SpotVM` adapters,
-the bridge runs `DiskCleaner`, `VmCleaner` and `SpotVmCleaner` built by their registered
-factories; both read the same fake SDK API, Slack and Influx clients. For `disk`, `vm` (delete and
-stop) and `spot_instances`, in a dry run and a real run, the run-log lines (RUN START, ACTION,
-SKIPPED, ERRORS, RESULT, REGION), the other log records, Slack, Influx, stdout and the raised
-error must be equal, and so must the mutating SDK calls. The only allowed difference: a listing
-error in a later region now stops the pair before any mutation (BUG-408).
+The legacy side is `tests.helpers_oracle.load_legacy_crc()`: `tests/legacy/crc_main.txt` with its
+`Disk`, `VM` and `SpotVM` bound to `tests/legacy/oci_*.txt`, driven through a fake OCI SDK
+(`tests.helpers_cl2_oci`) over the same fake API objects. The bridge runs `DiskCleaner`,
+`VmCleaner` and `SpotVmCleaner` built by their registered factories; both read the same fake
+API, Slack and Influx clients. For `disk`, `vm` (delete and stop) and `spot_instances`, in a dry
+run and a real run, the other log records, Slack, Influx, stdout and the raised error must equal
+the oracle's, and so must the mutating SDK calls. The oracles emit no run-log lines (RUN START,
+ACTION, SKIPPED, ERRORS, FAILED, RESULT, REGION), so the routed lines are compared with the lines
+the legacy adapters produced, frozen in `tests/helpers_cl2_oci_runlog.py`. Allowed differences: a
+listing error in a later region now stops the pair before any mutation (BUG-408), and the log
+levels of BUG-353 and BUG-358.
 """
 
 import logging
@@ -24,18 +28,18 @@ import pytest
 from crc.cli import bridge, dispatch
 from crc.cli.inputs import Targets, read_options
 from crc.cli.runner import CRC as NewCRC
-from crc.core import logger
-from crc.oci.disk import Disk, DiskRuntime
-from crc.oci.spot_vm import SpotVM, SpotVmRuntime
+from crc.oci._base import COMPARTMENT_ID
 from crc.oci.spot_vm.client import RegionClients
-from crc.oci.vm import VM, VmRuntime
+from tests.helpers_cl2_oci import install_sdk, paginate
+from tests.helpers_cl2_oci_runlog import FROZEN_RUN_LINES
+from tests.helpers_log_fix import expected_logs
+from tests.log_fix_oci import RULES
 from tests.test_cli_crc_parity import Case, Logs, Scenario, build, oracle
 from tests.test_oci_disk import NOW as DISK_NOW
 from tests.test_oci_disk import FakeApi as DiskApi
 from tests.test_oci_disk import att, vol
 from tests.test_oci_spot_instances import FakeClient as SpotApi
 from tests.test_oci_spot_instances import inst as spot_inst
-from tests.test_oci_spot_instances import paginate
 from tests.test_oci_vm import FakeApi as VmApi
 from tests.test_oci_vm import inst
 
@@ -56,6 +60,7 @@ MODES = [
     ("slack", "on", "off"),
     ("sfx", "off", "on_suffix"),
 ]
+REGIONS_LINE = "Retrieved list of OCI regions: "
 MUTATING = ("delete_volume", "delete_boot_volume", "terminate_instance", "stop_instance")
 
 
@@ -139,15 +144,15 @@ KINDS = [
 class Collector(logging.Handler):
     def __init__(self) -> None:
         super().__init__(0)
-        self.lines: list[tuple[str, str]] = []
+        self.lines: list[tuple[str, str, str]] = []
 
     def emit(self, record: logging.LogRecord) -> None:
         text = re.sub(r"seconds=\d+", "seconds=0", record.getMessage())
         text = re.sub(r"duration=\S+", "duration=0", text)
-        self.lines.append((record.name, f"{record.levelname} {text}"))
+        self.lines.append((record.name, record.levelname, text))
 
 
-def _patch_sdk(mp: pytest.MonkeyPatch, apis: dict[str, Any], oracle_module: ModuleType) -> None:
+def _patch_routed(mp: pytest.MonkeyPatch, apis: dict[str, Any]) -> None:
     mp.setattr("crc.service.Service.__init__", lambda self: None)
     mp.setattr("crc.oci._base.Base.__init__", lambda self: None)
     mp.setattr("crc.oci.disk.cleaner.Base", lambda: object())
@@ -158,7 +163,7 @@ def _patch_sdk(mp: pytest.MonkeyPatch, apis: dict[str, Any], oracle_module: Modu
         return lambda region: apis[region]
 
     def spot_factory(region: str) -> RegionClients:
-        return RegionClients(apis[region], apis[region], "cmp")
+        return RegionClients(apis[region], apis[region], COMPARTMENT_ID)
 
     def regions(base: Any) -> Callable[[], list[str]]:
         return lambda: list(apis)
@@ -169,27 +174,13 @@ def _patch_sdk(mp: pytest.MonkeyPatch, apis: dict[str, Any], oracle_module: Modu
     mp.setattr("crc.oci.vm.cleaner.compute_api_for", factory)
     mp.setattr("crc.oci.spot_vm.cleaner.clients_for", lambda base: spot_factory)
     mp.setattr("crc.oci.spot_vm.client.oci.pagination.list_call_get_all_results", paginate)
-    api_factory, lister = factory(None), regions(None)
-
-    def clock() -> Any:
-        return DISK_NOW
-
-    def make_disk(*args: Any) -> Disk:
-        return Disk(*args, runtime=DiskRuntime(api_factory, lister, clock))  # type: ignore[misc]
-
-    def make_vm(*args: Any) -> VM:
-        return VM(*args, runtime=VmRuntime(api_factory, lister, clock))  # type: ignore[misc]
-
-    def make_spot(*args: Any) -> SpotVM:
-        spot = SpotVM(*args, runtime=SpotVmRuntime(spot_factory, lister, paginate, clock))  # type: ignore[misc]
-        spot.compartment_id = "cmp"
-        return spot
-
-    mp.setattr(oracle_module, "OCI_Disk", make_disk)
-    mp.setattr(oracle_module, "OCI_VM", make_vm)
-    mp.setattr(oracle_module, "OCI_SpotVM", make_spot)
     mp.setattr(bridge, "init_run_logging", lambda: None)
     mp.setattr(bridge, "datetime", type("D", (), {"now": staticmethod(lambda tz=None: DISK_NOW)}))
+
+
+def _patch_legacy(mp: pytest.MonkeyPatch, apis: dict[str, Any], oracle_module: ModuleType) -> None:
+    adapters = (oracle_module.OCI_Disk, oracle_module.OCI_VM, oracle_module.OCI_SpotVM)
+    install_sdk(mp, apis, adapters, DISK_NOW)
 
 
 @dataclass(frozen=True)
@@ -226,17 +217,21 @@ def _act(run: Run, crc: Any, options: Any, targets: Targets) -> None:
         assert bridge.route_for("oci", kind.name) is not None
         dispatch._run_pair(crc, "oci", kind.name, options, targets)
         return
-    logger.begin("oci", kind.name, kind.operation, run.dry, dispatch._run_options(options))
-    try:
-        kind.act(crc)
-    finally:
-        logger.finish()
+    kind.act(crc)
 
 
-def _run(run: Run, oracle_module: ModuleType, mp: pytest.MonkeyPatch) -> dict[str, Any]:
+def _run(run: Run, oracle_module: ModuleType) -> dict[str, Any]:
+    with pytest.MonkeyPatch.context() as mp:
+        return _run_patched(run, oracle_module, mp)
+
+
+def _run_patched(run: Run, oracle_module: ModuleType, mp: pytest.MonkeyPatch) -> dict[str, Any]:
     kind, dry, mode = run.kind, run.dry, run.mode
     apis = kind.apis(run.second)
-    _patch_sdk(mp, apis, oracle_module)
+    if run.routed:
+        _patch_routed(mp, apis)
+    else:
+        _patch_legacy(mp, apis, oracle_module)
     case = Case(mode[0], "oci", lambda c: None, Scenario({}, dry, mode[1], mode[2]))
     logs = Logs()
     flags = {**FLAGS, "resource": kind.name, "operation_type": kind.operation, "dry_run": dry}
@@ -250,17 +245,49 @@ def _run(run: Run, oracle_module: ModuleType, mp: pytest.MonkeyPatch) -> dict[st
             _act(run, crc, options, targets)
         except Exception as exc:
             result = ("error", type(exc).__name__, str(exc))
-    run_lines = [t for n, t in collector.lines if n == "crc.run"]
+    if run.routed:
+        run_lines = [f"{lvl} {t}" for n, lvl, t in collector.lines if n == "crc.run"]
+    else:
+        assert not [t for n, _, t in collector.lines if n == "crc.run"], (
+            "the oracle logs no run lines"
+        )
+        run_lines = list(FROZEN_RUN_LINES[(kind.name, kind.operation, dry, run.second)])
     return {
         "result": result,
         "slack": logs.slack,
         "influx": logs.influx,
         "stdout": out.getvalue(),
         "run": run_lines,
-        "other": sorted(t for n, t in collector.lines if n != "crc.run"),
+        "other": [(n, lvl, t) for n, lvl, t in collector.lines if n != "crc.run"],
         "calls": {r: [c for c in a.calls if c[0] in MUTATING] for r, a in apis.items()},
         "all_calls": sorted(c for a in apis.values() for c in a.calls),
     }
+
+
+def _expected_other(oracle_logs: list[tuple[str, str, str]]) -> list[tuple[str, str, str]]:
+    """The oracle's non-run log records as the routed path emits them.
+
+    BUG-353 and BUG-358 move the raw tag dumps (and the OCI leftover-volume skip) to DEBUG. The
+    routed path takes its regions from the patched `regions_of` seam instead of
+    `Base.get_all_regions`, so the oracle's one "Retrieved list of OCI regions" line is not
+    emitted; nothing else may differ.
+    """
+    records = expected_logs(oracle_logs, {"BUG-353", "BUG-358"}, RULES)
+    return sorted(r for r in records if not str(r[-1]).startswith(REGIONS_LINE))
+
+
+def _expected_all_calls(
+    kind: Kind, second: str | None, oracle_calls: list[tuple[Any, ...]]
+) -> list[tuple[Any, ...]]:
+    """The oracle's SDK calls plus, for spot instances, BUG-255: before a leftover volume is
+    deleted the routed path also reads the volume's attachments (one read per leftover volume
+    the tag check lets through: `vol-a` in `r1`, and `vol-d` in `r2` when it lists)."""
+    if kind.name != "spot_instances":
+        return oracle_calls
+    reads = [("list_volume_attachments", "vol-a")]
+    if second is None:
+        reads.append(("list_volume_attachments", "vol-d"))
+    return sorted([*oracle_calls, *reads])
 
 
 def _by_kind(lines: list[str], prefix: str) -> list[str]:
@@ -285,10 +312,9 @@ def test_routed_pair_matches_the_legacy_adapter(
     mode: tuple[str, str, str],
     second: str | None,
     oracle: ModuleType,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    old = _run(Run(kind, dry, mode, second, False), oracle, monkeypatch)
-    new = _run(Run(kind, dry, mode, second, True), oracle, monkeypatch)
+    old = _run(Run(kind, dry, mode, second, False), oracle)
+    new = _run(Run(kind, dry, mode, second, True), oracle)
     assert new["result"] == old["result"]
     assert new["stdout"] == old["stdout"]
     assert new["run"][0] == old["run"][0]
@@ -306,21 +332,29 @@ def test_routed_pair_matches_the_legacy_adapter(
     assert new["slack"] == old["slack"]
     assert new["influx"] == old["influx"]
     assert new["calls"] == old["calls"]
-    assert new["all_calls"] == old["all_calls"]
+    assert new["all_calls"] == _expected_all_calls(kind, second, old["all_calls"])
     assert sorted(new["run"]) == sorted(old["run"])
-    assert new["other"] == old["other"]
+    assert sorted(new["other"]) == _expected_other(old["other"])
 
 
 @pytest.mark.parametrize("kind", KINDS, ids=lambda k: f"{k.name}-{k.operation}")
 @pytest.mark.parametrize("dry", [True, False])
-def test_the_comparison_is_not_vacuous(
-    kind: Kind, dry: bool, oracle: ModuleType, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_the_comparison_is_not_vacuous(kind: Kind, dry: bool, oracle: ModuleType) -> None:
     """Both paths log ACTION lines, send Slack and Influx with display names, and mutate."""
-    new = _run(Run(kind, dry, MODES[0], None, True), oracle, monkeypatch)
-    old = _run(Run(kind, dry, MODES[0], None, False), oracle, monkeypatch)
+    new = _run(Run(kind, dry, MODES[0], None, True), oracle)
+    old = _run(Run(kind, dry, MODES[0], None, False), oracle)
     assert new["result"] == old["result"] == ("ok",)
     assert _by_kind(new["run"], "ACTION") and len(new["slack"]) >= 1 and len(new["influx"]) >= 1
     assert any("name-" in str(call) for call in new["slack"] + new["influx"])
     assert not any("ocid" in str(call) for call in new["slack"] + new["influx"])
     assert bool(new["calls"]["r1"]) is (not dry)
+
+
+@pytest.mark.parametrize(
+    ("name", "file"),
+    [("OCI_Disk", "oci_disk"), ("OCI_VM", "oci_vm"), ("OCI_SpotVM", "oci_spot_vm")],
+)
+def test_the_legacy_side_runs_the_frozen_oracles(oracle: ModuleType, name: str, file: str) -> None:
+    """The adapters the oracle CRC builds come from `tests/legacy/`, not from `crc/oci`."""
+    adapter = getattr(oracle, name)
+    assert adapter.__init__.__globals__["__file__"].endswith(f"tests/legacy/{file}.txt")
