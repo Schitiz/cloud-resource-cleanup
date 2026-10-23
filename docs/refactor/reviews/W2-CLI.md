@@ -31,3 +31,35 @@ Noticed, not fixed:
 - `crc/notify/slack.py:177` `notify_cleanup` logs a failed part with the root `logging.exception`, not the module `logger`.
 - `crc/notify/slack_owners.py:69` the owner e-mail domain `@yugabyte.com` is hard coded.
 - `crc/cli/vm_ops.py:27-33` `_delete_vm` treats an empty `instance_state` list like `None` (delete all states).
+
+## Round 1 (Argon)
+
+### Findings
+
+None (no blocking or non-blocking defects found).
+
+1. **No behaviour change (`git diff --color-moved=zebra cea0a8a..HEAD` + AST check):**
+   - `crc/cli/args.py` (139 lines) + `crc/cli/args_run.py` (157 lines): all 6 functions (`get_argparser` and the 5 `_add_*_args` builders) have identical ASTs and call order to `cea0a8a`.
+   - `crc/cli/dispatch.py` (245 lines) + `crc/cli/pairs.py` (36 lines): all 17 functions and constants (`UNSUPPORTED_PAIR_MESSAGES`, `SUPPORTED_CLOUDS`, `AWS_ONLY_RESOURCES`, `is_supported_pair`, `_unsupported_message`) are AST-identical to `cea0a8a`.
+   - `crc/core/policy.py` (16 lines) + `policy_tags.py` (175 lines), `policy_text.py` (85 lines), `policy_managed.py` (127 lines), `policy_age.py` (46 lines): all 43 functions/enums/constants are AST-identical to `cea0a8a` and re-exported from `crc.core.policy`.
+   - `crc/notify/slack.py` (213 lines) + `slack_chunks.py` (48 lines), `slack_owners.py` (96 lines): all 16 functions and `SlackNotifier`/`SlackPoster` methods are AST-identical to `cea0a8a`.
+   - `crc/cli/resource_ops.py` (237 lines) + `crc/cli/vm_ops.py` (235 lines) + `crc/cli/report_calls.py` (22 lines) + `crc/cli/adapter_args.py` (91 lines): `report_result` preserves the `if slack_client:` then `if influxdb_client:` sequence and only reads `getattr(resource, result_attr)` when `influxdb_client` is truthy; `vm_arguments`, `ip_arguments`, and `disk_arguments` produce the exact per-cloud positional/keyword argument tuples/dicts; `delete_disks` preserves its `try`/`except`, report-before-raise order; `delete_spot_instances` preserves the `resource_group`/`project_id` checks before adapter construction in `_delete_spot`.
+2. **Import paths and monkeypatch/mock targets:**
+   - Every symbol imported by `crc.py`, `crc/core/__init__.py`, `crc/notify/__init__.py`, `crc/notifications.py`, `crc/cli/*`, cloud packages, and `tests/*` resolves at its original import path.
+   - All test patch targets continue to hit live code: adapter globals (`AWS_Disk`, `ElasticIPs`, `KeyPairs`, `Kms`, `VPC`, `Disk`, `AZU_IP`, `NIC`, `GCP_Disk`, `GCP_IP`, `OCI_Disk`, `SpotInstanceRequests`, `AWS_VM`, `AZU_SpotVM`, `AZU_VM`, `GCP_SpotVM`, `GCP_VM`, `OCI_SpotVM`, `OCI_VM`) remain module globals in `resource_ops` and `vm_ops` looked up at call time; `dispatch.make_crc`, `dispatch.HANDLERS`, `dispatch.Snapshot`, `dispatch.AWS_DISK_OPT_IN_MESSAGE`, `dispatch.SUPPORTED_CLOUDS`, `dispatch.is_supported_pair` remain on `crc.cli.dispatch`; `slack.human_readable_timedelta`, `slack.datetime`, `crc.notify.slack.time.sleep`, and `slack._chunk_lines_into_messages` remain on `crc.notify.slack` (and `human_readable_timedelta` is called from `_format_item_row` inside `crc.notify.slack`).
+3. **Protected files and tests:**
+   - Zero test files, oracle files (`tests/legacy/*.txt`), hash-locked safety tests (`tests/archtest/safety_lock.json`), or out-of-lane files (`crc/cli/main.py`, `crc/core/age.py`, docs/config) were touched.
+4. **Line counts and seam quality:**
+   - Every owned and newly created source file is under the 250-line cap (`wc -l` max is `crc/cli/dispatch.py` at 245 lines). Splits follow clean domain seams (`args_run`, `pairs`, `report_calls`, `adapter_args`, `policy_tags`/`policy_text`/`policy_managed`/`policy_age`, `slack_chunks`/`slack_owners`).
+5. **READMEs:**
+   - `crc/cli/README.md`, `crc/core/README.md`, and `crc/notify/README.md` are concise and pass ARCH-002 Public API synchronization.
+
+### Gates & Test Count
+
+- `python3 -m ruff check .`: PASS
+- `python3 -m mypy`: PASS (`Success: no issues found in 114 source files`)
+- `lint-imports`: PASS (`10 contracts kept, 0 broken`)
+- `pytest tests/archtest/ -q`: PASS (ARCH-001..005, SAF-LOCK all green)
+- `make check`: PASS — **43,010 passed** in 156.44s (`make check` total wall time: **2m43s**; base `cea0a8a` count: 43,010).
+
+VERDICT: APPROVE
