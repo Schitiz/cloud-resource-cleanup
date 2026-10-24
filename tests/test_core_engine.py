@@ -321,5 +321,5 @@ def test_unknown_kind_has_no_report_label() -> None:
 
 
 def test_every_selectable_kind_has_a_label() -> None:
-    for kind in (*RESOURCES, "vpc", "spot_instance_requests", "spot_instances"):
+    for kind in (*RESOURCES, "spot_instance_requests", "spot_instances"):
         assert kind in KIND_LABELS

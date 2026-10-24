@@ -21,7 +21,7 @@ behaviour-fix rungs mark each diverging parity case with its bug ID instead of e
 | `aws_snapshot.txt` | `main:crc/aws/snapshot.py` | `tests/test_aws_snapshot_parity.py` |
 | `aws_spot_instance_requests.txt` | `main:crc/aws/spot_instance_requests.py` | `tests/test_aws_spot_instance_requests_parity.py` |
 | `aws_vm.txt` | `main:crc/aws/vm.py` | `tests/test_aws_vm_parity.py` |
-| `aws_vpc.txt` | `main:crc/aws/vpc.py` | `tests/test_aws_vpc_parity.py` |
+| `aws_vpc.txt` | `main:crc/aws/vpc.py` | none (`--resource vpc` removed, BUG-083; only the `crc_main.txt` binding reads it; the owner retires it) |
 | `azu_base.txt` | `main:crc/azu/_base.py` | `tests/test_azure_base_parity.py` |
 | `azu_disk.txt` | `main:crc/azu/disk.py` | `tests/test_azure_disk_parity.py` |
 | `azu_ip.txt` | `main:crc/azu/ip.py` | `tests/test_azure_ip_parity.py` |

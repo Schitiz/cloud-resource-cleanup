@@ -14,6 +14,11 @@ READMEs say, then add one entry below (and nothing in the oracle):
 * a new choice of any other flag: `AddedChoice(option, choice, help)` with the new help text
   (`help=None` keeps the oracle help).
 
+To remove a `--resource` kind (an owner decision, never silently): delete it from `crc/**`, then
+add `RemovedResource(kind, reason)` to `REMOVED_RESOURCES`. The oracle's choice may then be absent
+and `--resource <kind>` exits 2 with argparse's invalid choice error; a removal that is not listed
+fails the parity tests.
+
 The Jenkins contract (`tests/test_jenkins_contract.py`) is separate and never relaxed here.
 """
 
@@ -45,11 +50,25 @@ class AddedResource:
     in_all: bool = False
 
 
+@dataclass(frozen=True)
+class RemovedResource:
+    kind: str
+    reason: str
+
+
 ADDED_FLAGS: tuple[AddedFlag, ...] = ()
 ADDED_CHOICES: tuple[AddedChoice, ...] = ()
 ADDED_RESOURCES: tuple[AddedResource, ...] = ()
 RESOURCE_HELP: str | None = None  # None: --resource help unchanged
+REMOVED_RESOURCES: tuple[RemovedResource, ...] = (
+    RemovedResource("vpc", "BUG-083: --resource vpc removed (owner decision)"),
+)
+REMOVED_HINT = "list it in REMOVED_RESOURCES in tests/helpers_ag_cli_added.py (owner decision only)"
 ADDED_HINT = "add it to the ADDED table in tests/helpers_ag_cli_added.py (with default and help)"
+
+
+def removed_kinds() -> set[str]:
+    return {r.kind for r in REMOVED_RESOURCES}
 
 
 def added_routed_pairs() -> set[tuple[str, str]]:

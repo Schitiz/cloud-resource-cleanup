@@ -7,7 +7,7 @@ AWS EC2 VM cleaner. `VmCleaner` is a registered `Cleaner` (`@register("aws", "vm
 Modules, one per responsibility:
 
 - `cleaner.py`: `VmCleaner` (plan/apply) and the registry factory; re-exports the names of the modules below.
-- `settings.py`: `VmSettings`, constants, default client and region factories, `settings_from_options()`.
+- `settings.py`: `VmSettings` (with `require_age`), constants, default client and region factories, `settings_from_options()`.
 - `judge.py`: `InstanceJudge`, the read-only decision on each instance (tags, Name tag, age).
 - `reporting.py`: region, dry-run and summary logging.
 - `client.py`: typed Protocols of the boto3 EC2 calls used by the cleaner and the tag scan.
@@ -41,11 +41,11 @@ Modules, one per responsibility:
 ## Safety Invariants
 
 - `plan()` only calls `describe_instances` and `describe_network_interfaces`; `terminate_instances` and `stop_instances` are called from `apply()` / `apply_region()` only and never in a dry run.
-- The age gate is the attach time of the first network interface against `--age` or the fail-closed custom age tag (`get_retention_age`; a present but bad tag keeps the instance, BUG-004) (`core.age.is_old`, `policy.effective_age`); an empty age matches every instance and `MAX_AGE` can shorten it (SAF-006 to SAF-010, BUG-004, BUG-213).
+- The age gate is the attach time of the first network interface against `--age` or the fail-closed custom age tag (`get_retention_age`; a present but bad tag keeps the instance, BUG-004) (`core.age.is_old`, `policy.effective_age`); `MAX_AGE` can shorten it (SAF-006 to SAF-010, BUG-004). BUG-213 (fixed in G-AWS, SAF-011): `build_vm_cleaner` raises `ValueError` naming `--age` for a real run (not a dry run) without a positive age, before any cloud call; a custom age tag still replaces `--age` per instance (it never replaces the requirement for `--age`, and `VmSettings.require_age` keeps any instance with no effective age). A dry run without an age still matches every instance.
 - Fail closed: any error while judging one instance is logged and keeps it; exception tags (any key) and notags skip an instance; an instance without a `Tags` key or `Name` tag is kept. Termination and stop errors are isolated per instance.
 - Region errors: a `describe_instances` connectivity error skips the region (SAF-001); `describe_regions` falls back to the static list on a connectivity error only and every other error propagates (SAF-004).
 - `plan()` lists every region before `apply()` mutates.
-- Quirks are in `docs/refactor/BUGS.md` (BUG-004, BUG-020, BUG-021, BUG-213 to BUG-227, BUG-351).
+- Quirks are in `docs/refactor/BUGS.md` (BUG-004, BUG-020, BUG-021, BUG-214 to BUG-227, BUG-351 (BUG-213 is fixed)).
 - Logging (BUG-358/361/362): the raw tag list of each instance is logged at DEBUG; REGION, ACTION (deleted/stopped, would_* in a dry run), skip counts (`no_tags`, `exception_tag`, `too_young`) and failures (processing errors, missing Name tag, failed terminate/stop) go to `crc.core.logger.current()`.
 
 ## Extension Rules

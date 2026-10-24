@@ -20,6 +20,8 @@ from tests.helpers_ag_cli_added import (
     ADDED_FLAGS,
     ADDED_HINT,
     ADDED_RESOURCES,
+    REMOVED_HINT,
+    REMOVED_RESOURCES,
     RESOURCE_HELP,
     AddedFlag,
 )
@@ -35,6 +37,13 @@ def added_choices(option_strings: Sequence[str]) -> list[tuple[str, str | None]]
     if "--resource" in option_strings:
         pairs += [(r.kind, RESOURCE_HELP) for r in ADDED_RESOURCES]
     return pairs
+
+
+def removed_choices(option_strings: Sequence[str]) -> list[str]:
+    """The oracle choices REMOVED lists for the option (only `--resource` has any)."""
+    if "--resource" in option_strings:
+        return [r.kind for r in REMOVED_RESOURCES]
+    return []
 
 
 def _flag_of(action: argparse.Action) -> AddedFlag | None:
@@ -60,9 +69,14 @@ def _check_choices(action: argparse.Action, old: argparse.Action) -> None:
         return
     assert new_choices is not None, f"{old.option_strings} lost its choices"
     missing = [c for c in old_choices if c not in new_choices]
-    assert not missing, f"{old.option_strings} lost the choices {missing} of the oracle"
+    removed = removed_choices(old.option_strings)
+    assert sorted(map(str, missing)) == sorted(removed), (
+        f"{old.option_strings} lost the choices {missing} of the oracle, REMOVED lists "
+        f"{removed}; {REMOVED_HINT}"
+    )
+    expected_kept = [c for c in old_choices if c not in removed]
     kept = [c for c in new_choices if c in old_choices]
-    assert kept == old_choices, f"{old.option_strings} reordered the choices of the oracle"
+    assert kept == expected_kept, f"{old.option_strings} reordered the choices of the oracle"
     extra = [c for c in new_choices if c not in old_choices]
     listed = added_choices(old.option_strings)
     assert sorted(map(str, extra)) == sorted(str(c) for c, _ in listed), (
@@ -125,7 +139,7 @@ def _resource_choices(parser: argparse.ArgumentParser) -> list[str]:
 
 
 def strip_additions(new: argparse.ArgumentParser, old: argparse.ArgumentParser) -> None:
-    """Remove only the flags and choices listed in ADDED from `new`."""
+    """Remove the flags and choices listed in ADDED from `new`; put back the REMOVED ones."""
     old_by_dest = {a.dest: a for a in old._actions}
     for action in list(new._actions):
         if _flag_of(action) is not None and action.dest not in old_by_dest:
@@ -144,6 +158,8 @@ def strip_additions(new: argparse.ArgumentParser, old: argparse.ArgumentParser) 
             helps = {h for _, h in listed if h is not None}
             if len(helps) == 1 and action.help == next(iter(helps)):
                 action.help = previous.help
+        if previous is not None and removed_choices(action.option_strings):
+            action.choices = list(previous.choices or [])
 
 
 def abbreviation_problems(new: argparse.ArgumentParser, old: argparse.ArgumentParser) -> list[str]:

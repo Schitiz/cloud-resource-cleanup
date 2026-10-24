@@ -32,7 +32,7 @@ Skip = Callable[[str, Options, Targets], bool]
 class NotifyMode(enum.Enum):
     """What a routed pair does with Slack and Influx.
 
-    `NONE` sends nothing (`vpc` and `snapshot`, BUG-084 and BUG-009). `REPORT` sends after a
+    `NONE` sends nothing (`snapshot`, BUG-009). `REPORT` sends after a
     successful run and sends nothing when the cleaner raises. `REPORT_THEN_RERAISE` also sends
     when `plan()` or `apply()` raises (what was done so far), then raises the same error
     (AWS `disk`, as `delete_disks` did).

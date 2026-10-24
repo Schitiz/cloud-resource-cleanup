@@ -27,9 +27,10 @@ reused. `tests/archtest/safety_lock.json` maps IDs to the tests that lock them.
   `set_max_age` and dispatch, and `run_dispatch` calls it again.
 - `--cloud all --resource disk|all` raises.
 - An unsupported pair of an explicit cloud raises `ValueError`: `keypair` and
-  `kms` off AWS, `nic` off Azure, `ip` on OCI, `snapshot` and `vpc` off AWS.
+  `kms` off AWS, `nic` off Azure, `ip` on OCI, `snapshot` off AWS. `--resource vpc` was removed (BUG-083): it is an
+  argparse invalid choice (exit 2) and no cleaner exists.
 - Under `--cloud all` an unsupported pair is skipped with a warning only when no
-  supported pair follows it; otherwise it raises. `snapshot` and `vpc` run in the
+  supported pair follows it; otherwise it raises. `snapshot` runs in the
   AWS pass only.
 - An empty or blank `--scan_tag` raises `ValueError` before any cleaner runs.
 
@@ -83,11 +84,13 @@ reused. `tests/archtest/safety_lock.json` maps IDs to the tests that lock them.
 
 **When adding a new destructive module**
 
-- [SAF-011] Require a real age (or equivalent) gate in `__init__`. Azure disk, ip and nic
-  meet it: a real run (not `--dry_run`) without a positive `--age` raises `ValueError`
-  naming `--age` before any cloud call; a dry run needs none. Azure IP and NIC read the
-  creation time from `azure-mgmt-resource` (`createdTime`, one listing per run); a resource
-  without one, or every resource when the lookup fails, is kept.
+- [SAF-011] Require a real age (or equivalent) gate. A real run (not `--dry_run`) without a
+  positive `--age` raises `ValueError` naming the flag before any cloud call for AWS VM, GCP VM,
+  GCP IP, Azure disk, Azure IP and Azure NIC; GCP disk requires a positive `--detach_age`
+  (SAF-023). Dry runs need none. A custom age tag still replaces `--age` per resource where the
+  kind supports it, never the requirement itself. Azure IP and NIC read the creation time from
+  `azure-mgmt-resource` (`createdTime`, one listing per run); a resource without one, or every
+  resource when the lookup fails, is kept.
 - [SAF-012] Reject or skip unknown keys, zero durations, and bad custom age tags.
 - [SAF-013] Avoid having `--max_age` / `MAX_AGE` silently shorten a floor another flag
   (for example AWS `--detach_age`) just established, unless that change is
@@ -121,7 +124,8 @@ reused. `tests/archtest/safety_lock.json` maps IDs to the tests that lock them.
 - [SAF-017] Inferred from AWS/EBS CloudWatch metrics published while attached to a
   **running** instance. Not a last-detach timestamp; blind to attachments on
   stopped instances. Documented that way in the `crc/aws/disk/` error strings,
-  README, and CLI `--help`.
+  README, and CLI `--help`. BUG-283 is wontfix (test environments): a volume detached from a
+  stopped instance may be deleted early.
 - [SAF-018] The AWS disk cleaner (`DiskCleaner`, settings in `crc/aws/disk/settings.py`) requires `--age` and/or `--detach_age`. When `--age` is omitted,
   `detach_age` is also the CreateTime floor (`test_detach_age_alone_is_enough`).
 - [SAF-019] Empty Complete CloudWatch series is not proof of long detach; CreateTime

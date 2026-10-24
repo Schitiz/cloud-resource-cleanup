@@ -39,14 +39,18 @@ class VmSettings:
     age: Any
     custom_age_tag_key: Any
     instance_state: Any
+    require_age: bool = False
 
 
 def _optional(options: Mapping[str, Any], key: str) -> Any:
     return options.get(key, {})
 
 
-def settings_from_options(options: Mapping[str, Any]) -> VmSettings:
-    """Build the settings from `RunContext.options` (missing filters are empty dicts)."""
+def settings_from_options(options: Mapping[str, Any], *, require_age: bool = False) -> VmSettings:
+    """Build the settings from `RunContext.options` (missing filters are empty dicts).
+
+    `require_age` is True for a real run: an instance with neither a custom age tag nor an
+    `--age` is then kept (BUG-213)."""
     return VmSettings(
         filter_tags=_optional(options, "filter_tags"),
         exception_tags=_optional(options, "exception_tags"),
@@ -54,4 +58,5 @@ def settings_from_options(options: Mapping[str, Any]) -> VmSettings:
         age=_optional(options, "age"),
         custom_age_tag_key=options.get("custom_age_tag_key"),
         instance_state=options.get("instance_state", DEFAULT_STATE),
+        require_age=require_age,
     )

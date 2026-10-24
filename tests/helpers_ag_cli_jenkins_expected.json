@@ -796,13 +796,13 @@
   "slack_channels": [],
   "slack_clients": 1
  },
- "14-66514161d4": {
+ "14-ef512eeaf2": {
   "dry_runs": [
    false
   ],
   "exit_code": 0,
   "influx_clients": 0,
-  "label": "14-66514161d4 gcp disk",
+  "label": "14-ef512eeaf2 gcp disk",
   "max_age_env": [
    null
   ],
@@ -814,7 +814,9 @@
    {
     "age": null,
     "custom_age_tag_key": "max_retention_age",
-    "detach_age": null,
+    "detach_age": {
+     "days": 1
+    },
     "exception_regex": null,
     "exception_tags": {
      "auto_clean": [
@@ -995,13 +997,13 @@
   ],
   "slack_clients": 1
  },
- "17-00ec209e6b": {
+ "17-94ea23041f": {
   "dry_runs": [
    false
   ],
   "exit_code": 0,
   "influx_clients": 0,
-  "label": "17-00ec209e6b azure ip",
+  "label": "17-94ea23041f azure ip",
   "max_age_env": [
    null
   ],
@@ -1011,6 +1013,9 @@
   ],
   "options": [
    {
+    "age": {
+     "days": 1
+    },
     "exception_tags": null,
     "filter_tags": {
      "crc": [
@@ -1315,13 +1320,13 @@
   ],
   "slack_clients": 1
  },
- "22-fe2fc1a772": {
+ "22-5a00060f72": {
   "dry_runs": [
    false
   ],
   "exit_code": 0,
   "influx_clients": 0,
-  "label": "22-fe2fc1a772 azure nic",
+  "label": "22-5a00060f72 azure nic",
   "max_age_env": [
    null
   ],
@@ -1331,6 +1336,9 @@
   ],
   "options": [
    {
+    "age": {
+     "days": 1
+    },
     "exception_regex": null,
     "name_regex": [
      "yb-itest",
@@ -1406,13 +1414,13 @@
   ],
   "slack_clients": 1
  },
- "24-0d10079fd9": {
+ "24-c753b3d227": {
   "dry_runs": [
    false
   ],
   "exit_code": 0,
   "influx_clients": 0,
-  "label": "24-0d10079fd9 gcp ip",
+  "label": "24-c753b3d227 gcp ip",
   "max_age_env": [
    null
   ],
@@ -1422,6 +1430,9 @@
   ],
   "options": [
    {
+    "age": {
+     "days": 1
+    },
     "exception_regex": null,
     "name_regex": [
      "itest",
@@ -2318,13 +2329,13 @@
   ],
   "slack_clients": 1
  },
- "39-34b895944d": {
+ "39-5467efd10a": {
   "dry_runs": [
    false
   ],
   "exit_code": 0,
   "influx_clients": 0,
-  "label": "39-34b895944d azure ip",
+  "label": "39-5467efd10a azure ip",
   "max_age_env": [
    null
   ],
@@ -2334,6 +2345,9 @@
   ],
   "options": [
    {
+    "age": {
+     "days": 1
+    },
     "exception_tags": null,
     "filter_tags": {
      "yb_task": [
@@ -2432,13 +2446,13 @@
   ],
   "slack_clients": 1
  },
- "41-f4010adc48": {
+ "41-daf41ee387": {
   "dry_runs": [
    false
   ],
   "exit_code": 0,
   "influx_clients": 0,
-  "label": "41-f4010adc48 gcp ip",
+  "label": "41-daf41ee387 gcp ip",
   "max_age_env": [
    null
   ],
@@ -2448,6 +2462,9 @@
   ],
   "options": [
    {
+    "age": {
+     "days": 1
+    },
     "exception_regex": null,
     "name_regex": [
      "yb-stress-auto"

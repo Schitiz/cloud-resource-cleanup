@@ -193,8 +193,10 @@ def test_route_tables_route_every_oracle_kind_and_only_added_extras() -> None:
     """Every kind routed before is still routed; an extra kind must be listed in ADDED."""
     assert sorted(bridge.TABLES) == sorted(ORACLE_ROUTED_KINDS), "the set of clouds changed"
     for cloud, kinds in ORACLE_ROUTED_KINDS.items():
-        lost = sorted(set(kinds) - set(bridge.TABLES[cloud]))
-        assert not lost, f"{cloud} no longer routes {lost}"
+        lost = sorted(set(kinds) - set(bridge.TABLES[cloud]) - added_table.removed_kinds())
+        assert not lost, f"{cloud} no longer routes {lost}; {added_table.REMOVED_HINT}"
+    for kind in added_table.removed_kinds():
+        assert not bridge.is_routed_kind(kind), f"{kind} is listed as removed but still routed"
     extra = {
         (cloud, kind)
         for cloud, table in bridge.TABLES.items()
@@ -223,6 +225,16 @@ def test_unlisted_or_missing_route_fails_route_table_check(
     monkeypatch.delitem(bridge.TABLES["aws"], "fake_kind")
     monkeypatch.delitem(bridge.TABLES["aws"], "keypair")
     with pytest.raises(AssertionError, match=r"aws no longer routes \['keypair'\]"):
+        test_route_tables_route_every_oracle_kind_and_only_added_extras()
+
+
+def test_bug_083_vpc_is_a_listed_removal_and_an_unlisted_removal_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert added_table.removed_kinds() == {"vpc"}
+    assert "vpc" not in bridge.TABLES["aws"]
+    monkeypatch.setattr(added_table, "REMOVED_RESOURCES", ())
+    with pytest.raises(AssertionError, match=r"aws no longer routes \['vpc'\]"):
         test_route_tables_route_every_oracle_kind_and_only_added_extras()
 
 

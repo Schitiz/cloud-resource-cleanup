@@ -1,4 +1,4 @@
-"""Log rules of the AWS KMS, snapshot, keypair, Elastic IP and VPC cleaners.
+"""Log rules of the AWS KMS, snapshot, keypair, Elastic IP cleaners.
 
 Pass ``rules=RULES`` to ``expected_logs`` / ``expected_outcome`` of ``tests/helpers_log_fix.py``
 for the bug IDs of these cleaners. ``RULES`` is the core rules plus BUG-357 and BUG-359, and a

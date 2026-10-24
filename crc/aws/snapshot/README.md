@@ -26,6 +26,7 @@ Modules:
 
 - Authoritative invariants and quirks: `crc/aws/README.md` (Safety Invariants) and `CLEANUP_SAFETY.md`.
 - `plan()` and what it calls stay read-only (ARCH-005); every mutating call stays in `apply()` / `delete_one()` and never runs in a dry run.
+- BUG-142 (not a bug: intended): every snapshot older than `--age` (fixed 90 days) without exception tags is deleted; there is no tag, name or owner guard by design.
 - `plan()` lists and decides every region before `apply()` deletes. An error while listing or deciding a region is recorded, that region is skipped and deletes nothing, and the other regions continue (BUG-149); only a `describe_regions` error or an invalid `age_days` stops the run, before any delete.
 - The age gate is `policy.snapshot_old_enough` on `age_days`; an invalid `age_days` raises before any call. A snapshot with an exception tag or one used by an AMI is kept. A `delete_snapshot` error is logged and kept out of the result.
 - Tests: `tests/test_aws_snapshot.py`, `tests/test_aws_snapshot_fix.py` and `tests/test_aws_snapshot_parity.py` (drives the Cleaner through `crc.core.engine.run` against the oracle `tests/legacy/aws_snapshot.txt`, never edit it).

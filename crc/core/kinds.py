@@ -63,8 +63,6 @@ KINDS: tuple[Kind, ...] = (
         unsupported="Keypair operation is only supported on AWS.",
     ),
     Kind("vm", VM),
-    # `vpc` sends no notification (BUG-084), so its label never reaches a notifier.
-    Kind("vpc", "VPC", in_all=False, clouds=("aws",), unsupported=AWS_ONLY_MESSAGE),
     Kind(
         "kms",
         KMS,

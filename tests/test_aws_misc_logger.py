@@ -1,4 +1,4 @@
-"""Run-log call sites of the AWS KMS, snapshot, keypair, Elastic IP and VPC cleaners.
+"""Run-log call sites of the AWS KMS, snapshot, keypair, Elastic IP cleaners.
 
 Each test begins a run with a fake clock, drives one cleaner (dry run, real run, a failure or a
 skipped region) and asserts the exact INFO+ lines, `REGION ... ACTION ... SKIPPED ... RESULT`,
@@ -12,14 +12,13 @@ from collections.abc import Iterator
 from typing import Any
 
 import pytest
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, EndpointConnectionError
 
 from crc.aws import _regionlog
 from crc.aws.elastic_ips import ElasticIpCleaner
 from crc.aws.keypairs import KeyPairCleaner
 from crc.aws.kms import KmsCleaner, KmsSettings
 from crc.aws.snapshot import SnapshotCleaner
-from crc.aws.vpc import VpcCleaner
 from crc.core import engine, logger
 from crc.core.cleaner import Cleaner, Operation, RunContext
 from crc.core.registry import Registry
@@ -29,9 +28,13 @@ from tests import test_aws_keypairs as kp_t
 from tests import test_aws_kms as kms_t
 from tests import test_aws_snapshot as snap_t
 from tests.helpers_wc_aws1_engine import run_cleaner
-from tests.test_aws_vpc_parity import W2, Case, FakeAws, FakeClient, FakeResource, conn_error, full
 
 TWO_SKIPS = 2
+
+
+def conn_error() -> Exception:
+    error: Exception = EndpointConnectionError(endpoint_url="https://ec2.example")
+    return error
 
 
 class Ticker:
@@ -471,90 +474,6 @@ def test_elastic_ips_release_failure_and_skipped_region(run_lines: Any) -> None:
     assert any("FAILED cloud=aws resource=ip region=us-west-2 id=1.1.1.1" in m for m in out)
 
 
-# VPC ---------------------------------------------------------------------------------------
-
-
-def _vpc(aws: FakeAws, *, dry_run: bool) -> _Engine:
-    cleaner = VpcCleaner(
-        lambda region: FakeClient(aws, region),
-        lambda region: FakeResource(aws, region),
-        lambda: list(aws.case.regions),
-        {"env": ["test"]},
-        None,
-        None,
-    )
-    return _Engine("vpc", cleaner, dry_run=dry_run, now=datetime.datetime(2026, 3, 1, 12))  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
-
-
-def test_vpc_dry_run_and_real_run_lines(run_lines: Any) -> None:
-    begin, lines = run_lines
-    begin("vpc", dry_run=True)
-    _vpc(FakeAws(Case("u", {W2: [full("vpc-1")]}, dry_run=True)), dry_run=True).delete()
-    out = lines()
-    assert _run_lines(out, "REGION", "ACTION") == [
-        "ACTION would_delete cloud=aws resource=vpc region=us-west-2 id=vpc-1 name=-",
-        "REGION cloud=aws resource=vpc region=us-west-2 scanned=1 selected=1 seconds=2",
-    ]
-    begin("vpc", dry_run=False)
-    _vpc(FakeAws(Case("u", {W2: [full("vpc-1")]})), dry_run=False).delete()
-    out = lines()
-    assert "ACTION deleted cloud=aws resource=vpc region=us-west-2 id=vpc-1 name=-" in out
-    assert " selected=1 done=1 failed=0 skipped=0 regions=1 regions_skipped=0 " in out[-1]
-
-
-def test_vpc_delete_failure_after_retries_is_listed(run_lines: Any) -> None:
-    begin, lines = run_lines
-    begin("vpc", dry_run=False)
-    errors = {("delete_vpc", W2, "vpc-1"): RuntimeError("DependencyViolation")}
-    _vpc(FakeAws(Case("u", {W2: [full("vpc-1")]}, errors=errors)), dry_run=False).delete()
-    out = lines()
-    assert not _run_lines(out, "ACTION")
-    assert "ERRORS count=1" in out
-    assert (
-        "FAILED cloud=aws resource=vpc region=us-west-2 id=vpc-1 "
-        "error=RuntimeError: DependencyViolation"
-    ) in out
-    assert " selected=0 done=0 failed=1 " in out[-1]
-
-
-def test_vpc_teardown_error_is_recorded_and_propagates(run_lines: Any) -> None:
-    begin, lines = run_lines
-    begin("vpc", dry_run=False)
-    errors = {("describe_vpc_endpoints", W2, "vpc-1"): RuntimeError("boom")}
-    vpc = _vpc(FakeAws(Case("u", {W2: [full("vpc-1")]}, errors=errors)), dry_run=False)
-    with pytest.raises(RuntimeError):
-        vpc.delete()
-    out = lines()
-    assert "FAILED cloud=aws resource=vpc region=us-west-2 id=vpc-1 error=RuntimeError: boom" in out
-
-
-def test_vpc_cleaner_plan_apply_and_skipped_region(run_lines: Any) -> None:
-    begin, lines = run_lines
-    begin("vpc", dry_run=False)
-    aws = FakeAws(Case("u", {W2: [full("vpc-1")], "eu-west-1": []}, errors={}))
-    aws.case = Case("u", {W2: [full("vpc-1")]})
-    cleaner = VpcCleaner(
-        lambda region: FakeClient(aws, region),
-        lambda region: FakeResource(aws, region),
-        lambda: [W2],
-        {"env": ["test"]},
-        None,
-        None,
-    )
-    context = RunContext(
-        dry_run=False,
-        operation=Operation.DELETE,
-        options={},
-        now=datetime.datetime(2026, 3, 1, 12, 0, 0),  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
-    )
-    cleaner.apply(cleaner.plan(context), context)
-    out = lines()
-    assert _run_lines(out, "REGION") == [
-        "REGION cloud=aws resource=vpc region=us-west-2 scanned=1 selected=1 seconds=2"
-    ]
-    assert "ACTION deleted cloud=aws resource=vpc region=us-west-2 id=vpc-1 name=-" in out
-
-
 def test_unattached_run_logs_nothing_extra(caplog: pytest.LogCaptureFixture) -> None:
     """Without begin() the cleaners log only their own lines (no REGION, ACTION or RESULT)."""
     caplog.set_level(logging.DEBUG)
@@ -563,8 +482,8 @@ def test_unattached_run_logs_nothing_extra(caplog: pytest.LogCaptureFixture) -> 
     assert not any(word in text for word in ("REGION ", "ACTION ", "RESULT ", "SKIPPED "))
 
 
-def test_engine_dry_run_logs_would_delete_for_kms_snapshot_ip_and_vpc(run_lines: Any) -> None:
-    """Through `engine.run` (`plan()` only in dry run), kms, snapshot, ip and vpc log
+def test_engine_dry_run_logs_would_delete_for_kms_snapshot_and_ip(run_lines: Any) -> None:
+    """Through `engine.run` (`plan()` only in dry run), kms, snapshot and ip log
     `ACTION would_delete` and count `selected` in `RESULT`."""
     begin, lines = run_lines
     registry = Registry()
@@ -591,22 +510,10 @@ def test_engine_dry_run_logs_would_delete_for_kms_snapshot_ip_and_vpc(run_lines:
             eip_aws.client, eip_aws.list_regions, {"team": ["qa"]}, {"keep": ["1"]}, None
         )
     )
-    vpc_aws = FakeAws(Case("u", {W2: [full("vpc-1")]}, dry_run=True))
-    registry.register("aws", "vpc")(
-        lambda ctx: VpcCleaner(
-            lambda r: FakeClient(vpc_aws, r),
-            lambda r: FakeResource(vpc_aws, r),
-            lambda: [W2],
-            {"env": ["test"]},
-            None,
-            None,
-        )
-    )
     for kind, expected_id in (
         ("kms", "k-ok"),
         ("snapshot", "old"),
         ("ip", "1.1.1.1"),
-        ("vpc", "vpc-1"),
     ):
         begin(kind, dry_run=True)
         ctx = RunContext(True, Operation.DELETE, {}, kms_t.NOW)

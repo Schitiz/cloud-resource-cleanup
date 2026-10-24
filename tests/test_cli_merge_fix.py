@@ -1,4 +1,4 @@
-"""The up-front pair check and the AWS-only snapshot and vpc rules hold together."""
+"""The up-front pair check and the AWS-only snapshot rule hold together."""
 
 import logging
 import os
@@ -13,7 +13,6 @@ __all__ = ["recorder"]
 
 UNSUPPORTED_ONE_CLOUD = [
     ("azure", "snapshot", "--resource snapshot is AWS-only; use --cloud aws (got --cloud azure)"),
-    ("gcp", "vpc", "--resource vpc is AWS-only; use --cloud aws (got --cloud gcp)"),
     ("azure", "keypair", "Keypair operation is only supported on AWS."),
     ("aws", "nic", "NICs operation is only supported on Azure."),
     ("oci", "kms", "KMS operation is only supported on AWS."),
@@ -22,10 +21,9 @@ UNSUPPORTED_ONE_CLOUD = [
 
 def test_aws_only_resources_use_the_shared_pair_table() -> None:
     assert cli_dispatch.SUPPORTED_CLOUDS["snapshot"] == ("aws",)
-    assert cli_dispatch.SUPPORTED_CLOUDS["vpc"] == ("aws",)
+    assert "vpc" not in cli_dispatch.SUPPORTED_CLOUDS
     assert not hasattr(cli_dispatch, "check_aws_only_resources")
     assert not cli_dispatch.is_supported_pair("azure", "snapshot")
-    assert cli_dispatch.is_supported_pair("aws", "vpc")
 
 
 @pytest.mark.parametrize(("cloud", "resource", "message"), UNSUPPORTED_ONE_CLOUD)
@@ -52,7 +50,7 @@ def test_cloud_all_disk_fails_before_state_changes(
     assert "MAX_AGE" not in os.environ
 
 
-@pytest.mark.parametrize("resource", ["snapshot", "vpc"])
+@pytest.mark.parametrize("resource", ["snapshot"])
 def test_cloud_all_aws_only_runs_aws_once_and_builds_no_other_crc(
     recorder: Recorder,
     monkeypatch: pytest.MonkeyPatch,

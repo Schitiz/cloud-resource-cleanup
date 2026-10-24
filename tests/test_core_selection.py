@@ -38,7 +38,7 @@ class _Options:
 
 
 ROOT = Path(__file__).resolve().parent.parent
-ORACLE_EXTRA_RESOURCES = ["vpc", "spot_instance_requests", "spot_instances"]
+ORACLE_EXTRA_RESOURCES = ["spot_instance_requests", "spot_instances"]
 ORACLE_KINDS = [r for r in [*RESOURCES, *EXTRA_RESOURCES] if r not in added_table.added_kinds()]
 KMS_OPTIONS = _Options(kms_key_description="desc", kms_user="arn:user")
 EBS_MESSAGE = "AWS EBS volume cleanup requires '--cloud aws --resource disk'"
@@ -199,7 +199,6 @@ OK_CASES: list[tuple[str, str, Operation, _Options | None, list[tuple[str, str]]
     ("aws", "ip", Operation.DELETE, None, [("aws", "ip")], 0),
     ("azure", "keypair", Operation.DELETE, None, [("azure", "keypair")], 0),
     ("aws", "nic", Operation.DELETE, None, [("aws", "nic")], 0),
-    ("aws", "vpc", Operation.DELETE, None, [("aws", "vpc")], 0),
     ("aws", "snapshot", Operation.DELETE, None, [("aws", "snapshot")], 0),
     ("azure", "snapshot", Operation.DELETE, None, [("azure", "snapshot")], 0),
     ("aws", "vm", Operation.DELETE, None, [("aws", "vm")], 0),
@@ -386,7 +385,7 @@ def test_all_expansion_order_follows_crc_py() -> None:
 
 
 @pytest.mark.parametrize("cloud", ["aws", "azure", "gcp", "oci"])
-@pytest.mark.parametrize("resource", ["ip", "vm", "nic", "keypair", "snapshot", "vpc"])
+@pytest.mark.parametrize("resource", ["ip", "vm", "nic", "keypair", "snapshot"])
 def test_single_pair(
     crc_cli: ModuleType,
     monkeypatch: pytest.MonkeyPatch,

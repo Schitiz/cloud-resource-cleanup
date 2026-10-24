@@ -1,4 +1,4 @@
-"""BUG-009, BUG-084 (AWS-only snapshot and vpc) and BUG-344 (blank --scan_tag)."""
+"""BUG-009, BUG-084 (AWS-only snapshot; vpc removed by BUG-083) and BUG-344 (blank --scan_tag)."""
 
 import logging
 import os
@@ -70,7 +70,6 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> Recorder:
         rec.events.append(("Snapshot.delete",))
 
     cleaners.side_effect[("aws", "snapshot")] = snapshot
-    cleaners.side_effect[("aws", "vpc")] = lambda context: rec.events.append(("delete_vpc", "aws"))
     return rec
 
 
@@ -79,7 +78,7 @@ def run(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> None:
     main()
 
 
-@pytest.mark.parametrize("resource", ["snapshot", "vpc"])
+@pytest.mark.parametrize("resource", ["snapshot"])
 @pytest.mark.parametrize("cloud", ["azure", "gcp", "oci"])
 def test_single_non_aws_cloud_raises_before_any_cleaner(
     recorder: Recorder, monkeypatch: pytest.MonkeyPatch, cloud: str, resource: str
@@ -101,24 +100,21 @@ def test_aws_snapshot_runs_as_before(
     ]
 
 
-def test_aws_vpc_runs_as_before(recorder: Recorder, monkeypatch: pytest.MonkeyPatch) -> None:
-    run(monkeypatch, ["--cloud", "aws", "--resource", "vpc"])
-    assert recorder.events == [("CRC", "aws"), ("delete_vpc", "aws")]
+ARGPARSE_USAGE_ERROR = 2
 
 
-def test_cloud_all_vpc_runs_once_for_aws_and_warns(
-    recorder: Recorder, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+@pytest.mark.parametrize("cloud", ["aws", "azure", "gcp", "oci", "all"])
+def test_bug_083_resource_vpc_is_an_invalid_choice_and_runs_nothing(
+    recorder: Recorder,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    cloud: str,
 ) -> None:
-    caplog.set_level(logging.INFO)
-    run(monkeypatch, ["--cloud", "all", "--resource", "vpc"])
-    assert [e for e in recorder.events if e[0] == "delete_vpc"] == [("delete_vpc", "aws")]
-    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
-    assert warnings == [
-        f"vpc is not supported on {cloud}; skipped under --cloud all" for cloud in OTHER_CLOUDS
-    ]
-    skipped = [r.getMessage() for r in caplog.records if "SKIPPED" in r.getMessage()]
-    assert len(skipped) == len(OTHER_CLOUDS)
-    assert all("reason=unsupported_cloud_resource count=1" in line for line in skipped)
+    with pytest.raises(SystemExit) as exit_info:
+        run(monkeypatch, ["--cloud", cloud, "--resource", "vpc"])
+    assert exit_info.value.code == ARGPARSE_USAGE_ERROR
+    assert "argument -r/--resource: invalid choice: 'vpc'" in capsys.readouterr().err
+    assert recorder.events == []
 
 
 def test_cloud_all_snapshot_runs_once_for_aws_and_warns(
