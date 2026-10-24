@@ -118,3 +118,57 @@ Lane G-GCP, branch `gb/gcp`: owner-approved behaviour fixes for BUG-124, BUG-062
      - `pytest`: **44,704 passed, 1 skipped in 63.59s** (44,705 collected, floor 44,705, ARCH-008 green)
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+### Round 1 fixes checked
+
+- `safety_lock.json`: the diff against `5fc34af` is only the SHA-256 of `SAF-023` (the locked test
+  asserted the BUG-124 behaviour, so the lock had to change; `SAF-023` text changed with it). No ID
+  added, removed or renamed; regenerated through `update_safety_lock.py` (round 1). No VPC lock is
+  touched. Kept: the locked name `test_saf_023_gcp_disk_without_detach_age_deletes_every_detached_disk`
+  now asserts the real run raises; the name is stale but renaming needs a hand edit of the lock,
+  which the contract forbids (owner may rename through the script later).
+- `CLEANUP_SAFETY.md`: only GCP lines changed (SAF-023, the GCP keep-rules bullet, the
+  `disk_cleaner.py` row); the shared SAF-011 bullet is untouched.
+- README `AddressView` / `ip.py` lines and the expanded disk/VM tests: correct.
+
+### Independent checks
+
+1. Fixes are real. `build_disk_cleaner`, `build_ip_cleaner` and `build_vm_cleaner` call
+   `core_age.require_positive_age` on a real run before the Compute client is constructed (the tests
+   replace the clients with a class that fails when built). Dry runs build and list everything
+   without an age. Ages are applied: young disks / addresses / instances are kept
+   (`test_bug_124_dry_run_and_positive_detach_age_still_build`, `test_bug_062_only_addresses_old_enough_are_deleted`,
+   `..._hours_age_and_another_utc_offset`, `test_bug_183_custom_age_label_still_replaces_the_positive_age`).
+   IP uses `TIME_FORMAT` and `core_age.is_old` as disk/VM; an unreadable or missing timestamp keeps
+   the address and records a failure (fail closed). Ran `tests/test_gcp_require_age.py` on a
+   `5fc34af` worktree: 28 failed, 5 passed (the 5 are the dry-run / custom-label tests whose
+   behaviour is unchanged by design).
+2. Only the listed behaviour changed. `tests/legacy/`, `tests/fixtures/`, `tests/test_jenkins_contract.py`,
+   requirements and constraints are untouched. Contract test on this branch: 142 passed. The six
+   newly diverging parity cases (disk and VM `age-empty/none/zero`) carry `BUG-124` / `BUG_183`
+   and assert `ValueError` with no cloud call; IP parity passes an age and an old timestamp, so it
+   still equals the oracle.
+   Integration note (not a lane defect): against the G-AWS fixture and expected JSON
+   (`gb/aws` `fffe56d`), the two GCP IP lines fail only `test_command_runs_offline_as_frozen`,
+   because G-AWS froze the GCP IP options without `age` (their branch lacks this route change). The
+   runs succeed and `test_command_reaches_its_cleaner_with_the_flags` passes for them. After merging
+   both lanes, `tests/helpers_ag_cli_jenkins_expected.json` must gain `"age": {"days": 1}` in the
+   options of the GCP IP keys `24-c753b3d227` and `41-daf41ee387` (owned by G-AWS / the merge).
+   (The three Azure failures on that combination belong to the Azure lane.)
+3. BUGS.md rows BUG-124, BUG-062, BUG-183 `fixed in G-GCP`; no `TODO(BUG-124|062|183)` left in
+   code; ARCH-012 green. Minor: the BUG-062 row still says "no tag/label filter"; that part is not
+   fixed (out of scope for this lane), the age gate that made it high risk is.
+4. Only owned files changed (`crc/gcp/` without `spot_vm`, `crc/cli/routes/gcp.py`, GCP tests,
+   GCP lines of `CLEANUP_SAFETY.md`, the three BUGS.md rows, test floor, this file).
+5. Sizes: changed source files at most 244 lines, new test file 247; the GCP parity / bridge test
+   files were already over 250 on the base (legacy list) and grew by at most 32 lines; ARCH-004
+   (files and functions) green.
+6. Gates after `pip install -r requirements.txt -r requirements-dev.txt`, `make check`: ruff
+   check passed, 379 files formatted, mypy no issues in 378 files, lint-imports 5 kept, pytest
+   **44,704 passed, 1 skipped in 59.06 s** (make check wall time 79 s).
+
+No code changes in round 2.
+
+ROUND 2 VERDICT: APPROVE
