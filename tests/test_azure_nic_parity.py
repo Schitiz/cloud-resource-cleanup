@@ -636,7 +636,7 @@ def test_list_is_requested_twice_and_the_first_is_dropped(
     assert azure.calls[:3] == [("client", "sub-1"), ("list", "rg-test"), ("list", "rg-test")]
 
 
-def test_list_is_scoped_to_the_configured_group_BUG_111(
+def test_list_is_scoped_to_the_configured_group_bug_111(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],

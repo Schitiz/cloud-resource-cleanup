@@ -38,7 +38,7 @@ def _in_use(**attrs: Any) -> types.SimpleNamespace:
     return types.SimpleNamespace(name="nic-a", virtual_machine=None, **attrs)
 
 
-def test_only_the_configured_group_is_listed_and_acted_on_BUG_111_BUG_122(
+def test_only_the_configured_group_is_listed_and_acted_on_bug_111_bug_122(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     azure = FakeAzure([nic("nic-a")])
@@ -54,7 +54,7 @@ def test_only_the_configured_group_is_listed_and_acted_on_BUG_111_BUG_122(
     assert candidate_ids(outcome) == ["nic-a"]
 
 
-def test_group_comes_from_env_when_not_given_BUG_111(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_group_comes_from_env_when_not_given_bug_111(monkeypatch: pytest.MonkeyPatch) -> None:
     azure = FakeAzure([nic("nic-a")])
     azure.install(monkeypatch)
     _engine("", ["nic"], dry_run=True)
@@ -70,14 +70,14 @@ def test_group_comes_from_env_when_not_given_BUG_111(monkeypatch: pytest.MonkeyP
         ("a|b", ["a1", "b1", "c1"], ["a1", "b1"]),
     ],
 )
-def test_name_regex_is_a_regular_expression_BUG_113(
+def test_name_regex_is_a_regular_expression_bug_113(
     pattern: str, names: list[str], expected: list[str]
 ) -> None:
     plan = _cleaner(FakeAzure([nic(n) for n in names]), [pattern]).plan(_ctx(dry_run=True))
     assert [c.id for c in plan.candidates] == expected
 
 
-def test_production_values_select_the_same_nics_BUG_113() -> None:
+def test_production_values_select_the_same_nics_bug_113() -> None:
     names = ["yb-itest-a", "yb-itests-b", "ui-auto-c", "ui-automation", "prod-nic", "yb-it"]
     plan = _cleaner(FakeAzure([nic(n) for n in names]), ["yb-itest", "yb-itests", "ui-auto"]).plan(
         _ctx(dry_run=True)
@@ -85,7 +85,7 @@ def test_production_values_select_the_same_nics_BUG_113() -> None:
     assert [c.id for c in plan.candidates] == [n for n in names if n not in {"prod-nic", "yb-it"}]
 
 
-def test_exception_regex_is_a_regular_expression_BUG_113() -> None:
+def test_exception_regex_is_a_regular_expression_bug_113() -> None:
     plan = _cleaner(FakeAzure([nic("nic-keep-1"), nic("nic-b")]), ["nic"], ["keep-\\d"]).plan(
         _ctx(dry_run=True)
     )
@@ -93,7 +93,7 @@ def test_exception_regex_is_a_regular_expression_BUG_113() -> None:
     assert [(s.id, s.reason) for s in plan.skipped] == [("nic-keep-1", "matches exception_regex")]
 
 
-def test_exception_literal_substring_still_excludes_BUG_113() -> None:
+def test_exception_literal_substring_still_excludes_bug_113() -> None:
     plan = _cleaner(FakeAzure([nic("x^nic-a"), nic("nic-b")]), ["nic"], ["^nic-a"]).plan(
         _ctx(dry_run=True)
     )
@@ -114,7 +114,7 @@ def test_exception_literal_substring_still_excludes_BUG_113() -> None:
         (["nic"], [None]),
     ],
 )
-def test_invalid_patterns_raise_value_error_before_any_sdk_call_BUG_113(
+def test_invalid_patterns_raise_value_error_before_any_sdk_call_bug_113(
     name_regex: Any, exception_regex: Any
 ) -> None:
     azure = FakeAzure([nic("nic-a")])
@@ -124,7 +124,7 @@ def test_invalid_patterns_raise_value_error_before_any_sdk_call_BUG_113(
     assert azure.calls == []
 
 
-def test_engine_invalid_pattern_raises_before_any_sdk_call_BUG_113(
+def test_engine_invalid_pattern_raises_before_any_sdk_call_bug_113(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     azure = FakeAzure([nic("nic-a")])
@@ -134,7 +134,7 @@ def test_engine_invalid_pattern_raises_before_any_sdk_call_BUG_113(
     assert _sdk(azure) == []
 
 
-def test_empty_string_entry_is_ignored_BUG_113(caplog: pytest.LogCaptureFixture) -> None:
+def test_empty_string_entry_is_ignored_bug_113(caplog: pytest.LogCaptureFixture) -> None:
     azure = FakeAzure([nic("nic-a"), nic("other")])
     plan = _cleaner(azure, ["", "nic"]).plan(_ctx(dry_run=True))
     assert [c.id for c in plan.candidates] == ["nic-a"]
@@ -152,7 +152,7 @@ def test_empty_string_entry_is_ignored_BUG_113(caplog: pytest.LogCaptureFixture)
         {"private_endpoint": {"id": "pe"}, "private_link_service": {"id": "pls"}},
     ],
 )
-def test_nic_in_use_by_private_endpoint_or_link_service_is_kept_BUG_114(
+def test_nic_in_use_by_private_endpoint_or_link_service_is_kept_bug_114(
     attrs: dict[str, Any],
 ) -> None:
     azure = FakeAzure([_in_use(**attrs), nic("nic-b")])
@@ -164,14 +164,14 @@ def test_nic_in_use_by_private_endpoint_or_link_service_is_kept_BUG_114(
     assert [c for c in azure.calls if c[0] == "begin_delete"] == [("begin_delete", "rg", "nic-b")]
 
 
-def test_vm_attached_nic_is_in_use_and_missing_attributes_default_to_free_BUG_114() -> None:
+def test_vm_attached_nic_is_in_use_and_missing_attributes_default_to_free_bug_114() -> None:
     azure = FakeAzure([nic("nic-a", {"id": "vm"}), _in_use(private_endpoint=None)])
     plan = _cleaner(azure, ["nic"]).plan(_ctx(dry_run=True))
     assert [(s.id, s.reason) for s in plan.skipped] == [("nic-a", "in_use")]
     assert [c.id for c in plan.candidates] == ["nic-a"]
 
 
-def test_engine_keeps_nic_in_use_BUG_114(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_engine_keeps_nic_in_use_bug_114(monkeypatch: pytest.MonkeyPatch) -> None:
     azure = FakeAzure([_in_use(private_endpoint={"id": "pe"})])
     azure.install(monkeypatch)
     assert candidate_ids(_engine("rg", ["nic"], dry_run=False)) == []
