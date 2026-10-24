@@ -262,3 +262,24 @@ Removed `paramiko`, `requests`, `beautifulsoup4`; every other line unchanged.
 
 VERDICT: APPROVE
 
+
+## Round 2 (Opus)
+
+### Findings
+
+No blocking or non-blocking defects found; no file changed except this review.
+
+1. **Round 1 fixes and findings:** round 1 reported no findings and made no fixes; its claims were re-checked independently below.
+2. **Lock pairs (check 1):** no `"test"` entry in `tests/archtest/safety_lock.json` (94 entries, 46 SAF IDs, `gaps: []`) points at one of the five legacy files. Every removed line in `tests/test_aws_disk_engine.py` and `tests/test_aws_spot_instance_requests_engine.py` was replaced by a stricter assertion (`[0] == "sir-1"` became the full planned id list; `"x" in methods` became exact counts plus exact call arguments; the mutating-call order now includes arguments). I read these old and new tests side by side: SAF-007/012 (all five bad ages, `days: 900` included, through `build_settings`), SAF-015 (Forbidden status and AccessDenied through `DiskCleaner.plan()`, plus `had_errors`), SAF-028/029/030/032/033 (spot, through `engine.run`), SAF-038/044 Azure (`apply()` order VM, disk, NIC; no `disk_begin_delete`, no `disk_get` for another resource group), SAF-039 GCP (`instance, operation, disk` through `SpotVMCleaner.apply()`), SAF-040/046 OCI (terminate, poll, delete order; failed attachment list gives no candidate and no terminate). Each runs the production Cleaner, the registered factory or the production rule helper, with the same inputs and assertions at least as strict. No weaker lock.
+3. **Gaps (check 2):** I read every rule text in `CLEANUP_SAFETY.md` next to its lock. New tests in `tests/test_own1_saf_gaps.py` assert the rule itself (SAF-002 exit-0 inventory and forced dry run through `main()`; SAF-004 AuthFailure raises out of `engine.run` with nothing deleted; SAF-016 no "keep" wording for a zero window, only dropped volumes logged as skipped; SAF-022/023/024 through the registered `gcp`/`disk` factory; SAF-034 a failing sweep delete does not stop the next volume). Reused locks also match their rules: SAF-036 asserts `influx_payload() == {VM: [request, instance], DISK: [volume]}` for plan and apply; SAF-005 list error raises, a failing VM is isolated; SAF-006 empty age matches all, even with `MAX_AGE`; SAF-010 `MAX_AGE` override parametrized. No gap remains.
+4. **Deleted tests and floor (check 3):** at `a0b3d09` the five files define 33 + 36 + 11 + 15 + 15 = 110 tests (no parametrize or subTest), table 3 has 110 rows, and every covering test it names exists (`def` found in the named file). Floor 44415 -> 44305 = 110. The `legacy_baseline.txt` diff has only removals, and none of the removed paths exists.
+5. **Requirements (check 4):** `git grep` finds no `import`/`from` of `paramiko`, `requests` or `bs4` in any `.py` file. The only `requests` imports are the local `crc.aws.spot_instance_requests.requests` module. The diff removes exactly those three lines, `frozen_inputs.json` changes only the `requirements.txt` hash, and ARCH-007 passes. In-repo consumers (`ci.yml`, `.cursor/environment.json`, `AGENTS.md`/`README.md` instructions) install it only to run CRC and its tests. `gh api repos/yugabyte/cloud-resource-cleanup-triggers` still returns 404 from here, so the claim about the triggers repo rests on the task contract (owner action kept from section 4).
+6. **Tamper test (check 4):** locally (not committed) I replaced `assert "disk_get" not in _names(azure)` with `pass` in `test_saf_044_disk_in_another_resource_group_is_not_touched`, and loosened `exit_info.value.code == 0` to `in (0, 1)` in `test_saf_002_scan_tag_forces_a_dry_run_and_exits_zero_without_cleaning`. `test_safety_lock.py` failed with `SAF-LOCK: SAF-044 ... changed (AST hash mismatch)` and the same for SAF-002. After restoring, it passed again and `git status` was clean.
+7. **Scope (check 5):** `git diff --name-only a0b3d09..HEAD` touches nothing under `crc/**` and no `Makefile`, CI, `AGENTS.md`, `ARCHITECTURE.md`, `CLEANUP_SAFETY.md` or README. Only the lane files listed by round 1 changed. The adapter classes are still in place.
+
+### Gates
+
+- `pip install -r requirements.txt -r requirements-dev.txt`: pass.
+- `make check` (ruff check, ruff format --check, mypy, lint-imports, pytest, ARCH-008): pass, `44350 passed in 53.31s`, `ARCH-008: 44350 tests, floor 44305`, wall time 1m14s.
+
+ROUND 2 VERDICT: APPROVE
