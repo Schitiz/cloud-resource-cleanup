@@ -3,6 +3,7 @@ msrestazure
 azure.mgmt.compute
 azure.identity
 azure.mgmt.network
+azure.mgmt.resource
 google-cloud-compute
 google-api-python-client
 oci

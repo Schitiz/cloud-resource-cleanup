@@ -110,7 +110,7 @@ def test_engine_run_deletes_unattached_disks_only(monkeypatch: pytest.MonkeyPatc
         "filter_tags": {},
         "exception_tags": {},
         "notags": {},
-        "age": {},
+        "age": {"days": 1},
         "custom_age_tag_key": "",
     }
     outcome = engine_run("disk", options, dry_run=False, now=NOW)

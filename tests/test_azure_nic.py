@@ -167,7 +167,12 @@ def test_supports_only_delete() -> None:
 def test_engine_run_with_injected_client(monkeypatch: pytest.MonkeyPatch) -> None:
     azure = FakeAzure([nic("nic-a"), nic("other")])
     azure.install(monkeypatch)
-    options = {"resource_group": "rg", "name_regex": ["nic"], "exception_regex": []}
+    options = {
+        "resource_group": "rg",
+        "name_regex": ["nic"],
+        "exception_regex": [],
+        "age": {"days": 1},
+    }
     outcome = engine_run("nic", options, dry_run=False, now=NOW)
     assert candidate_ids(outcome) == ["nic-a"]
     assert [section.ids for section in outcome.report.sections] == [("nic-a",)]

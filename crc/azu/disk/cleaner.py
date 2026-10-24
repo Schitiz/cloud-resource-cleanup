@@ -16,7 +16,7 @@ from typing import Any
 
 from crc.azu import _logger
 from crc.azu._base import Base
-from crc.azu._common import log_delete_summary, log_would_delete
+from crc.azu._common import log_delete_summary, log_would_delete, real_run_age
 from crc.azu.disk.client import AgeSpec, ClientFactory, SdkDisk, TagSpec
 from crc.core import age as core_age
 from crc.core import policy
@@ -154,8 +154,6 @@ class AzureDiskCleaner:
             return "matches notags"
         return ""
 
-    # TODO(BUG-173): Azure disk cleanup accepts an empty or missing age
-    #  labels: bug, risk-high, crc
     def _is_old_enough(self, disk: SdkDisk, now: datetime.datetime) -> bool:
         settings = self._settings
         retention_age: Any = core_age.get_retention_age(
@@ -173,12 +171,13 @@ def build_disk_cleaner(context: RunContext) -> Cleaner:
     """Registry factory. Options: `resource_group`, `filter_tags`, `exception_tags`, `notags`,
     `age` and `custom_age_tag_key`."""
     options = context.options
+    age = real_run_age(context, "disk")
     base = Base(options.get("resource_group") or "")
     settings = DiskSettings(
         filter_tags=options.get("filter_tags"),
         exception_tags=options.get("exception_tags"),
         notags=options.get("notags"),
-        age=options.get("age"),
+        age=age,
         custom_age_tag_key=options.get("custom_age_tag_key"),
     )
     return AzureDiskCleaner(base.get_compute_client, base.resource_group, settings)

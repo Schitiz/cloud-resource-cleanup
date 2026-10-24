@@ -30,6 +30,7 @@ def _engine(group: str, name_regex: Any, exception_regex: Any = (), *, dry_run: 
         "resource_group": group,
         "name_regex": name_regex,
         "exception_regex": list(exception_regex),
+        "age": None if dry_run else {"days": 1},
     }
     return engine_run("nic", options, dry_run=dry_run, now=NOW)
 

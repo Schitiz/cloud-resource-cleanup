@@ -107,7 +107,7 @@ def test_bug_174_engine_continues_and_lists_only_deleted(
         "filter_tags": {},
         "exception_tags": {},
         "notags": {},
-        "age": {},
+        "age": {"days": 1},
         "custom_age_tag_key": "",
     }
     outcome = engine_run("disk", options, dry_run=False, now=NOW)

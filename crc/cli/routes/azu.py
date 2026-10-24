@@ -13,21 +13,34 @@ from crc.cli.routes import NotifyMode, Route, skips
 SPOT_NEEDS_GROUP = "resource_group is required for Azure Spot VM cleanup"
 
 
+def _with_age(values: dict[str, Any], options: Options) -> dict[str, Any]:
+    """Pass `--age` on when given (a real run of ip and nic requires it, a dry run does not)."""
+    if options.age is not None:
+        values["age"] = options.age
+    return values
+
+
 def _ip(options: Options) -> dict[str, Any]:
-    return {
-        "resource_group": options.resource_group,
-        "filter_tags": options.filter_tags,
-        "exception_tags": options.exception_tags,
-        "notags": options.notags,
-    }
+    return _with_age(
+        {
+            "resource_group": options.resource_group,
+            "filter_tags": options.filter_tags,
+            "exception_tags": options.exception_tags,
+            "notags": options.notags,
+        },
+        options,
+    )
 
 
 def _nic(options: Options) -> dict[str, Any]:
-    return {
-        "resource_group": options.resource_group,
-        "name_regex": options.name_regex,
-        "exception_regex": options.exception_regex,
-    }
+    return _with_age(
+        {
+            "resource_group": options.resource_group,
+            "name_regex": options.name_regex,
+            "exception_regex": options.exception_regex,
+        },
+        options,
+    )
 
 
 def _disk(options: Options) -> dict[str, Any]:

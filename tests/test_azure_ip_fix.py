@@ -41,6 +41,7 @@ def _engine(
         "filter_tags": filter_tags,
         "exception_tags": exception_tags,
         "notags": notags,
+        "age": None if dry_run else {"days": 1},
     }
     return engine_run("ip", options, dry_run=dry_run, now=NOW)
 

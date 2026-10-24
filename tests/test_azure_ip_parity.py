@@ -11,6 +11,7 @@ deletes, so a listing or selection error stops the run before any delete (fewer 
 registered `Cleaner` protocol (factory, `plan()`, `apply()`) is compared too.
 """
 
+import datetime
 import logging
 import types
 from collections.abc import Callable, Mapping, Sequence
@@ -43,6 +44,7 @@ class Case:
     list_error: Exception | None = None
     delete_errors: Mapping[str, Exception] = field(default_factory=dict)
     fails_in_plan: bool = False
+    age: Any = field(default_factory=lambda: {"days": 1})
 
 
 def _many(prefix: str, count: int) -> list[Any]:
@@ -225,6 +227,18 @@ CASES = [
         exception_tags={"env": ["test"]},
         notags={"owner": 123},
     ),
+    Case(
+        "young-ip-kept-by-age-gate",
+        [
+            types.SimpleNamespace(
+                name="a",
+                tags=ENV,
+                ip_configuration=None,
+                created_time=NOW.replace(tzinfo=datetime.UTC) - datetime.timedelta(hours=1),
+            ),
+            ip("b", ENV),
+        ],
+    ),
 ]
 
 
@@ -264,6 +278,7 @@ DIVERGING: dict[str, Diverges] = {
     "in-use-nat-gateway-skipped": Diverges("BUG-076", ["b"], None, ["a", "b"]),
     "in-use-linked-ip-skipped": Diverges("BUG-076", ["b"], None, ["a", "b"]),
     "in-use-service-ip-skipped": Diverges("BUG-076", ["b"], None, ["a", "b"]),
+    "young-ip-kept-by-age-gate": Diverges("BUG-075", ["b"], None, ["a", "b"]),
 }
 
 
@@ -364,6 +379,7 @@ def _options(case: Case) -> dict[str, Any]:
         "filter_tags": case.filter_tags,
         "exception_tags": case.exception_tags,
         "notags": case.notags,
+        "age": None if case.dry_run else case.age,
     }
 
 
@@ -380,7 +396,9 @@ def _run_engine(
         deleted = candidate_ids(engine_run("ip", _options(case), dry_run=case.dry_run, now=NOW))
     except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
-    logs = [(r.name, r.levelno, r.getMessage()) for r in caplog.records]
+    logs = [
+        (r.name, r.levelno, r.getMessage()) for r in caplog.records if r.levelno > logging.DEBUG
+    ]
     return Outcome(azure.calls, deleted, len(deleted), logs, capsys.readouterr().out, error)
 
 
@@ -436,12 +454,7 @@ def _run_cleaner(
     ctx = RunContext(
         dry_run=case.dry_run,
         operation=Operation.DELETE,
-        options={
-            "resource_group": case.resource_group,
-            "filter_tags": case.filter_tags,
-            "exception_tags": case.exception_tags,
-            "notags": case.notags,
-        },
+        options=_options(case),
         now=NOW,
     )
     error: tuple[str, str] | None = None
@@ -455,7 +468,9 @@ def _run_cleaner(
             deleted = list(cleaner.apply(plan, ctx).succeeded)
     except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
-    logs = [(r.name, r.levelno, r.getMessage()) for r in caplog.records]
+    logs = [
+        (r.name, r.levelno, r.getMessage()) for r in caplog.records if r.levelno > logging.DEBUG
+    ]
     return Outcome(azure.calls, deleted, len(deleted), logs, capsys.readouterr().out, error)
 
 
@@ -593,6 +608,12 @@ FIXED_QUIRKS: Sequence[FixedQuirk] = [
         "BUG-013",
         lambda o: o.error == TYPE_ERROR and o.deleted == ["a"],
         lambda o: o.error is None and o.deleted == ["a", "c"],
+    ),
+    FixedQuirk(
+        "young-ip-kept-by-age-gate",
+        "BUG-075",
+        lambda o: o.error is None and o.deleted == ["a", "b"],
+        lambda o: o.error is None and o.deleted == ["b"],
     ),
 ]
 

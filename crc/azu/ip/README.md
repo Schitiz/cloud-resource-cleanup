@@ -19,7 +19,7 @@ Modules:
 ## Safety Invariants
 
 - Authoritative text: `CLEANUP_SAFETY.md`; the per-module invariants are in `crc/azu/README.md` (Azure IPs). `plan()` makes no mutating call and never in a dry run (ARCH-005); the delete calls run from `apply()` only. A real run logs its `REGION` line at the end of `apply()` (a dry run in `plan()`), so a delete error leaves it out.
-- Selection: any-key `filter_tags`, `exception_tags` any key, `notags` all keys, kept when in use; no age gate (SAF-011 not met).
+- Selection: any-key `filter_tags`, `exception_tags` any key, `notags` all keys, kept when in use; a real run needs a positive `--age` (BUG-075; creation time read from `azure-mgmt-resource`, unknown or failed lookup keeps the IP; `ValueError` naming `--age` otherwise; a dry run needs none).
 - Do not call real cloud APIs in tests; mock every SDK client.
 
 ## Extension Rules

@@ -133,6 +133,7 @@ def test_engine_run_with_injected_client(monkeypatch: pytest.MonkeyPatch) -> Non
         "filter_tags": {"env": []},
         "exception_tags": {},
         "notags": {},
+        "age": {"days": 1},
     }
     outcome = engine_run("ip", options, dry_run=False, now=NOW)
     assert candidate_ids(outcome) == ["a"]

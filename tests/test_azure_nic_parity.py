@@ -14,6 +14,7 @@ age gate and lists no regions, so there are no age edges, region fallback or reg
 to cover.
 """
 
+import datetime
 import logging
 import types
 from collections.abc import Callable, Mapping, Sequence
@@ -45,6 +46,7 @@ class Case:
     begin_script: Mapping[str, Sequence[Exception | None]] = field(default_factory=dict)
     result_script: Mapping[str, Sequence[Exception | None]] = field(default_factory=dict)
     fails_in_plan: bool = False
+    age: Any = field(default_factory=lambda: {"days": 1})
 
 
 def _many(count: int) -> list[Any]:
@@ -204,6 +206,18 @@ CASES = [
         begin_script={"nic-a": [_boom()]},
         result_script={"nic-a": [_boom()]},
     ),
+    Case("real-run-without-age-raises", [nic("nic-a")], age=None),
+    Case(
+        "young-nic-kept-by-age-gate",
+        [
+            types.SimpleNamespace(
+                name="nic-young",
+                virtual_machine=None,
+                created_time=NOW.replace(tzinfo=datetime.UTC) - datetime.timedelta(hours=1),
+            ),
+            nic("nic-old"),
+        ],
+    ),
 ]
 
 
@@ -321,6 +335,16 @@ DIVERGING: dict[str, tuple[str, Callable[["Outcome"], bool], Callable[["Outcome"
         lambda o: o.deleted == ["nic-pe", "nic-pls", "nic-free"],
         _deleted_outcome(["nic-free"]),
     ),
+    "real-run-without-age-raises": (
+        "BUG-112",
+        lambda o: o.deleted == ["nic-a"],
+        _value_error,
+    ),
+    "young-nic-kept-by-age-gate": (
+        "BUG-112",
+        lambda o: o.deleted == ["nic-young", "nic-old"],
+        _deleted_outcome(["nic-old"]),
+    ),
 }
 
 
@@ -350,7 +374,9 @@ def _setup(
 
 
 def _records(caplog: pytest.LogCaptureFixture) -> list[tuple[str, int, str]]:
-    return [(r.name, r.levelno, r.getMessage()) for r in caplog.records]
+    return [
+        (r.name, r.levelno, r.getMessage()) for r in caplog.records if r.levelno > logging.DEBUG
+    ]
 
 
 def _run(
@@ -385,6 +411,7 @@ def _options(case: Case) -> dict[str, Any]:
         "resource_group": case.resource_group,
         "name_regex": case.name_regex,
         "exception_regex": case.exception_regex,
+        "age": None if case.dry_run else case.age,
     }
 
 
@@ -456,11 +483,7 @@ def _run_cleaner(
     ctx = RunContext(
         dry_run=case.dry_run,
         operation=Operation.DELETE,
-        options={
-            "resource_group": case.resource_group,
-            "name_regex": case.name_regex,
-            "exception_regex": case.exception_regex,
-        },
+        options=_options(case),
         now=NOW,
     )
     error: tuple[str, str] | None = None
@@ -614,7 +637,7 @@ def test_buggy_quirk_is_fixed(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     bug_id, old_shows, new_shows = DIVERGING[case_id]
-    assert bug_id in {"BUG-113", "BUG-114"}
+    assert bug_id in {"BUG-112", "BUG-113", "BUG-114"}
     case = _find(case_id)
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run_engine(case, monkeypatch, caplog, capsys)

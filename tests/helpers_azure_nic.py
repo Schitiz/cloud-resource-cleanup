@@ -15,10 +15,12 @@ from typing import Any
 import pytest
 
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
+DEFAULT_CREATED = NOW.replace(tzinfo=datetime.UTC) - datetime.timedelta(days=10)
+ROOT_ID = "/subscriptions/sub-1/resourceGroups/rg/providers/Microsoft.Network/networkInterfaces"
 
 
 def nic(name: Any, vm: Any = None) -> types.SimpleNamespace:
-    return types.SimpleNamespace(name=name, virtual_machine=vm)
+    return types.SimpleNamespace(id=f"{ROOT_ID}/{name}", name=name, virtual_machine=vm)
 
 
 class FakePoller:
@@ -70,6 +72,28 @@ class FakeNetworkClient:
         self.network_interfaces = FakeNicOperations(azure)
 
 
+class FakeResourceOperations:
+    def __init__(self, azure: "FakeAzure") -> None:
+        self.azure = azure
+
+    def list_by_resource_group(
+        self, resource_group_name: str, *, filter: str, expand: str
+    ) -> list[Any]:
+        return [
+            types.SimpleNamespace(
+                id=getattr(item, "id", None),
+                created_time=getattr(item, "created_time", DEFAULT_CREATED),
+            )
+            for item in self.azure.nics
+            if not isinstance(item, Exception)
+        ]
+
+
+class FakeResourceClient:
+    def __init__(self, azure: "FakeAzure") -> None:
+        self.resources = FakeResourceOperations(azure)
+
+
 class FakeAzure:
     def __init__(
         self,
@@ -78,6 +102,9 @@ class FakeAzure:
         begin_script: Mapping[str, Sequence[Exception | None]] | None = None,
         result_script: Mapping[str, Sequence[Exception | None]] | None = None,
     ) -> None:
+        for index, item in enumerate(nics):
+            if not isinstance(item, Exception) and getattr(item, "id", None) is None:
+                item.id = f"{ROOT_ID}/{getattr(item, 'name', None) or index}"
         self.nics = nics
         self.list_error = list_error
         self.begin_script = {k: list(v) for k, v in (begin_script or {}).items()}
@@ -101,4 +128,8 @@ class FakeAzure:
         monkeypatch.setenv("AZURE_RESOURCE_GROUP", "env-rg")
         monkeypatch.setattr("crc.azu._base.ClientSecretCredential", lambda **kwargs: "credential")
         monkeypatch.setattr("crc.azu._base.NetworkManagementClient", self.client)
+        monkeypatch.setattr(
+            "crc.azu._base.ResourceManagementClient",
+            lambda credential, subscription_id: FakeResourceClient(self),
+        )
         monkeypatch.setattr("crc.service.init_logging", lambda *args, **kwargs: None)
