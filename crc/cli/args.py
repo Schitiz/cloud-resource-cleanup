@@ -5,6 +5,7 @@ import ast
 from typing import Any
 
 from crc.cli.args_run import _add_age_args, _add_notify_args, _add_resource_args
+from crc.core.kinds import KIND_NAMES
 
 
 def _add_selection_args(parser: argparse.ArgumentParser) -> None:
@@ -24,19 +25,7 @@ def _add_selection_args(parser: argparse.ArgumentParser) -> None:
         "-r",
         "--resource",
         default="all",
-        choices=[
-            "disk",
-            "ip",
-            "keypair",
-            "vm",
-            "vpc",
-            "kms",
-            "nic",
-            "spot_instance_requests",
-            "spot_instances",
-            "snapshot",
-            "all",
-        ],
+        choices=[*KIND_NAMES, "all"],
         metavar="RESOURCE",
         help=(
             "Type of resource to operate on. Valid options include: 'disk', 'ip', "

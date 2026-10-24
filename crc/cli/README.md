@@ -12,8 +12,8 @@ plain `dict`, as on `main`.
 
 - `args.py` and `args_run.py`: `get_argparser()`, split into one private `_add_*_args` function per group of flags (selection and filter flags in `args.py`, age, notify and resource flags in `args_run.py`); the flag order is the order of `main`, which fixes the `--help` text and the key order of the returned dict. JSON and Python-literal values (`--age '{"days": 1}'`, `--filter_tags "{'k': ['v']}"`) go through `ast.literal_eval`.
 - `validate.py`: the type validators and the InfluxDB field checks.
-- `constants.py`: `CLOUDS` and `RESOURCES` (the `--cloud all` and `--resource all` order).
-- `pairs.py`: the supported (cloud, resource) pairs and the unsupported-pair message; `dispatch.py` re-exports them.
+- `constants.py`: `CLOUDS` and `RESOURCES` (the `--cloud all` and `--resource all` order; `RESOURCES` and the `--resource` choices come from the kind table `crc/core/kinds.py`).
+- `pairs.py`: the supported (cloud, resource) pairs and the unsupported-pair message, derived from the kind table; `dispatch.py` re-exports them.
 - `runner.py`: `CRC`, the run context of one cloud: the settings the bridge, the notifiers and the scan read (`cloud`, `dry_run`, `notags`, `project_id`, `resource_group`, the Slack and Influx clients, `slack_channel`, `influxdb_bucket`, `resource_suffix`) and `get_msg`. It runs nothing and sends nothing itself.
 - `main.py`: `main()`, which composes the modules below in the order of `main` on the main branch.
 - `inputs.py`: `Options` (every flag read with `.get`), `Tokens`, `Targets`, `read_options`, `read_tokens`, and the checks in the order `main` ran them (`check_tokens`, `check_flag_combinations`, `resolve_targets`, `validate_values`).

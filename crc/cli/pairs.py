@@ -3,23 +3,13 @@
 from typing import Any
 
 from crc.cli.constants import CLOUDS
-
-UNSUPPORTED_PAIR_MESSAGES: dict[str, str] = {
-    "keypair": "Keypair operation is only supported on AWS.",
-    "nic": "NICs operation is only supported on Azure.",
-    "kms": "KMS operation is only supported on AWS.",
-}
+from crc.core.kinds import AWS_ONLY_MESSAGE, KINDS, KINDS_BY_NAME
 
 SUPPORTED_CLOUDS: dict[str, tuple[str, ...]] = {
-    "keypair": ("aws",),
-    "nic": ("azure",),
-    "kms": ("aws",),
-    "ip": ("aws", "azure", "gcp"),
-    "snapshot": ("aws",),
-    "vpc": ("aws",),
+    kind.name: kind.clouds for kind in KINDS if kind.clouds is not None
 }
 
-AWS_ONLY_RESOURCES = ("snapshot", "vpc")
+AWS_ONLY_RESOURCES = tuple(kind.name for kind in KINDS if kind.unsupported == AWS_ONLY_MESSAGE)
 
 AWS_DISK_OPT_IN_MESSAGE = (
     "AWS EBS volume cleanup requires '--cloud aws --resource disk'. "
@@ -36,8 +26,4 @@ def is_supported_pair(cloud: Any, resource: Any) -> bool:
 
 
 def _unsupported_message(cloud: Any, resource: Any) -> str:
-    if resource in AWS_ONLY_RESOURCES:
-        return f"--resource {resource} is AWS-only; use --cloud aws (got --cloud {cloud})"
-    if resource == "ip":
-        return f"Invalid cloud provided: {cloud}. Supported clouds are {CLOUDS}"
-    return UNSUPPORTED_PAIR_MESSAGES[resource]
+    return KINDS_BY_NAME[resource].unsupported_message(cloud, CLOUDS)

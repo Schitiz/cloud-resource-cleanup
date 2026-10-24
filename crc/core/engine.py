@@ -13,36 +13,15 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from crc.core.cleaner import Plan, Result, RunContext
+from crc.core.kinds import KINDS
 from crc.core.registry import Registry
-from crc.core.report import (
-    DISK,
-    IP,
-    KEYPAIR,
-    KMS,
-    NIC,
-    SNAPSHOT,
-    SPOT_INSTANCE_REQUEST,
-    VM,
-    Report,
-)
+from crc.core.report import Report
 from crc.core.selection import Selection
 
 logger = logging.getLogger(__name__)
 
-# Report label of each resource kind, the labels the notifiers receive.
-# `vpc` sends no notification (BUG-084), so its label never reaches a notifier.
-KIND_LABELS: dict[str, str] = {
-    "disk": DISK,
-    "ip": IP,
-    "keypair": KEYPAIR,
-    "vm": VM,
-    "kms": KMS,
-    "nic": NIC,
-    "snapshot": SNAPSHOT,
-    "spot_instance_requests": SPOT_INSTANCE_REQUEST,
-    "spot_instances": VM,
-    "vpc": "VPC",
-}
+# Report label of each resource kind, the labels the notifiers receive (table: crc/core/kinds.py).
+KIND_LABELS: dict[str, str] = {kind.name: kind.label for kind in KINDS}
 
 
 class Notifier(Protocol):

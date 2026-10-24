@@ -17,6 +17,7 @@ from crc.cli import context as cli_context
 from crc.cli import main as cli_main
 from crc.core import selection as selection_module
 from crc.core.cleaner import Operation
+from crc.core.kinds import KINDS
 from crc.core.selection import (
     CLOUDS,
     EXTRA_RESOURCES,
@@ -141,14 +142,7 @@ def run_crc_main(
     return calls
 
 
-SUPPORTED_ON = {
-    "keypair": ("aws",),
-    "kms": ("aws",),
-    "nic": ("azure",),
-    "ip": ("aws", "azure", "gcp"),
-    "snapshot": ("aws",),
-    "vpc": ("aws",),
-}
+SUPPORTED_ON = {kind.name: kind.clouds for kind in KINDS if kind.clouds is not None}
 
 
 def unsupported_items(items: Any) -> list[tuple[str, str]]:
