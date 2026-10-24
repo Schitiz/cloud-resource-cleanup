@@ -25,6 +25,7 @@ from crc.core.cleaner import (
 from crc.core.engine import KIND_LABELS, Notifier, RunOutcome, run
 from crc.core.kinds import (
     ALL_KINDS,
+    AWS_ONLY_MESSAGE,
     EXPLICIT_KINDS,
     KIND_NAMES,
     KINDS,
@@ -106,6 +107,7 @@ from crc.core.selection import (
 __all__ = [
     "AGE_KEYS",
     "ALL_KINDS",
+    "AWS_ONLY_MESSAGE",
     "CLOUDS",
     "DISK",
     "EXPLICIT_KINDS",

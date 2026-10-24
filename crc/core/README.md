@@ -135,6 +135,7 @@ Kinds (module kinds.py). The one table of resource kinds; the parser choices, th
 - `ALL_KINDS`: the names the all expansion includes.
 - `EXPLICIT_KINDS`: the names only an explicit choice selects.
 - `KINDS_BY_NAME`: lookup of a kind by name.
+- `AWS_ONLY_MESSAGE`: the unsupported-pair message template of the AWS-only kinds (snapshot, vpc).
 
 Engine (module engine.py). Orchestration only; Slack and Influx senders are injected.
 

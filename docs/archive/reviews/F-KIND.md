@@ -107,3 +107,75 @@ Ran `pip install -r requirements.txt -r requirements-dev.txt -c constraints.txt 
 - Total `make check` runtime: **1m06.1s** wall clock
 
 VERDICT: APPROVE
+
+
+## Round 2 (Opus)
+
+Reviewed `git diff f8ed6dd..HEAD` (commits `81d02ee`, `88028c0`) against the lane task, the final
+wave contract and the kind items of `AGENT-NATIVE-AUDIT-3.md` (Round 2B item 8, recommendation 7)
+and `AGENT-NATIVE-AUDIT-3-GPT.md` (item 8, recommendation 4).
+
+### Round 1 fixes
+
+Both hold. `crc/cli/README.md` is identical to `f8ed6dd`; `crc/core/README.md` only adds the
+`kinds.py` Public API block. `tests/test_core_kinds.py` filters `added_table.added_kinds()` before
+it compares with the oracle literals, and checks `ADDED_RESOURCES` against `KINDS_BY_NAME`.
+
+### Findings
+
+1. **Fixed: `AWS_ONLY_MESSAGE` was undocumented.** It is a public constant of `crc/core/kinds.py`
+   imported across packages by `crc/cli/pairs.py`, but it was missing from the `crc/core/README.md`
+   Public API block and from `crc.core.__all__`. ARCH-002 does not catch this because it only
+   requires functions, classes and `__all__` names. Added one README line and exported it from
+   `crc/core/__init__.py`, the same way as the other `kinds.py` constants. ARCH-002 requires a
+   documented constant to be in `__all__`.
+2. **Accepted: `crc/core/__init__.py` is not on the lane's file list.** The edit only re-exports
+   the names of the new `kinds.py` module. No other lane touches it: `fw/docs` and `fw/gate` do not
+   change it, and `git merge-tree origin/fw/docs HEAD` merges cleanly, including the
+   `crc/core/README.md` edits on both sides.
+3. **Checked, no change: dict order.** `pairs.SUPPORTED_CLOUDS` and `engine.KIND_LABELS` now follow
+   table order, not the old literal order. Both are only read with `.get` or `[...]` (in
+   `pairs.is_supported_pair`, `engine._run_one` and the tests), so nothing observable changes.
+4. **Checked, kept hand-written: `--resource` help text.** It is prose in a different order with
+   per-kind annotations, compared byte for byte by the parity tests. The reason is recorded above.
+   `CLOUDS` stays a literal because it is not a kind.
+5. **Minor, no change: `AWS_ONLY_RESOURCES` is derived by comparing message templates**
+   (`kind.unsupported == AWS_ONLY_MESSAGE`). A dedicated field would be sturdier, but the result
+   is pinned to `{"snapshot", "vpc"}` by `test_pair_rules_keep_their_content` and
+   `tests/test_cli_merge_fix.py`.
+
+### Checklist
+
+1. Lane items: open in code, all true. One frozen `Kind` table (name, label, `in_all`, `clouds`,
+   `unsupported`, `explicit_only`). Derived from it: parser choices (`args.py`),
+   `selection.RESOURCES`/`EXTRA_RESOURCES`, `constants.RESOURCES`, `pairs.SUPPORTED_CLOUDS`,
+   `AWS_ONLY_RESOURCES`, `_unsupported_message`, `engine.KIND_LABELS`, and `SUPPORTED_ON` in
+   `tests/test_core_selection.py`. The route completeness test is in both directions. The
+   ARCHITECTURE steps are listed under Docs to update.
+2. `python3 crc.py --help` is byte-identical to `f8ed6dd` (8,434 bytes; checked before and after
+   the Round 2 edit). `tests/test_jenkins_contract.py`, `tests/test_*parity*.py`,
+   `tests/helpers_ag_cli_added.py` are unchanged.
+3. Locked files are untouched: `tests/legacy/*.txt`, `safety_lock.json`, `frozen_inputs.json`,
+   `docs/refactor/BUGS.md`. No test was weakened; the floor was raised from 44,597 to 44,613. I
+   broke each new check once locally, then reverted:
+   - Moved `vm` before `keypair` in `KINDS`: `test_parser_choices_keep_their_order` failed.
+   - Deleted the AWS `snapshot` route: the route completeness test failed with "supported pair
+     without a route".
+   - Changed the `vpc` label to `"Vpc"`: `test_report_labels_are_unchanged` failed.
+4. Changed files are owned or covered by finding 2.
+5. File sizes are within limits: `crc/core/__init__.py` has 200 lines, `crc/core/README.md` 196,
+   `kinds.py` 88, `tests/test_core_kinds.py` 175. Every function is at most 60 lines, and the
+   README Public API is in sync (ARCH-002 passes).
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt -c constraints.txt && make check`, after
+the Round 2 edit:
+- ruff check passed, and `ruff format --check` reported 373 files formatted.
+- mypy found no issues in 372 files.
+- lint-imports: 5 contracts kept.
+- pytest: **44,612 passed, 1 skipped in 53.3s**.
+- ARCH-008: 44,613 tests, floor 44,613.
+- `make check` took **1m02s** of wall-clock time.
+
+ROUND 2 VERDICT: APPROVE
