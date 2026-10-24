@@ -17,7 +17,7 @@ error isolation), `summary.py` (closing log lines), `cleaner.py` (`plan()` / `ap
 
 - `SpotRequestCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus apply_region).
 - `build_spot_request_cleaner`: registry factory behind @register("aws", "spot_instance_requests"); reads filter_tags, exception_tags, notags, age (required) and custom_age_tag_key from RunContext.options.
-- `SpotRuntime`: (runtime.py) frozen dataclass with the injected client factory, region lister, clock and `Waiter`.
+- `SpotRuntime`: (runtime.py) frozen dataclass with the injected client factory, region lister and `Waiter`.
 - `settings_from_options` (runtime.py), `log_summary` (summary.py), `list_matches`, `guarded_sweep`, `guarded_cleanup` (regions.py): helpers used by the cleaner and re-exported by cleaner.py (settings, closing warnings, per-region listing, error isolation).
 - `SpotClient`, `VolumePaginator`: Protocols of the EC2 calls used; tests pass fakes. `boto3_client`, `all_regions`: the real client and region factories.
 - `SpotSettings`, `RequestMatch`, `SpotState`, `Waiter`, `Inspection`: frozen/slot dataclasses of model.py.

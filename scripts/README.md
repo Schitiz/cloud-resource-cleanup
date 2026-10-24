@@ -5,6 +5,7 @@
 Developer and CI tooling that is not part of the CLI. `smoke_offline.py` runs `python crc.py
 --dry_run` once per (cloud, kind) of the production Jenkins commands with every SDK faked and
 sockets denied (`make smoke-offline`; `tests/test_smoke_offline.py` runs the same pairs).
+`doctor.py` checks the Python version and the pinned ruff, mypy and pytest (`make doctor`).
 
 ## Public API
 
@@ -13,7 +14,8 @@ sockets denied (`make smoke-offline`; `tests/test_smoke_offline.py` runs the sam
 - `offline_env`: the subprocess environment (dummy credentials, the hook path, the switch).
 - `run_command`: run one command offline.
 - `problems_of`: what is wrong with one run (exit code, count of `RUN START` and `RESULT` lines).
-- `main`: run every pair and print a summary.
+- `main`: run every pair and print a summary (`smoke_offline.py`; `doctor.py` has its own `main`).
+- `pinned_versions`, `minimum_python`, `installed_version`, `problems_of`, `install_command`: the checks of `doctor.py`.
 
 ## Safety Invariants
 

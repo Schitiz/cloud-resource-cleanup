@@ -1,7 +1,7 @@
 """OWNER-ONLY: regenerate `frozen_inputs.json` (ARCH-007). Agents must never run this.
 
 Run `python -m tests.archtest.update_frozen_inputs` only after the owner reviewed and accepted
-a change to `tests/legacy/*.txt` or `requirements.txt`.
+a change to `tests/legacy/*.txt`, `requirements.txt` or `constraints.txt`.
 """
 
 import json

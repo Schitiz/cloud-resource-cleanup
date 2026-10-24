@@ -3,7 +3,6 @@
 """GCP Spot VM cleaner: `plan()` lists and filters, `apply()` deletes the VMs and their
 leftover disks."""
 
-import datetime
 import logging
 from collections.abc import Iterable, Iterator
 from typing import Any
@@ -162,7 +161,7 @@ class SpotVMCleaner:
         candidate: Candidate,
         instances: list[str],
         disks: list[str],
-        clock: Clock = datetime.datetime.now,
+        clock: Clock,
     ) -> None:
         """Dry run of one VM: record it, then record the leftover disks that pass the label
         check (a read of each disk). Any error is logged."""
@@ -185,7 +184,7 @@ class SpotVMCleaner:
         disks: list[str],
         *,
         dry_run: bool,
-        clock: Clock = datetime.datetime.now,
+        clock: Clock,
     ) -> None:
         """Delete one VM and wait for the operation, then its leftover disks, recording each
         as it is done. A VM whose delete fails or does not complete is not recorded and its

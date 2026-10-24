@@ -84,17 +84,19 @@ def disk_label(settings: SpotSettings, ref: DiskRef, fallback_zone: str) -> str:
 
 
 def _custom_age_keeps(
-    disk: Mapping[str, Any], labels: dict[str, str], settings: SpotSettings, clock: Clock
+    disk: Mapping[str, Any], labels: dict[str, str], settings: SpotSettings, clock: Clock | None
 ) -> str | None:
     """BUG-242: the keep reason when the disk carries the custom age label and is younger than
-    it, or when the label is invalid or the disk age is unreadable (fail closed). None when the
-    disk has no custom age label, or is old enough for it."""
+    it, or when the label is invalid, the disk age is unreadable or no clock was injected (fail
+    closed). None when the disk has no custom age label, or is old enough for it."""
     try:
         retention_age = core_age.validated_retention_age(labels, settings.custom_age_tag_key or "")
     except ValueError:
         return "disk_invalid_age_tag"
     if not retention_age:
         return None
+    if clock is None:
+        return "disk_age_unknown"
     try:
         created = datetime.datetime.strptime(str(disk.get("creationTimestamp")), TIME_FORMAT)  # noqa: DTZ007 - TIME_FORMAT ends in %z, so the result is aware
         now = clock().astimezone(created.tzinfo)
@@ -109,7 +111,7 @@ def disk_ok_to_delete(
     settings: SpotSettings,
     ref: DiskRef,
     fallback_zone: str,
-    clock: Clock = datetime.datetime.now,
+    clock: Clock | None = None,
 ) -> bool:
     """Read the disk and keep it when its own labels match `exception_labels` or `notags`, or
     (BUG-242) when it carries the custom age label and is younger than it or the label is
