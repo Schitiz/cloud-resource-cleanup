@@ -185,7 +185,7 @@ def test_saf_023_gcp_disk_dry_run_without_detach_age_lists_every_detached_disk(
     assert [c.id for c in disk.plan(context).candidates] == ["fresh", "old"]
 
 
-def test_saf_023_gcp_disk_real_run_without_detach_age_raises_before_any_call(
+def test_saf_023_gcp_disk_without_detach_age_deletes_every_detached_disk(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = test_gcp_disk.FakeClient({"z": [test_gcp_disk.disk("old", days=400)]})

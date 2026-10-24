@@ -11,7 +11,7 @@ Modules:
 - `_common.py`: `is_old_enough`, the age gate (timestamp, custom age label, `core_age.is_old`) shared by the disk and VM cleaners, and the `TIME_FORMAT` and `Clock` they share
 - `disk.py`: re-exports the disk names; `disk_cleaner.py` holds `DiskCleaner` (registered as `gcp` / `disk`) and `disk_settings.py` `DiskSettings` and the result helpers. Deletes unattached disks by `last_detach_timestamp` (zonal disks of every zone); label any-key filter; `notags` (as the VM cleaner) and `name_regex` (`re.search`) are applied; `age` is not used
 - `disk_client.py`: `DiskView`, `GcpDiskClient` and `ComputeDiskClient`, re-exported by `disk.py`
-- `ip.py`: re-exports the IP names; `ip_cleaner.py` holds `IpCleaner` (registered as `gcp` / `ip`) and `ip_client.py` the client protocols and `ComputeIpClient`. Deletes RESERVED addresses (`AddressesClient().delete`, waits for the operation); substring name and exception filters
+- `ip.py`: re-exports the IP names; `ip_cleaner.py` holds `IpCleaner` (registered as `gcp` / `ip`) and `ip_client.py` the client protocols and `ComputeIpClient`. Deletes RESERVED addresses (`AddressesClient().delete`, waits for the operation) by `creationTimestamp` (`age`), substring name and exception filters
 - `spot_vm/`: subpackage with its own README; the import path is `crc.gcp.spot_vm`
 - `vm_client.py`: `GcpVmClient`, `InstanceView` and `ComputeVmClient`, re-exported by `vm.py`
 - `vm.py`: re-exports the VM names; `vm_cleaner.py` holds `VmCleaner` (registered as `gcp` / `vm`), and `vm_settings.py` `VmSettings`. Deletes (`delete`) or stops (`stop`) RUNNING instances by labels (all keys), `notags` and exception labels, and age
@@ -25,7 +25,7 @@ The names below are synced with this README by ARCH-002. The spot_vm subpackage 
 - `is_old_enough`: the shared age gate of the disk and VM cleaners: parses the timestamp, reads the custom age label (fail closed: a present but bad label keeps the item, BUG-004 fixed), logs an "Updating age" line when it is set and returns whether the item is old enough for the effective age; pure apart from logging.
 - `ZoneScan`: counts the resources listed and selected in one zone or region and logs the REGION line through the current run log when finished; log text only (BUG-361).
 - `log_action`: logs the ACTION line (would_delete, deleted, would_stop or stopped) of one candidate through the current run log.
-- `AddressView`: Protocol of the two address fields read (name, status); tests pass fakes.
+- `AddressView`: Protocol of the three address fields read (name, status, creation_timestamp); tests pass fakes.
 - `OperationView`: Protocol of the long-running delete operation the delete call returns; waiting for it (result) raises when it failed (BUG-064).
 - `GcpIpClient`: Protocol of the three Compute Engine calls used (list_regions, list_addresses, delete_address); tests pass fakes.
 - `ComputeIpClient`: the google-cloud-compute implementation of `GcpIpClient`; it builds a new RegionsClient or AddressesClient for every call.

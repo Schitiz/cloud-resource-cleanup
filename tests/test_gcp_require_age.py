@@ -64,6 +64,9 @@ class Client:
     def list_instances(self, project_id: str, zone: str) -> Iterable[Any]:
         return self.items
 
+    def list_disks(self, project_id: str, zone: str) -> Iterable[Any]:
+        return self.items
+
     def list_addresses(self, project_id: str, region: str) -> Iterable[AddressView]:
         return self.items
 
@@ -75,7 +78,16 @@ class Client:
         self.calls.append(("stop_instance", name))
         return {"name": "op"}
 
+    def delete_disk(self, project_id: str, zone: str, name: str) -> object:
+        self.calls.append(("delete_disk", name))
+        return {"name": "op"}
+
     def get_zone_operation(self, project_id: str, zone: str, name: str) -> Mapping[str, Any]:
+        return {"status": "DONE"}
+
+    def get_operation(
+        self, project_id: str, scope_kind: str, scope: str, name: str
+    ) -> Mapping[str, Any]:
         return {"status": "DONE"}
 
     def delete_address(self, project_id: str, region: str, name: str) -> Any:
@@ -116,11 +128,22 @@ def test_bug_124_the_age_flag_is_no_substitute_for_detach_age() -> None:
 def test_bug_124_dry_run_and_positive_detach_age_still_build(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("crc.gcp.disk_cleaner.ComputeDiskClient", lambda: Client([]))
+    disks = [
+        types.SimpleNamespace(
+            name="young", users=[], labels={}, last_detach_timestamp=stamp(hours=1)
+        ),
+        types.SimpleNamespace(name="old", users=[], labels={}, last_detach_timestamp=stamp(days=2)),
+    ]
+    client = Client(disks)
+    monkeypatch.setattr("crc.gcp.disk_cleaner.ComputeDiskClient", lambda: client)
     options: dict[str, Any] = {"project_id": PROJECT}
-    assert get("gcp", "disk")(context(options, dry_run=True)) is not None
+    dry = get("gcp", "disk")(context(options, dry_run=True))
+    assert deleted_ids(run_engine(dry, "disk", dry_run=True)) == ["young", "old"]
+    assert client.calls == []
     options["detach_age"] = {"hours": 2}
-    assert get("gcp", "disk")(context(options)) is not None
+    real = get("gcp", "disk")(context(options))
+    assert deleted_ids(run_engine(real, "disk")) == ["old"]
+    assert client.calls == [("delete_disk", "old")]
 
 
 @pytest.mark.parametrize("age", BAD_AGES)
@@ -149,8 +172,9 @@ def test_bug_183_custom_age_label_still_replaces_the_positive_age(
 ) -> None:
     client = Client(
         [
+            instance("young", days=0.1),
             instance("long-ttl", days=3, labels={"ttl": "{'days': 5}"}),
-            instance("short-ttl", days=3, labels={"ttl": "{'hours': 1}"}),
+            instance("short-ttl", days=0.5, labels={"ttl": "{'hours': 1}"}),
             instance("no-label", days=3),
         ]
     )

@@ -84,12 +84,6 @@ reused. `tests/archtest/safety_lock.json` maps IDs to the tests that lock them.
 **When adding a new destructive module**
 
 - [SAF-011] Require a real age (or equivalent) gate in `__init__`.
-  Met by the GCP kinds too (BUG-124, BUG-062, BUG-183): a real run of GCP disk (`--detach_age`),
-  GCP IP and GCP VM (`--age`) raises `ValueError` naming the flag before any cloud call when the
-  age is missing or zero; a dry run needs none. The GCP IP cleaner gates each RESERVED address on
-  its `creationTimestamp` (RFC 3339, the disk and VM parser): an address younger than `--age`, or
-  with an unreadable timestamp (recorded as a failure), is kept. A custom age label still replaces
-  `--age` per resource on GCP VM (it never replaces the requirement for `--age`).
 - [SAF-012] Reject or skip unknown keys, zero durations, and bad custom age tags.
 - [SAF-013] Avoid having `--max_age` / `MAX_AGE` silently shorten a floor another flag
   (for example AWS `--detach_age`) just established, unless that change is
@@ -136,11 +130,11 @@ reused. `tests/archtest/safety_lock.json` maps IDs to the tests that lock them.
 - [SAF-021] The GCP disk cleaner (`DiskCleaner` in `crc/gcp/disk_cleaner.py`) uses `disk.last_detach_timestamp` via
   `is_old(retention_age or self.detach_age, ...)`.
 - [SAF-022] `--age` never reaches the GCP disk cleaner's age gate; only `detach_age` is read.
-- [SAF-023] A real (not `--dry_run`) GCP disk run requires a positive `--detach_age` (BUG-124
-  fixed): the registered factory raises `ValueError` naming `detach_age` before any client is
-  built or any cloud call, for an omitted, empty, zero or `None` value; `--age` is no substitute.
-  A dry run without it still lists every unattached disk with a `last_detach_timestamp` (the
-  Jenkins `-d` untagged reports).
+- [SAF-023] A real (not `--dry_run`) GCP disk run requires a positive `--detach_age` (SAF-011,
+  BUG-124 fixed): the registered factory raises `ValueError` naming `detach_age` before any client
+  is built or any cloud call, for an omitted, empty, zero or `None` value; `--age` is no
+  substitute. A dry run without it still lists every unattached disk with a `last_detach_timestamp`
+  (the Jenkins `-d` untagged reports).
 - [SAF-024] A custom age label replaces `detach_age` on GCP.
 - [SAF-025] On AWS a custom tag never changes the CloudWatch `detach_age` window
   (`_drop_recently_attached` uses only the `detach_age` setting). The CreateTime
@@ -237,7 +231,13 @@ No SAF ID is assigned to these yet.
   one sensitive value keeps the volume.
 - GCP disk delete is recorded only after the zone operation is DONE without
   error. An error evaluating or deleting one disk, or listing one zone, is recorded
-  and the run continues; the disk is kept.
+  and the run continues; the disk is kept. GCP IP and GCP VM also meet SAF-011
+  (BUG-062, BUG-183 fixed): a real run requires a positive `--age` (`ValueError`
+  naming `age` before any cloud call when the age is missing or zero; a dry run
+  needs none, and a custom age label still replaces `--age` per instance on GCP VM).
+  The GCP IP cleaner (`crc/gcp/ip_cleaner.py`) gates each RESERVED address on its
+  `creationTimestamp` (RFC 3339, the disk and VM parser): an address younger than
+  `--age`, or with an unreadable timestamp (recorded as a failure), is kept.
 - OCI disk: when the volume attachments, the availability domains or the
   boot volume attachments of a region cannot be listed (connectivity or auth error,
   or no availability domain), every block volume (respectively boot volume) of that

@@ -43,10 +43,11 @@ def _log_summary(deleted: Sequence[str], *, dry_run: bool) -> None:
 
 
 class IpCleaner:
-    """Deletes RESERVED addresses whose name contains a `filter_regex` entry (any; empty
-    matches all) unless it contains an `exception_regex` entry (any; BUG-001 fixed). Applies
-    to every region of the project. A failed delete is recorded and the next address goes on
-    (BUG-063); an address counts as deleted only once its operation finished (BUG-064)."""
+    """Deletes RESERVED addresses that are at least `age` old (`creation_timestamp`; BUG-062)
+    and whose name contains a `filter_regex` entry (any; empty matches all) unless it
+    contains an `exception_regex` entry (any; BUG-001 fixed). Applies to every region of the
+    project. A failed delete is recorded and the next address goes on (BUG-063); an address
+    counts as deleted only once its operation finished (BUG-064)."""
 
     cloud = "gcp"
     kind = "ip"
