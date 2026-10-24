@@ -42,6 +42,17 @@ from tests.test_aws_spot_instance_requests_parity import (
 )
 
 
+def mutations(aws: FakeAws) -> list[tuple[str, dict[str, Any]]]:
+    return [(c[1], c[2]) for c in aws.calls if c[1] in MUTATING]
+
+
+MARKER_TAGS = [{"Key": LEFTOVER_FROM_TAG}, {"Key": LEFTOVER_SCOPE_PREFIX + "yb_owner"}]
+LEFTOVER_TAGS = [
+    {"Key": LEFTOVER_FROM_TAG, "Value": "sir-1"},
+    {"Key": LEFTOVER_SCOPE_PREFIX + "yb_owner", "Value": "qa"},
+]
+
+
 def plan_ids(case: Case, monkeypatch: pytest.MonkeyPatch, **options: Any) -> list[str]:
     ctx = RunContext(True, Operation.DELETE, {**OPTIONS, **options}, NOW)
     aws = FakeAws(case)
@@ -107,7 +118,7 @@ def test_saf_026_tags_are_matched_on_the_request_not_the_instance(
     case = Case(
         "x", one(std(requests=[req(instance="i-untagged")], instances={"i-untagged": inst()}))
     )
-    assert plan_ids(case, monkeypatch)[0] == "sir-1"
+    assert plan_ids(case, monkeypatch) == ["sir-1", "i-untagged"]
 
 
 def test_saf_026_untagged_requests_are_skipped_even_without_filters(
@@ -121,7 +132,7 @@ def test_saf_029_a_cancelled_request_with_an_instance_is_retried(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     case = Case("x", one(std(requests=[req(state="cancelled", instance="i-1")])))
-    assert plan_ids(case, monkeypatch)[0] == "sir-1"
+    assert plan_ids(case, monkeypatch) == ["sir-1", "i-1"]
 
 
 def test_saf_029_a_cancelled_request_without_an_instance_is_not_planned(
@@ -135,13 +146,14 @@ def test_saf_028_cancel_comes_before_terminate_and_leftover_volume_is_deleted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     aws, outcome = run_engine(Case("x", one(std())), monkeypatch, dry_run=False)
-    order = [m for m in _methods(aws) if m in MUTATING]
-    assert order == [
-        "create_tags",
-        "cancel_spot_instance_requests",
-        "terminate_instances",
-        "delete_volume",
+    assert mutations(aws) == [
+        ("create_tags", {"Resources": ["vol-1"], "Tags": LEFTOVER_TAGS}),
+        ("cancel_spot_instance_requests", {"SpotInstanceRequestIds": ["sir-1"]}),
+        ("terminate_instances", {"InstanceIds": ["i-1"]}),
+        ("delete_volume", {"VolumeId": "vol-1"}),
     ]
+    assert outcome.result is not None
+    assert outcome.result.succeeded == ("sir-1", "i-1")
     assert outcome.result is not None
     assert outcome.result.related["Disk"] == ("vol-1",)
 
@@ -155,6 +167,7 @@ def test_saf_028_a_failed_cancel_does_not_terminate_a_persistent_request(
     assert "terminate_instances" not in _methods(aws)
     assert outcome.result is not None
     assert outcome.result.succeeded == ()
+    assert outcome.result.related["Disk"] == ()
 
 
 def test_saf_028_a_failed_volume_tag_does_not_terminate(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -165,6 +178,10 @@ def test_saf_028_a_failed_volume_tag_does_not_terminate(monkeypatch: pytest.Monk
     methods = _methods(aws)
     assert "terminate_instances" not in methods
     assert "cancel_spot_instance_requests" not in methods
+    assert "delete_volume" not in methods
+    assert mutations(aws)[1:] == [
+        ("delete_tags", {"Resources": ["vol-1"], "Tags": MARKER_TAGS}),
+    ]
     assert outcome.result is not None
     assert outcome.result.succeeded == ()
 
@@ -176,7 +193,8 @@ def test_saf_029_an_already_cancelled_request_skips_cancel_then_terminates(
     aws, outcome = run_engine(case, monkeypatch, dry_run=False)
     methods = _methods(aws)
     assert "cancel_spot_instance_requests" not in methods
-    assert "terminate_instances" in methods
+    assert methods.count("terminate_instances") == 1
+    assert ("delete_volume", {"VolumeId": "vol-1"}) in mutations(aws)
     assert outcome.result is not None
     assert "i-1" in outcome.result.succeeded
 
@@ -224,9 +242,9 @@ def test_saf_030_tags_bdm_volumes_when_instance_is_shutting_down(
     )
     aws, outcome = run_engine(Case("x", one(spec)), monkeypatch, dry_run=False)
     methods = _methods(aws)
-    assert "create_tags" in methods
+    assert methods.count("create_tags") == 1
     assert "terminate_instances" not in methods
-    assert "delete_volume" in methods
+    assert ("delete_volume", {"VolumeId": "vol-1"}) in mutations(aws)
     assert outcome.result is not None
     assert outcome.result.related["Disk"] == ("vol-1",)
 
@@ -284,8 +302,9 @@ def test_saf_032_terminate_failure_clears_leftover_tag(
     spec = std(errors={"terminate_instances": ce("OperationNotPermitted", "TerminateInstances")})
     aws, _ = run_engine(Case("x", one(spec)), monkeypatch, dry_run=False)
     methods = _methods(aws)
-    assert "create_tags" in methods
-    assert "delete_tags" in methods
+    assert methods.count("create_tags") == 1
+    assert methods.count("delete_tags") == 1
+    assert ("delete_tags", {"Resources": ["vol-1"], "Tags": MARKER_TAGS}) in mutations(aws)
     assert "delete_volume" not in methods
 
 
@@ -296,7 +315,8 @@ def test_saf_032_cancel_botocore_error_invalidates_marker(
     aws, _ = run_engine(Case("x", one(spec)), monkeypatch, dry_run=False)
     methods = _methods(aws)
     assert "terminate_instances" not in methods
-    assert "delete_tags" in methods
+    assert methods.count("delete_tags") == 1
+    assert ("delete_tags", {"Resources": ["vol-1"], "Tags": MARKER_TAGS}) in mutations(aws)
 
 
 def test_saf_032_terminate_failure_writes_sentinel_when_delete_tags_denied(
@@ -311,6 +331,9 @@ def test_saf_032_terminate_failure_writes_sentinel_when_delete_tags_denied(
     aws, _ = run_engine(Case("x", one(spec)), monkeypatch, dry_run=False)
     create_calls = [c for c in aws.calls if c[1] == "create_tags"]
     assert len(create_calls) == 1 + 1 + 1
+    assert create_calls[1][2]["Tags"] == [
+        {"Key": LEFTOVER_SCOPE_PREFIX + "yb_owner", "Value": LEFTOVER_INVALID_VALUE}
+    ]
     assert create_calls[-1][2]["Tags"] == [
         {"Key": LEFTOVER_FROM_TAG, "Value": LEFTOVER_INVALID_VALUE}
     ]
@@ -322,7 +345,7 @@ def test_saf_033_botocore_terminate_error_invalidates_marker(
     spec = std(errors={"terminate_instances": conn()})
     aws, _ = run_engine(Case("x", one(spec)), monkeypatch, dry_run=False)
     methods = _methods(aws)
-    assert "delete_tags" in methods
+    assert methods.count("delete_tags") == 1
     assert "delete_volume" not in methods
 
 
@@ -337,7 +360,8 @@ def test_saf_033_botocore_terminate_error_keeps_marker_if_shutting_down(
     aws, _ = run_engine(Case("x", one(spec)), monkeypatch, dry_run=False)
     methods = _methods(aws)
     assert "delete_tags" not in methods
-    assert "delete_volume" in methods
+    assert methods.count("delete_volume") == 1
+    assert ("delete_volume", {"VolumeId": "vol-1"}) in mutations(aws)
 
 
 def test_saf_033_botocore_terminate_unknown_state_invalidates_marker(
@@ -370,7 +394,7 @@ def test_saf_033_botocore_terminate_unknown_state_invalidates_marker(
     cleaner._clients["us-west-2"] = real_client
     cleaner.apply(plan, ctx)
     methods = _methods(aws)
-    assert "delete_tags" in methods
+    assert methods.count("delete_tags") == 1
     assert "delete_volume" not in methods
 
 
