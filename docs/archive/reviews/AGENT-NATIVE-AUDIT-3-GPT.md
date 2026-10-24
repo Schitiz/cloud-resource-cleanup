@@ -216,9 +216,9 @@ Missing pieces common in mature agent-native repos:
 3. An agent-generated, reviewed workflow for changing safety hashes/oracles/guardrails. Requiring
    approval is sound; requiring a human to perform the edit is not.
 4. A suite-wide network deny, not only the smoke hook.
-5. Dependency/security scanning and proof that direct dependencies are used. Constraints make
-   resolution reproducible, but `paramiko`, `requests` and `beautifulsoup4` remain direct
-   requirements with no production imports.
+5. Dependency/security scanning and lock provenance. Constraints make resolution reproducible,
+   and the earlier unused direct dependencies are gone, but there is no vulnerability/license
+   gate or automated proof that the constraints still describe a reviewed resolution.
 6. Generated semantic reference sections for supported pairs, route/label coverage, safety-lock
    coverage and test counts.
 
@@ -253,18 +253,18 @@ also say to search `BUGS.md` by resource/ID, never read it wholesale.
 
 | # | Recommendation | Status now | Evidence |
 |---:|---|---|---|
-| 1 | Fix post-engine doc lies and seven fail-open READMEs | **Done** | Live docs no longer name deleted handlers/adapters; package age text is fail-closed. New drift exists, but not the listed lies. |
+| 1 | Fix post-engine doc lies and seven fail-open READMEs | **Partly done** | Deleted handler/adapter references and package fail-open claims are fixed, but `ARCHITECTURE.md` now has a stale `MAX_AGE` claim, so the broader documentation-freshness goal is not complete. |
 | 2 | Extend ARCH-011 to all live docs and backticked paths | **Done** | Recursive `.md`/`.mdc` scan, archive exclusion, links, repo paths, globs and placeholders in `doc_links.py`, with self-tests. |
 | 3 | Repoint safety locks, map all gaps, delete adapters/dead selection builder | **Done** | 46/46 locks, zero gaps, zero adapter files, no `build_selection`. |
 | 4 | Permit additive CLI flags/resources while preserving the oracle | **Done** | One typed ADDED table plus tests proving additions pass and changed legacy flags fail. |
 | 5 | Add the production Jenkins command manifest | **Done** | 47-command fixture and three contract layers in `test_jenkins_contract.py`. |
 | 6 | Split/archive BUGS and unify location policy | **Partly done** | New rows use current paths and TODOs point to current code; the 403-row table remains unsplit and old locations remain intentionally stale. |
 | 7 | Close ARCH-003 env/clock/print loopholes | **Partly done** | Core env and clock-reference holes are closed; cloud bans are broad. `crc/notify` still permits and uses `print`. |
-| 8 | Pin deps, remove unused deps, format, type `crc.py` | **Partly done** | Constraints and SDK-independent mypy exist; Ruff format is in lint/CI. Suspect unused direct deps remain, and `crc.py` remains excluded from mypy. |
+| 8 | Pin deps, remove unused deps, format, type `crc.py` | **Partly done** | Constraints and SDK-independent mypy exist, unused direct dependencies were removed, and Ruff format is in lint/CI. `requirements.txt` itself is unpinned and `crc.py` remains excluded from mypy. |
 | 9 | Add offline CLI smoke | **Done** | `make smoke-offline`, fake SDK hook, denied sockets, subprocess per production pair. |
 | 10 | Prebuild the Cursor Cloud environment | **Open / deliberately deprioritized** | Repo install config exists, but this machine was unbootstrapped. Owner says Cloud Agents are not the long-term workflow, so this should not lower the cross-agent score much. |
 
-Net: **6 done, 3 partly done, 1 open/deprioritized**.
+Net: **5 done, 4 partly done, 1 open/deprioritized**.
 
 ## 10. Status of the 7.0/10 audit's top ten
 
