@@ -19,14 +19,15 @@ contradicts fixed code in several packages; adding a resource kind conflicts wit
 parser oracle; owner-only guardrail updates make some normal changes stop conditions; there is no
 safe offline end-to-end CLI; and 403 bugs plus compatibility adapters preserve too much refactor
 scaffolding. Also, the supplied premise that the legacy adapter layer was deleted is overstated:
-production no longer dispatches through it, but adapter classes and adapter-focused tests remain.
+production delete/stop no longer dispatches through it, but `--scan_tag` still instantiates VM
+adapters, and adapter classes, exports, and adapter-focused tests remain.
 
 ## 1. Day-one walkthrough and context cost
 
 I started at `AGENTS.md`, then read the human `README.md`, followed the implementation path to
 `ARCHITECTURE.md`, `CLEANUP_SAFETY.md`, `.cursor/skills/crc-maintain/SKILL.md`, and the relevant
-cloud/package READMEs. For a focused AWS cleaner change, that is about **7 files, 9,900 words, or
-roughly 13,000 tokens before code**:
+cloud/package READMEs. The seven primary documents alone are about **9,900 words / 13,000
+tokens**:
 
 | Document | Lines | Words |
 |---|---:|---:|
@@ -37,6 +38,12 @@ roughly 13,000 tokens before code**:
 | `crc-maintain/SKILL.md` | 52 | 484 |
 | `crc/aws/README.md` | 60 | 1,938 |
 | Example kind README (`crc/aws/keypairs/README.md`) | 30 | 262 |
+
+That is only orientation. Following the links and instructions through the core/CLI READMEs,
+archtest catalog, model cleaner and route, and relevant tests before a safe edit expands the
+realistic minimal read to about **21 files, 1,879 lines, 18,441 words, or 34,300 tokens**. Reading
+all of `BUGS.md` would add roughly 40,000 tokens; the usable workflow is a targeted search, though
+`ARCHITECTURE.md` does not say so.
 
 That is improved from the first audit: active refactor plans, status logs, skill-selection notes,
 and reviews moved under `docs/archive/`, so they are no longer on the normal path. A competent agent
@@ -61,12 +68,18 @@ Where I got lost or received contradictory guidance:
 5. `docs/refactor/BUGS.md` is still a 450-line, 24,902-word Markdown table with **403 rows**. Its
    summary says only 63 are fixed and 5 partly fixed. Many location cells point to old monolithic
    paths while `docs/refactor/README.md` says locations must match current code.
-6. The 261-line root README, package READMEs, safety document, and CLI help all repeat behavioral
+6. Worse, the active register links to moved paths—`docs/refactor/{PLAN,STATUS,FILTER_VARIANTS}.md`
+   now live under `docs/archive/`. ARCH-011 reports green because it does not scan nested
+   `docs/refactor/BUGS.md`.
+7. `tests/legacy/README.md:65` still sends an agent to the deleted
+   `.cursor/skills/crc-python-refactor/BEHAVIOUR_FIX.md` instead of the current maintenance skill.
+8. The 261-line root README, package READMEs, safety document, and CLI help all repeat behavioral
    details. Mechanical API-name sync does not stop those prose copies from disagreeing.
 
 The repository contains about 157 tracked Markdown/MDC files and roughly 246,000 words. About 101
-review files (roughly 168,000 words) are now archived, which is the right direction; broad search
-still retrieves them unless an agent scopes searches carefully.
+pre-existing review files (roughly 168,000 words; 102 including this audit) are now archived,
+which is the right direction; broad search still retrieves them unless an agent scopes searches
+carefully.
 
 ## 2. Current 2025–2026 guidance used
 
@@ -109,7 +122,7 @@ guardrails.
 | 2 | Apply queued safety/README corrections | **Partly done** | Root README and `CLEANUP_SAFETY.md` now correctly describe logs, VPC example, fail-closed `SAF-009`, and AWS disk floors. Several package READMEs still say `BUG-004` is fail-open after it was fixed. |
 | 3 | Test a manifest of production Jenkins commands | **Open** | No trigger-command fixture or contract test exists under `tests/`; templates merely ask which trigger job is affected. |
 | 4 | Close ARCH-003/005 loopholes and add locks/floor checks | **Partly done** | ARCH-005 follows sibling modules; ARCH-006..008 ban constructs, hash oracles/`requirements.txt`, and enforce a test floor. ARCH-003 still permits `crc/core` env reads and misses callable references such as `clock=datetime.datetime.now`; many remain in cloud adapters/cleaners. |
-| 5 | Finish engine wiring and delete adapters | **Partly done** | Production dispatch is engine-only (`dispatch.py:51-53` and all route tables). Adapter source, exports, scan dependencies, and adapter tests remain. |
+| 5 | Finish engine wiring and delete adapters | **Partly done** | Production delete/stop dispatch is engine-only (`dispatch.py:51-53` and all route tables). Adapter source, exports, `--scan_tag` dependencies, and adapter tests remain. |
 | 6 | Replace frozen exhaustive parity with behavioral contracts | **Open** | Three slow CLI parity files remain in `SLOW_PARITY`; `test_cli_args_parity.py:538-548` still requires the parser definition, including choices, to equal frozen `crc_main.txt`. |
 | 7 | Archive history and split `BUGS.md` | **Partly done** | PLAN/STATUS/FILTER_VARIANTS/SKILL_SELECTION and reviews moved to `docs/archive`; `BUGS.md` was not split and grew from 379 to 403 rows. |
 | 8 | Rewrite instructions for steady-state maintenance | **Done** | `AGENTS.md`, `.cursor/rules/`, and `.cursor/skills/crc-maintain/` now describe normal implement/fix/review workflows. Residual migration wording should be removed. |
@@ -183,13 +196,15 @@ only some untyped SDK namespaces are overridden. CI installs whatever versions r
 | Claim | Code reality | Result |
 |---|---|---|
 | `ARCHITECTURE.md:42-46` and `AGENTS.md:84-86`: kinds remain on legacy dispatch | All supported pairs are routed; `dispatch._run_pair` has no fallback call | **Stale** |
-| Context claim: legacy adapter layer deleted | Multiple adapter modules, exports, and tests remain | **False** |
+| Context claim: legacy adapter layer deleted | Multiple adapter modules, exports, and tests remain; `crc/cli/scan.py` still builds VM adapters | **False** |
 | `crc/oci/disk/README.md:39`: bad custom age tag fails open | `age_tags.get_retention_age` returns `KEEP_AGE`; `is_old` returns false for it | **Stale, safety-relevant** |
 | `crc/azu/vm/README.md:47`: `get_retention_age` is fail-open | Same fail-closed core path is called by `azu/vm/selection.py:32-37` | **Stale, safety-relevant** |
 | `crc/gcp/README.md:25,54-55`: disk/VM custom age is fail-open | Both use the fixed shared age helper; `BUGS.md` marks BUG-004 fixed | **Stale, safety-relevant** |
 | `crc/core/README.md:179-180`: policy preserves inverted GCP IP and substring NIC quirks | Actual cleaners implement fixed behavior; old helpers remain unused, documented as BUG-370 | **Stale/dead abstraction** |
 | `AGENTS.md`: every failed check ends in `REMEDIATION:` | Current mypy failure does not | **False** |
 | `docs/refactor/README.md`: bug locations must match current code | Many rows, including fixed engine rows, cite old `crc.py` adapter-loop locations | **Not maintained** |
+| `docs/refactor/BUGS.md:13,27-28`: active PLAN/STATUS/FILTER_VARIANTS links | Those files moved to `docs/archive`; ARCH-011 does not inspect this nested document | **Broken active workflow** |
+| `tests/legacy/README.md:65`: use `crc-python-refactor/BEHAVIOUR_FIX.md` | That skill no longer exists; current playbook is `crc-maintain/fix-bug.md` | **Broken link** |
 
 `CLEANUP_SAFETY.md` itself is much better than in the first audit, but package copies did not move
 with it. A safety statement should be generated or referenced, not manually repeated in every
@@ -201,7 +216,7 @@ Context/process that no longer pays for itself:
 
 - `BUGS.md` is an issue tracker implemented as one 24,902-word table. It is hard to query, diff,
   assign, or retire, and package READMEs duplicate its status.
-- 101 archived review essays are appropriately archived but still dominate broad repository
+- 101 pre-existing archived review essays are appropriately archived but still dominate broad repository
   search. They should not be required evidence for current behavior.
 - Compatibility adapters and adapter tests preserve two mental models after production dispatch
   moved to the engine.
@@ -238,11 +253,18 @@ The guide is much more accurate now, and the implementation pattern is readable.
    `plan`, `apply`, settings, tests, and `@register("aws", "nat_gateway")`.
 2. Import it and add an options builder plus route in `crc/cli/routes/aws.py`.
 3. Add `nat_gateway` independently to `crc/cli/constants.py:RESOURCES` and the literal choices/help
-   in `crc/cli/args.py`.
+   in `crc/cli/args.py`. Explicit-only kinds are also split into `crc/core/selection.py`'s
+   `EXTRA_RESOURCES`, so the agent must decide whether `--resource all` includes the new kind.
 4. Add its supported-cloud rule/message in `crc/cli/pairs.py`.
 5. Add its label/constants in `crc/core/engine.py` and possibly report/notifier handling.
 6. Extend bridge, parser, selection, cleaner, notification, safety, and README tests; raise the
    test floor.
+
+Guide step 7 still tells the agent to remove `dispatch.HANDLERS` and legacy CLI methods that no
+longer exist, and step 8 points mainly at the one-kind bridge parity test rather than the current
+multi-kind AWS bridge suite. The greenfield safety rule also requires a real age/equivalent gate
+while the nearest VPC teardown model is tag-gated without age, so a NAT-gateway design needs an
+explicit safety decision rather than mechanical copying.
 
 The cleaner code itself is approachable: protocols, injected clients, pure policy, and plan/apply
 are good agent-facing seams. The friction is manual cross-file wiring and a hard contradiction:
