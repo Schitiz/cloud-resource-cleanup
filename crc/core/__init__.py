@@ -23,6 +23,15 @@ from crc.core.cleaner import (
     candidate_ids,
 )
 from crc.core.engine import KIND_LABELS, Notifier, RunOutcome, run
+from crc.core.kinds import (
+    ALL_KINDS,
+    AWS_ONLY_MESSAGE,
+    EXPLICIT_KINDS,
+    KIND_NAMES,
+    KINDS,
+    KINDS_BY_NAME,
+    Kind,
+)
 from crc.core.policy import (
     SENSITIVE_YB_TASK,
     Tags,
@@ -97,12 +106,18 @@ from crc.core.selection import (
 
 __all__ = [
     "AGE_KEYS",
+    "ALL_KINDS",
+    "AWS_ONLY_MESSAGE",
     "CLOUDS",
     "DISK",
+    "EXPLICIT_KINDS",
     "EXTRA_RESOURCES",
     "IP",
     "KEYPAIR",
+    "KINDS",
+    "KINDS_BY_NAME",
     "KIND_LABELS",
+    "KIND_NAMES",
     "KMS",
     "NIC",
     "RESOURCES",
@@ -116,6 +131,7 @@ __all__ = [
     "DuplicateCleanerError",
     "Failure",
     "InfluxPoint",
+    "Kind",
     "Notifier",
     "Operation",
     "Plan",

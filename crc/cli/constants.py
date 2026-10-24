@@ -1,4 +1,6 @@
 """Supported clouds and resource kinds of the CLI (`--cloud all` and `--resource all` order)."""
 
+from crc.core.selection import RESOURCES as _RESOURCES
+
 CLOUDS = ["aws", "azure", "gcp", "oci"]
-RESOURCES = ["disk", "ip", "keypair", "vm", "kms", "nic", "snapshot"]
+RESOURCES = list(_RESOURCES)

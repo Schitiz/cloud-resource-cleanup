@@ -127,6 +127,16 @@ Selection (module selection.py). Only constants and the `Selection` dataclass: n
 - `RESOURCES`: the --resource all order (spot resources and vpc are not part of it).
 - `EXTRA_RESOURCES`: resources selectable by name only (vpc, spot_instance_requests, spot_instances).
 
+Kinds (module kinds.py). The one table of resource kinds; the parser choices, the selection constants, the pair rules of the CLI and the engine labels are derived from it.
+
+- `Kind`: frozen entry of the table: name, report label, whether the all expansion includes it, the clouds it is limited to and the unsupported-pair message template.
+- `KINDS`: the table, in the order of the parser choices.
+- `KIND_NAMES`: the names of every kind, in table order.
+- `ALL_KINDS`: the names the all expansion includes.
+- `EXPLICIT_KINDS`: the names only an explicit choice selects.
+- `KINDS_BY_NAME`: lookup of a kind by name.
+- `AWS_ONLY_MESSAGE`: the unsupported-pair message template of the AWS-only kinds (snapshot, vpc).
+
 Engine (module engine.py). Orchestration only; Slack and Influx senders are injected.
 
 - `run()`: for each selected pair build the cleaner from a Registry, check supports, plan(), apply() only when not a dry run, build the Report and call the notifiers in order; cleaner errors propagate.

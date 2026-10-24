@@ -2,15 +2,18 @@
 
 Pure and typed. `Selection` is the ordered pairs the engine runs; `crc/cli/bridge.py` builds a
 one-pair `Selection` per run. `CLOUDS`, `RESOURCES` and `EXTRA_RESOURCES` record the `--cloud all`
-and `--resource all` expansion order; the pair and opt-in checks live in `crc/cli/inputs.py` and
-`crc/cli/dispatch.py`. Nothing here reads the environment or logs.
+and `--resource all` expansion order, derived from the kind table `crc/core/kinds.py`; the pair
+and opt-in checks live in `crc/cli/inputs.py` and `crc/cli/dispatch.py`.
+Nothing here reads the environment or logs.
 """
 
 from dataclasses import dataclass
 
+from crc.core.kinds import ALL_KINDS, EXPLICIT_KINDS
+
 CLOUDS: tuple[str, ...] = ("aws", "azure", "gcp", "oci")
-RESOURCES: tuple[str, ...] = ("disk", "ip", "keypair", "vm", "kms", "nic", "snapshot")
-EXTRA_RESOURCES: tuple[str, ...] = ("vpc", "spot_instance_requests", "spot_instances")
+RESOURCES: tuple[str, ...] = ALL_KINDS
+EXTRA_RESOURCES: tuple[str, ...] = EXPLICIT_KINDS
 
 
 @dataclass(frozen=True, slots=True)
