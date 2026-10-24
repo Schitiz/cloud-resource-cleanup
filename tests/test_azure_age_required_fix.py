@@ -242,13 +242,8 @@ def test_bug_173_disk_age_still_gates_a_real_run(monkeypatch: pytest.MonkeyPatch
 
 
 def test_routes_pass_the_age_option_for_ip_and_nic() -> None:
+    unset = ("exception_regex", "filter_tags", "exception_tags", "notags")
     options: Any = types.SimpleNamespace(
-        age={"days": 1},
-        resource_group="rg",
-        name_regex=["n"],
-        exception_regex=None,
-        filter_tags=None,
-        exception_tags=None,
-        notags=None,
+        age={"days": 1}, resource_group="rg", name_regex=["n"], **dict.fromkeys(unset)
     )
     assert (azu_routes._ip(options)["age"], azu_routes._nic(options)["age"]) == ({"days": 1},) * 2
