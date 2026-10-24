@@ -109,8 +109,8 @@ VM_GUARDS: dict[str, Any] = {
     "custom_age_tag_key": "ttl",
 }
 CASES: dict[str, tuple[str, dict[str, Any], Callable[[], FakeGcp]]] = {
-    "ip": ("ip", {"name_regex": ["a-"], "exception_regex": ["x-"]}, ips),
-    "ip-match-all": ("ip", {}, ips),
+    "ip": ("ip", {"name_regex": ["a-"], "exception_regex": ["x-"], "age": AGE}, ips),
+    "ip-match-all": ("ip", {"age": AGE}, ips),
     "disk": ("disk", {**DISK_GUARDS, "name_regex": ["d"]}, disks),
     "disk-owners": (
         "disk",

@@ -10,7 +10,7 @@ from google.cloud import compute_v1
 
 
 class AddressView(Protocol):
-    """The two fields of a GCP address this cleaner reads."""
+    """The three fields of a GCP address this cleaner reads."""
 
     @property
     def name(self) -> str:
@@ -20,6 +20,11 @@ class AddressView(Protocol):
     @property
     def status(self) -> str:
         """Address status, for example RESERVED or IN_USE."""
+        ...
+
+    @property
+    def creation_timestamp(self) -> str:
+        """Creation time, RFC 3339 (`creationTimestamp`)."""
         ...
 
 

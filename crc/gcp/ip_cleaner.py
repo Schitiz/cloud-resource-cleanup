@@ -6,12 +6,14 @@
 their addresses and filters them, `apply()` deletes the planned RESERVED addresses.
 """
 
+import datetime
 import logging
 from collections.abc import Sequence
 
 from google.api_core.exceptions import GoogleAPIError
 from google.auth.exceptions import GoogleAuthError
 
+from crc.core import age as core_age
 from crc.core import logger, policy
 from crc.core.cleaner import (
     Candidate,
@@ -24,8 +26,9 @@ from crc.core.cleaner import (
     Skipped,
 )
 from crc.core.registry import register
+from crc.gcp._common import TIME_FORMAT
 from crc.gcp._scan import ZoneScan
-from crc.gcp.ip_client import ComputeIpClient, GcpIpClient
+from crc.gcp.ip_client import AddressView, ComputeIpClient, GcpIpClient
 
 _RESERVED = "RESERVED"
 
@@ -55,12 +58,14 @@ class IpCleaner:
         filter_regex: Sequence[str] | None,
         exception_regex: Sequence[str] | None,
         state: str = _RESERVED,
+        age: core_age.AgeSpec | int | None = None,
     ) -> None:
         self._client = client
         self._project_id = project_id
         self._filter_regex = filter_regex
         self._exception_regex = exception_regex
         self._state = state
+        self._age = age or {}
         self.failures: list[Failure] = []
 
     def supports(self, operation: Operation) -> bool:
@@ -75,7 +80,7 @@ class IpCleaner:
         candidates: list[Candidate] = []
         skipped: list[Skipped] = []
         for region in self.regions():
-            region_plan = self.plan_region(region)
+            region_plan = self.plan_region(region, context.now)
             candidates.extend(region_plan.candidates)
             skipped.extend(region_plan.skipped)
             if context.dry_run:
@@ -97,11 +102,11 @@ class IpCleaner:
         _log_summary(deleted, dry_run=context.dry_run)
         return Result(succeeded=tuple(deleted), failed=tuple(self.failures))
 
-    # TODO(BUG-062): GCP IP cleanup has no age gate and no label filter
-    #  labels: bug, risk-high, crc
-    def plan_region(self, region: str) -> Plan:
+    def plan_region(self, region: str, now: datetime.datetime | None = None) -> Plan:
         """List one region and decide, in the order of `main`: log the address, read its
-        name, skip other states, then the filter and the exception test."""
+        name, skip other states, then the filter and the exception test, then the age gate
+        (`creationTimestamp` at least `age` old; skipped when no age is set, a dry run only;
+        an unreadable timestamp keeps the address and is recorded as a failure)."""
         candidates: list[Candidate] = []
         skipped: list[Skipped] = []
         scan = ZoneScan(region)
@@ -115,17 +120,34 @@ class IpCleaner:
                 continue
             matches_filter = self._matches_filter(name)
             excluded = self._excluded(name)
-            if matches_filter and not excluded:
-                candidates.append(
-                    Candidate(id=name, name=name, region=region, state=address.status)
-                )
-                scan.selected += 1
-            else:
+            if not matches_filter or excluded:
                 reason = "no filter_regex match" if not matches_filter else "exception_regex"
                 skipped.append(Skipped(id=name, reason=reason, name=name))
                 logger.current().skip("filter_mismatch" if not matches_filter else reason)
+                continue
+            if not self._old_enough(address, region, now):
+                skipped.append(Skipped(id=name, reason="too young or age unknown", name=name))
+                continue
+            candidates.append(Candidate(id=name, name=name, region=region, state=address.status))
+            scan.selected += 1
         scan.finish()
         return Plan(candidates=tuple(candidates), skipped=tuple(skipped))
+
+    def _old_enough(self, address: AddressView, region: str, now: datetime.datetime | None) -> bool:
+        if not self._age:
+            return True
+        try:
+            if now is None:
+                raise ValueError("the run time is required for the age gate")
+            stamp = datetime.datetime.strptime(address.creation_timestamp, TIME_FORMAT)  # noqa: DTZ007 - TIME_FORMAT ends in %z, so the result is aware
+            old = core_age.is_old(self._age, now.astimezone(stamp.tzinfo), stamp)
+        except Exception as e:  # noqa: BLE001 - per-address isolation, failure logged and recorded, address kept
+            logging.error("Error occurred while evaluating IP address %s: %s", address.name, e)
+            logger.current().fail(region, str(getattr(address, "name", "")), e)
+            return False
+        if not old:
+            logger.current().skip("too_young")
+        return old
 
     def apply_region(
         self, region: str, candidates: Sequence[Candidate], *, dry_run: bool
@@ -164,14 +186,19 @@ class IpCleaner:
 
 @register("gcp", "ip")
 def build_ip_cleaner(context: RunContext) -> Cleaner:
-    """Registry factory. Options: `project_id`, `name_regex` and `exception_regex`."""
+    """Registry factory. Options: `project_id`, `name_regex`, `exception_regex` and `age` (a
+    positive age is required on a real run, BUG-062)."""
     options = context.options
     project_id = options.get("project_id")
     if not project_id:
         raise ValueError("project_id is required for GCP IP cleanup")
+    age = options.get("age")
+    if not context.dry_run:
+        age = core_age.require_positive_age(age, "age")
     return IpCleaner(
         client=ComputeIpClient(),
         project_id=project_id,
         filter_regex=options.get("name_regex"),
         exception_regex=options.get("exception_regex"),
+        age=age,
     )

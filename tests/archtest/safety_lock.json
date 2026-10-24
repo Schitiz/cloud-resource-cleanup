@@ -104,6 +104,18 @@
       {
         "test": "tests/test_aws_spot_instance_requests_engine.py::test_saf_007_011_027_a_positive_age_is_required",
         "sha256": "a012ed98f85cf5485320eaa6e62f58ccc11f4f9afc39434b4eeb62a6d5888d2d"
+      },
+      {
+        "test": "tests/test_gcp_require_age.py::test_bug_124_real_disk_run_needs_a_positive_detach_age",
+        "sha256": "a690438ef8cbde612c575ee5ab7f8c5246e1dc000acc22d6b3da41394bdc397b"
+      },
+      {
+        "test": "tests/test_gcp_require_age.py::test_bug_183_real_vm_run_needs_a_positive_age",
+        "sha256": "9144db08fb3bee2e5e3fdec8cfdc1ae004287c03ba918d0fcbed0601939bac98"
+      },
+      {
+        "test": "tests/test_gcp_require_age.py::test_bug_062_real_ip_run_needs_a_positive_age",
+        "sha256": "efba4ad7b7d24f6a9868c6acc54e2a95e6693b865aabaa235dfd280d971ec009"
       }
     ],
     "SAF-012": [
@@ -206,8 +218,8 @@
     ],
     "SAF-023": [
       {
-        "test": "tests/test_own1_saf_gaps.py::test_saf_023_gcp_disk_without_detach_age_deletes_every_detached_disk",
-        "sha256": "244e63e8c015a53fea1689f3a9f5d75ab2fb359906018962609956fb99327941"
+        "test": "tests/test_own1_saf_gaps.py::test_saf_023_gcp_disk_real_run_without_detach_age_raises_before_any_call",
+        "sha256": "3213f5c12df5c30cfdd13e338ba84bbdeeec9e37346022f4b0c5d3a1b510cb0a"
       }
     ],
     "SAF-024": [

@@ -9,7 +9,7 @@ injected into the fake GCP client (see `apply_scenario` in `tests/test_cli_bridg
 
 RUN_LOG: dict[tuple[str, bool, bool, bool, str], tuple[str, ...]] = {
     ("ip", False, False, False, ""): (
-        'RUN START cloud=gcp resource=ip operation=delete dry_run=false name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
+        'RUN START cloud=gcp resource=ip operation=delete dry_run=false age={"days":1} name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
         "REGION cloud=gcp resource=ip region=r1 scanned=4 selected=2 seconds=7",
         "ACTION deleted cloud=gcp resource=ip region=r1 id=a-1 name=a-1",
         "ACTION deleted cloud=gcp resource=ip region=r1 id=a-2 name=a-2",
@@ -21,7 +21,7 @@ RUN_LOG: dict[tuple[str, bool, bool, bool, str], tuple[str, ...]] = {
         "RESULT cloud=gcp resource=ip operation=delete dry_run=false selected=3 done=3 failed=0 skipped=3 regions=2 regions_skipped=0 duration_s=0",
     ),
     ("ip", False, False, True, ""): (
-        'RUN START cloud=gcp resource=ip operation=delete dry_run=false name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
+        'RUN START cloud=gcp resource=ip operation=delete dry_run=false age={"days":1} name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
         "REGION cloud=gcp resource=ip region=r1 scanned=4 selected=2 seconds=7",
         "ACTION deleted cloud=gcp resource=ip region=r1 id=a-1 name=a-1",
         "ACTION deleted cloud=gcp resource=ip region=r1 id=a-2 name=a-2",
@@ -33,7 +33,7 @@ RUN_LOG: dict[tuple[str, bool, bool, bool, str], tuple[str, ...]] = {
         "RESULT cloud=gcp resource=ip operation=delete dry_run=false selected=3 done=3 failed=0 skipped=3 regions=2 regions_skipped=0 duration_s=0",
     ),
     ("ip", False, True, False, ""): (
-        'RUN START cloud=gcp resource=ip operation=delete dry_run=false name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
+        'RUN START cloud=gcp resource=ip operation=delete dry_run=false age={"days":1} name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
         "REGION cloud=gcp resource=ip region=r1 scanned=4 selected=2 seconds=7",
         "ACTION deleted cloud=gcp resource=ip region=r1 id=a-1 name=a-1",
         "ACTION deleted cloud=gcp resource=ip region=r1 id=a-2 name=a-2",
@@ -45,7 +45,7 @@ RUN_LOG: dict[tuple[str, bool, bool, bool, str], tuple[str, ...]] = {
         "RESULT cloud=gcp resource=ip operation=delete dry_run=false selected=3 done=3 failed=0 skipped=3 regions=2 regions_skipped=0 duration_s=0",
     ),
     ("ip", False, True, True, ""): (
-        'RUN START cloud=gcp resource=ip operation=delete dry_run=false name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
+        'RUN START cloud=gcp resource=ip operation=delete dry_run=false age={"days":1} name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
         "REGION cloud=gcp resource=ip region=r1 scanned=4 selected=2 seconds=7",
         "ACTION deleted cloud=gcp resource=ip region=r1 id=a-1 name=a-1",
         "ACTION deleted cloud=gcp resource=ip region=r1 id=a-2 name=a-2",
@@ -57,7 +57,7 @@ RUN_LOG: dict[tuple[str, bool, bool, bool, str], tuple[str, ...]] = {
         "RESULT cloud=gcp resource=ip operation=delete dry_run=false selected=3 done=3 failed=0 skipped=3 regions=2 regions_skipped=0 duration_s=0",
     ),
     ("ip", True, False, False, ""): (
-        'RUN START cloud=gcp resource=ip operation=delete dry_run=true name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
+        'RUN START cloud=gcp resource=ip operation=delete dry_run=true age={"days":1} name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
         "REGION cloud=gcp resource=ip region=r1 scanned=4 selected=2 seconds=7",
         "ACTION would_delete cloud=gcp resource=ip region=r1 id=a-1 name=a-1",
         "ACTION would_delete cloud=gcp resource=ip region=r1 id=a-2 name=a-2",
@@ -69,7 +69,7 @@ RUN_LOG: dict[tuple[str, bool, bool, bool, str], tuple[str, ...]] = {
         "RESULT cloud=gcp resource=ip operation=delete dry_run=true selected=3 done=0 failed=0 skipped=3 regions=2 regions_skipped=0 duration_s=0",
     ),
     ("ip", True, False, True, ""): (
-        'RUN START cloud=gcp resource=ip operation=delete dry_run=true name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
+        'RUN START cloud=gcp resource=ip operation=delete dry_run=true age={"days":1} name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
         "REGION cloud=gcp resource=ip region=r1 scanned=4 selected=2 seconds=7",
         "ACTION would_delete cloud=gcp resource=ip region=r1 id=a-1 name=a-1",
         "ACTION would_delete cloud=gcp resource=ip region=r1 id=a-2 name=a-2",
@@ -81,7 +81,7 @@ RUN_LOG: dict[tuple[str, bool, bool, bool, str], tuple[str, ...]] = {
         "RESULT cloud=gcp resource=ip operation=delete dry_run=true selected=3 done=0 failed=0 skipped=3 regions=2 regions_skipped=0 duration_s=0",
     ),
     ("ip", True, True, False, ""): (
-        'RUN START cloud=gcp resource=ip operation=delete dry_run=true name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
+        'RUN START cloud=gcp resource=ip operation=delete dry_run=true age={"days":1} name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
         "REGION cloud=gcp resource=ip region=r1 scanned=4 selected=2 seconds=7",
         "ACTION would_delete cloud=gcp resource=ip region=r1 id=a-1 name=a-1",
         "ACTION would_delete cloud=gcp resource=ip region=r1 id=a-2 name=a-2",
@@ -93,7 +93,7 @@ RUN_LOG: dict[tuple[str, bool, bool, bool, str], tuple[str, ...]] = {
         "RESULT cloud=gcp resource=ip operation=delete dry_run=true selected=3 done=0 failed=0 skipped=3 regions=2 regions_skipped=0 duration_s=0",
     ),
     ("ip", True, True, True, ""): (
-        'RUN START cloud=gcp resource=ip operation=delete dry_run=true name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
+        'RUN START cloud=gcp resource=ip operation=delete dry_run=true age={"days":1} name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
         "REGION cloud=gcp resource=ip region=r1 scanned=4 selected=2 seconds=7",
         "ACTION would_delete cloud=gcp resource=ip region=r1 id=a-1 name=a-1",
         "ACTION would_delete cloud=gcp resource=ip region=r1 id=a-2 name=a-2",
@@ -105,7 +105,7 @@ RUN_LOG: dict[tuple[str, bool, bool, bool, str], tuple[str, ...]] = {
         "RESULT cloud=gcp resource=ip operation=delete dry_run=true selected=3 done=0 failed=0 skipped=3 regions=2 regions_skipped=0 duration_s=0",
     ),
     ("ip-match-all", False, False, False, ""): (
-        'RUN START cloud=gcp resource=ip operation=delete dry_run=false project_id="proj"',
+        'RUN START cloud=gcp resource=ip operation=delete dry_run=false age={"days":1} project_id="proj"',
         "REGION cloud=gcp resource=ip region=r1 scanned=4 selected=3 seconds=7",
         "ACTION deleted cloud=gcp resource=ip region=r1 id=a-1 name=a-1",
         "ACTION deleted cloud=gcp resource=ip region=r1 id=a-2 name=a-2",
@@ -117,7 +117,7 @@ RUN_LOG: dict[tuple[str, bool, bool, bool, str], tuple[str, ...]] = {
         "RESULT cloud=gcp resource=ip operation=delete dry_run=false selected=5 done=5 failed=0 skipped=1 regions=2 regions_skipped=0 duration_s=0",
     ),
     ("ip-match-all", False, False, True, ""): (
-        'RUN START cloud=gcp resource=ip operation=delete dry_run=false project_id="proj"',
+        'RUN START cloud=gcp resource=ip operation=delete dry_run=false age={"days":1} project_id="proj"',
         "REGION cloud=gcp resource=ip region=r1 scanned=4 selected=3 seconds=7",
         "ACTION deleted cloud=gcp resource=ip region=r1 id=a-1 name=a-1",
         "ACTION deleted cloud=gcp resource=ip region=r1 id=a-2 name=a-2",
@@ -129,7 +129,7 @@ RUN_LOG: dict[tuple[str, bool, bool, bool, str], tuple[str, ...]] = {
         "RESULT cloud=gcp resource=ip operation=delete dry_run=false selected=5 done=5 failed=0 skipped=1 regions=2 regions_skipped=0 duration_s=0",
     ),
     ("ip-match-all", False, True, False, ""): (
-        'RUN START cloud=gcp resource=ip operation=delete dry_run=false project_id="proj"',
+        'RUN START cloud=gcp resource=ip operation=delete dry_run=false age={"days":1} project_id="proj"',
         "REGION cloud=gcp resource=ip region=r1 scanned=4 selected=3 seconds=7",
         "ACTION deleted cloud=gcp resource=ip region=r1 id=a-1 name=a-1",
         "ACTION deleted cloud=gcp resource=ip region=r1 id=a-2 name=a-2",
@@ -141,7 +141,7 @@ RUN_LOG: dict[tuple[str, bool, bool, bool, str], tuple[str, ...]] = {
         "RESULT cloud=gcp resource=ip operation=delete dry_run=false selected=5 done=5 failed=0 skipped=1 regions=2 regions_skipped=0 duration_s=0",
     ),
     ("ip-match-all", False, True, True, ""): (
-        'RUN START cloud=gcp resource=ip operation=delete dry_run=false project_id="proj"',
+        'RUN START cloud=gcp resource=ip operation=delete dry_run=false age={"days":1} project_id="proj"',
         "REGION cloud=gcp resource=ip region=r1 scanned=4 selected=3 seconds=7",
         "ACTION deleted cloud=gcp resource=ip region=r1 id=a-1 name=a-1",
         "ACTION deleted cloud=gcp resource=ip region=r1 id=a-2 name=a-2",
@@ -153,7 +153,7 @@ RUN_LOG: dict[tuple[str, bool, bool, bool, str], tuple[str, ...]] = {
         "RESULT cloud=gcp resource=ip operation=delete dry_run=false selected=5 done=5 failed=0 skipped=1 regions=2 regions_skipped=0 duration_s=0",
     ),
     ("ip-match-all", True, False, False, ""): (
-        'RUN START cloud=gcp resource=ip operation=delete dry_run=true project_id="proj"',
+        'RUN START cloud=gcp resource=ip operation=delete dry_run=true age={"days":1} project_id="proj"',
         "REGION cloud=gcp resource=ip region=r1 scanned=4 selected=3 seconds=7",
         "ACTION would_delete cloud=gcp resource=ip region=r1 id=a-1 name=a-1",
         "ACTION would_delete cloud=gcp resource=ip region=r1 id=a-2 name=a-2",
@@ -165,7 +165,7 @@ RUN_LOG: dict[tuple[str, bool, bool, bool, str], tuple[str, ...]] = {
         "RESULT cloud=gcp resource=ip operation=delete dry_run=true selected=5 done=0 failed=0 skipped=1 regions=2 regions_skipped=0 duration_s=0",
     ),
     ("ip-match-all", True, False, True, ""): (
-        'RUN START cloud=gcp resource=ip operation=delete dry_run=true project_id="proj"',
+        'RUN START cloud=gcp resource=ip operation=delete dry_run=true age={"days":1} project_id="proj"',
         "REGION cloud=gcp resource=ip region=r1 scanned=4 selected=3 seconds=7",
         "ACTION would_delete cloud=gcp resource=ip region=r1 id=a-1 name=a-1",
         "ACTION would_delete cloud=gcp resource=ip region=r1 id=a-2 name=a-2",
@@ -177,7 +177,7 @@ RUN_LOG: dict[tuple[str, bool, bool, bool, str], tuple[str, ...]] = {
         "RESULT cloud=gcp resource=ip operation=delete dry_run=true selected=5 done=0 failed=0 skipped=1 regions=2 regions_skipped=0 duration_s=0",
     ),
     ("ip-match-all", True, True, False, ""): (
-        'RUN START cloud=gcp resource=ip operation=delete dry_run=true project_id="proj"',
+        'RUN START cloud=gcp resource=ip operation=delete dry_run=true age={"days":1} project_id="proj"',
         "REGION cloud=gcp resource=ip region=r1 scanned=4 selected=3 seconds=7",
         "ACTION would_delete cloud=gcp resource=ip region=r1 id=a-1 name=a-1",
         "ACTION would_delete cloud=gcp resource=ip region=r1 id=a-2 name=a-2",
@@ -189,7 +189,7 @@ RUN_LOG: dict[tuple[str, bool, bool, bool, str], tuple[str, ...]] = {
         "RESULT cloud=gcp resource=ip operation=delete dry_run=true selected=5 done=0 failed=0 skipped=1 regions=2 regions_skipped=0 duration_s=0",
     ),
     ("ip-match-all", True, True, True, ""): (
-        'RUN START cloud=gcp resource=ip operation=delete dry_run=true project_id="proj"',
+        'RUN START cloud=gcp resource=ip operation=delete dry_run=true age={"days":1} project_id="proj"',
         "REGION cloud=gcp resource=ip region=r1 scanned=4 selected=3 seconds=7",
         "ACTION would_delete cloud=gcp resource=ip region=r1 id=a-1 name=a-1",
         "ACTION would_delete cloud=gcp resource=ip region=r1 id=a-2 name=a-2",
@@ -913,7 +913,7 @@ RUN_LOG: dict[tuple[str, bool, bool, bool, str], tuple[str, ...]] = {
         "RESULT cloud=gcp resource=spot_instances operation=delete dry_run=true selected=0 done=0 failed=0 skipped=5 regions=2 regions_skipped=0 duration_s=0",
     ),
     ("ip", False, True, True, "fail_delete:a-2"): (
-        'RUN START cloud=gcp resource=ip operation=delete dry_run=false name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
+        'RUN START cloud=gcp resource=ip operation=delete dry_run=false age={"days":1} name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
         "REGION cloud=gcp resource=ip region=r1 scanned=4 selected=2 seconds=7",
         "ACTION deleted cloud=gcp resource=ip region=r1 id=a-1 name=a-1",
         "REGION cloud=gcp resource=ip region=r2 scanned=2 selected=1 seconds=7",
@@ -926,7 +926,7 @@ RUN_LOG: dict[tuple[str, bool, bool, bool, str], tuple[str, ...]] = {
         "RESULT cloud=gcp resource=ip operation=delete dry_run=false selected=2 done=2 failed=1 skipped=3 regions=2 regions_skipped=0 duration_s=0",
     ),
     ("ip", True, True, True, "fail_delete:a-2"): (
-        'RUN START cloud=gcp resource=ip operation=delete dry_run=true name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
+        'RUN START cloud=gcp resource=ip operation=delete dry_run=true age={"days":1} name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
         "REGION cloud=gcp resource=ip region=r1 scanned=4 selected=2 seconds=7",
         "ACTION would_delete cloud=gcp resource=ip region=r1 id=a-1 name=a-1",
         "ACTION would_delete cloud=gcp resource=ip region=r1 id=a-2 name=a-2",
@@ -1032,11 +1032,11 @@ RUN_LOG: dict[tuple[str, bool, bool, bool, str], tuple[str, ...]] = {
         "RESULT cloud=gcp resource=spot_instances operation=delete dry_run=true selected=2 done=0 failed=0 skipped=3 regions=2 regions_skipped=0 duration_s=0",
     ),
     ("ip", False, True, True, "fail_list_first"): (
-        'RUN START cloud=gcp resource=ip operation=delete dry_run=false name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
+        'RUN START cloud=gcp resource=ip operation=delete dry_run=false age={"days":1} name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
         "RESULT cloud=gcp resource=ip operation=delete dry_run=false selected=0 done=0 failed=0 skipped=0 regions=0 regions_skipped=0 duration_s=0",
     ),
     ("ip", True, True, True, "fail_list_first"): (
-        'RUN START cloud=gcp resource=ip operation=delete dry_run=true name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
+        'RUN START cloud=gcp resource=ip operation=delete dry_run=true age={"days":1} name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
         "RESULT cloud=gcp resource=ip operation=delete dry_run=true selected=0 done=0 failed=0 skipped=0 regions=0 regions_skipped=0 duration_s=0",
     ),
     ("disk", False, True, True, "fail_list_first"): (
@@ -1088,11 +1088,11 @@ RUN_LOG: dict[tuple[str, bool, bool, bool, str], tuple[str, ...]] = {
         "RESULT cloud=gcp resource=spot_instances operation=delete dry_run=true selected=1 done=0 failed=0 skipped=0 regions=1 regions_skipped=1 duration_s=0",
     ),
     ("ip", False, True, True, "fail_zones"): (
-        'RUN START cloud=gcp resource=ip operation=delete dry_run=false name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
+        'RUN START cloud=gcp resource=ip operation=delete dry_run=false age={"days":1} name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
         "RESULT cloud=gcp resource=ip operation=delete dry_run=false selected=0 done=0 failed=0 skipped=0 regions=0 regions_skipped=0 duration_s=0",
     ),
     ("ip", True, True, True, "fail_zones"): (
-        'RUN START cloud=gcp resource=ip operation=delete dry_run=true name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
+        'RUN START cloud=gcp resource=ip operation=delete dry_run=true age={"days":1} name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
         "RESULT cloud=gcp resource=ip operation=delete dry_run=true selected=0 done=0 failed=0 skipped=0 regions=0 regions_skipped=0 duration_s=0",
     ),
     ("disk", False, True, True, "fail_zones"): (
@@ -1132,7 +1132,7 @@ RUN_LOG: dict[tuple[str, bool, bool, bool, str], tuple[str, ...]] = {
         "RESULT cloud=gcp resource=disk operation=delete dry_run=false selected=0 done=0 failed=0 skipped=0 regions=0 regions_skipped=0 duration_s=0",
     ),
     ("ip", False, False, False, "fail_list_last"): (
-        'RUN START cloud=gcp resource=ip operation=delete dry_run=false name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
+        'RUN START cloud=gcp resource=ip operation=delete dry_run=false age={"days":1} name_regex=["a-"] exception_regex=["x-"] project_id="proj"',
         "REGION cloud=gcp resource=ip region=r1 scanned=4 selected=2 seconds=7",
         "ACTION deleted cloud=gcp resource=ip region=r1 id=a-1 name=a-1",
         "ACTION deleted cloud=gcp resource=ip region=r1 id=a-2 name=a-2",

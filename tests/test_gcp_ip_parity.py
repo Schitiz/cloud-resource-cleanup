@@ -46,8 +46,12 @@ class Fixed:
     deletes: list[tuple[str, str]]
 
 
+OLD_STAMP = "2020-01-01T00:00:00.000+00:00"
+AGE = {"days": 1}
+
+
 def addr(name: Any, status: Any = "RESERVED") -> Any:
-    return types.SimpleNamespace(name=name, status=status)
+    return types.SimpleNamespace(name=name, status=status, creation_timestamp=OLD_STAMP)
 
 
 def _make(kind: type[Exception], message: str) -> Exception:
@@ -431,6 +435,7 @@ def _run_cleaner(
             "project_id": PROJECT,
             "name_regex": case.filter_regex,
             "exception_regex": case.exception_regex,
+            "age": AGE,
         },
         now=NOW,
     )
@@ -452,9 +457,16 @@ def _run_cleaner(
         gcp.awaited,
         deleted,
         len(deleted),
-        _logs(caplog),
+        [log for log in _logs(caplog) if not _is_age_debug(log[2])],
         capsys.readouterr().out,
         error,
+    )
+
+
+def _is_age_debug(message: str) -> bool:
+    """The debug lines of the BUG-062 age gate, which `main` never logged."""
+    return message.startswith(("Validating resource age", "The resource is ")) and (
+        "threshold" in message
     )
 
 

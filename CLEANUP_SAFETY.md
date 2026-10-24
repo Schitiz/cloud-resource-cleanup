@@ -84,6 +84,12 @@ reused. `tests/archtest/safety_lock.json` maps IDs to the tests that lock them.
 **When adding a new destructive module**
 
 - [SAF-011] Require a real age (or equivalent) gate in `__init__`.
+  Met by the GCP kinds too (BUG-124, BUG-062, BUG-183): a real run of GCP disk (`--detach_age`),
+  GCP IP and GCP VM (`--age`) raises `ValueError` naming the flag before any cloud call when the
+  age is missing or zero; a dry run needs none. The GCP IP cleaner gates each RESERVED address on
+  its `creationTimestamp` (RFC 3339, the disk and VM parser): an address younger than `--age`, or
+  with an unreadable timestamp (recorded as a failure), is kept. A custom age label still replaces
+  `--age` per resource on GCP VM (it never replaces the requirement for `--age`).
 - [SAF-012] Reject or skip unknown keys, zero durations, and bad custom age tags.
 - [SAF-013] Avoid having `--max_age` / `MAX_AGE` silently shorten a floor another flag
   (for example AWS `--detach_age`) just established, unless that change is
@@ -130,9 +136,11 @@ reused. `tests/archtest/safety_lock.json` maps IDs to the tests that lock them.
 - [SAF-021] The GCP disk cleaner (`DiskCleaner` in `crc/gcp/disk_cleaner.py`) uses `disk.last_detach_timestamp` via
   `is_old(retention_age or self.detach_age, ...)`.
 - [SAF-022] `--age` never reaches the GCP disk cleaner's age gate; only `detach_age` is read.
-- [SAF-023] Omitting `--detach_age` with no custom age label leaves the age argument
-  empty/`None`, so `Service.is_old` returns True and every matching unattached
-  disk with a `last_detach_timestamp` is deleted.
+- [SAF-023] A real (not `--dry_run`) GCP disk run requires a positive `--detach_age` (BUG-124
+  fixed): the registered factory raises `ValueError` naming `detach_age` before any client is
+  built or any cloud call, for an omitted, empty, zero or `None` value; `--age` is no substitute.
+  A dry run without it still lists every unattached disk with a `last_detach_timestamp` (the
+  Jenkins `-d` untagged reports).
 - [SAF-024] A custom age label replaces `detach_age` on GCP.
 - [SAF-025] On AWS a custom tag never changes the CloudWatch `detach_age` window
   (`_drop_recently_attached` uses only the `detach_age` setting). The CreateTime
@@ -260,7 +268,7 @@ No SAF ID is assigned to these yet.
 | `crc/service.py` | Shared `is_old` / `require_positive_age` / retention tags — empty age is True unless a module rejects it; `get_retention_age` returns `KEEP_AGE` for a bad tag |
 | `crc/core/` | Age helpers (`crc/core/age.py`, `KEEP_AGE`), tag and age policy (`crc/core/policy.py`), run log |
 | `crc/aws/disk/` | AWS EBS; age validation in `crc/aws/disk/settings.py`; detach_age via CloudWatch (`crc/aws/disk/detach.py`); per-region errors logged (region-list auth failures still raise) |
-| `crc/gcp/disk_cleaner.py` | GCP disks; detach_age via `last_detach_timestamp`; `--age` ignored; custom label replaces detach_age; notags and name_regex applied; delete waits for the zone operation; per-disk and per-zone errors are recorded and skipped |
+| `crc/gcp/disk_cleaner.py` | GCP disks; positive detach_age required on a real run, compared with `last_detach_timestamp`; `--age` ignored; custom label replaces detach_age; notags and name_regex applied; delete waits for the zone operation; per-disk and per-zone errors are recorded and skipped |
 | `crc/oci/disk/` | OCI block and boot volumes; unknown attachment state keeps the volume |
 | `crc/aws/spot_instance_requests/` | cancel→terminate→DoT=false EBS; cancel-fail skips terminate; age required; cancelled+InstanceId retried |
 | `crc/aws/connectivity.py` | Skip unreachable regions |

@@ -14,11 +14,15 @@ from crc.cli.routes import NotifyMode, Route, skips
 
 
 def _ip(options: Options) -> dict[str, Any]:
-    return {
+    """`age` is passed only when the flag was given (BUG-062; a dry run runs without it)."""
+    values: dict[str, Any] = {
         "project_id": options.project_id,
         "name_regex": options.name_regex,
         "exception_regex": options.exception_regex,
     }
+    if options.age is not None:
+        values["age"] = options.age
+    return values
 
 
 def _disk(options: Options) -> dict[str, Any]:

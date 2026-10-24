@@ -10,6 +10,7 @@ import logging
 import time
 from collections.abc import Iterator, Mapping, Sequence
 
+from crc.core import age as core_age
 from crc.core import logger, policy
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext
 from crc.core.registry import register
@@ -193,8 +194,6 @@ class VmCleaner:
         tags = policy.normalize_tags(instance.labels)
         return policy.filter_tags_all_keys(tags, self._settings.filter_labels)
 
-    # TODO(BUG-183): GCP VM cleanup accepts an empty or zero age
-    #  labels: bug, risk-high, crc
     def _is_old(self, instance: InstanceView, clock: Clock) -> bool:
         settings = self._settings
         return is_old_enough(
@@ -215,12 +214,15 @@ def build_vm_cleaner(context: RunContext) -> Cleaner:
     project_id = options.get("project_id")
     if not project_id:
         raise ValueError("project_id is required for GCP VM cleanup")
+    age = options.get("age") or {}
+    if not context.dry_run:
+        age = core_age.require_positive_age(age, "age")
     settings = VmSettings(
         project_id=project_id,
         filter_labels=options.get("filter_tags"),
         exception_labels=options.get("exception_tags"),
         notags=options.get("notags"),
-        age=options.get("age") or {},
+        age=age,
         custom_age_tag_key=options.get("custom_age_tag_key") or "",
         instance_state=_DEFAULT_STATE
         if context.operation is Operation.STOP or options.get("instance_state") is None

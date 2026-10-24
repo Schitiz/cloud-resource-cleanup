@@ -199,7 +199,9 @@ def test_supports_delete_only() -> None:
 
 
 def test_factory_reads_options_and_requires_project() -> None:
-    built = get("gcp", "ip")(ctx(project_id=PROJECT, name_regex=["a"], exception_regex=["b"]))
+    built = get("gcp", "ip")(
+        ctx(project_id=PROJECT, name_regex=["a"], exception_regex=["b"], age={"days": 1})
+    )
     assert isinstance(built, IpCleaner)
     with pytest.raises(ValueError, match="project_id is required"):
         get("gcp", "ip")(ctx())

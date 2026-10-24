@@ -137,12 +137,25 @@ def _age_cases() -> list[Case]:
             {"z": [disk("d", ago={"hours": 29})]},
             detach_age={"days": 1, "hours": 6},
         ),
-        Case("age-empty-matches-everything", {"z": [disk("d", ago={"seconds": 1})]}, detach_age={}),
         Case(
-            "age-none-matches-everything", {"z": [disk("d", ago={"seconds": 1})]}, detach_age=None
+            "age-empty-matches-everything",
+            {"z": [disk("d", ago={"seconds": 1})]},
+            detach_age={},
+            diverges="BUG-124",
+        ),
+        Case(
+            "age-none-matches-everything",
+            {"z": [disk("d", ago={"seconds": 1})]},
+            detach_age=None,
+            diverges="BUG-124",
         ),
         Case("age-int-days", one, detach_age=1),
-        Case("age-zero-days", {"z": [disk("d", ago={"seconds": 1})]}, detach_age={"days": 0}),
+        Case(
+            "age-zero-days",
+            {"z": [disk("d", ago={"seconds": 1})]},
+            detach_age={"days": 0},
+            diverges="BUG-124",
+        ),
         Case("age-future-detach", {"z": [disk("d", ago={"days": -1})]}),
         Case(
             "age-offset-timestamp", {"z": [disk("d", stamp_value="2026-02-27T01:00:00.000-08:00")]}
@@ -797,6 +810,9 @@ def test_engine_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run_cleaner(case, monkeypatch, caplog, capsys)
+    if case.diverges == "BUG-124":
+        _assert_bug_124(case, old, new)
+        return
     if case.diverges:
         _assert_fixed(case, old, new)
         return
@@ -884,6 +900,18 @@ def _assert_fixed(case: Case, old: Outcome, new: Outcome) -> None:
     assert len(_errors(new)) == failures
     if case.diverges == "BUG-127":
         assert old.error is not None
+
+
+def _assert_bug_124(case: Case, old: Outcome, new: Outcome) -> None:
+    """BUG-124: main deleted every detached disk for an empty or zero `detach_age`; a real run
+    now raises `ValueError` naming the flag before any cloud call."""
+    assert old.error is None
+    assert old.deleted == ["d"]
+    assert new.error is not None
+    assert new.error[0] == "ValueError"
+    assert new.error[1].startswith("detach_age ")
+    assert new.deleted == []
+    assert new.calls == []
 
 
 def _find(case_id: str) -> Case:
@@ -1009,6 +1037,10 @@ def test_quirk_is_preserved(
     # against the frozen crc_service oracle. Fixed cases assert the new outcome only.
     if case_id not in BUG_004_FIXED:
         assert check(old), "oracle no longer shows the quirk"
+    if case.diverges == "BUG-124":
+        assert check(old), "oracle no longer shows the quirk"
+        _assert_bug_124(case, old, new)
+        return
     if case_id in DIVERGING:
         assert case.diverges
         assert new.error is None

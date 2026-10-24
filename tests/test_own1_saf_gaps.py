@@ -159,7 +159,7 @@ def test_saf_022_gcp_disk_never_reads_age(monkeypatch: pytest.MonkeyPatch) -> No
     assert [c.id for c in disk.plan(context).candidates] == ["d"]
 
 
-def test_saf_023_gcp_disk_without_detach_age_deletes_every_detached_disk(
+def test_saf_023_gcp_disk_dry_run_without_detach_age_lists_every_detached_disk(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     never_detached = test_gcp_disk.disk("never")
@@ -174,8 +174,24 @@ def test_saf_023_gcp_disk_without_detach_age_deletes_every_detached_disk(
             ]
         }
     )
-    disk, context = _gcp_cleaner(monkeypatch, client)
+    monkeypatch.setattr("crc.gcp.disk_cleaner.ComputeDiskClient", lambda: client)
+    context = RunContext(
+        dry_run=True,
+        operation=Operation.DELETE,
+        options={"project_id": test_gcp_disk.PROJECT},
+        now=NOW,
+    )
+    disk = get("gcp", "disk")(context)
     assert [c.id for c in disk.plan(context).candidates] == ["fresh", "old"]
+
+
+def test_saf_023_gcp_disk_real_run_without_detach_age_raises_before_any_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = test_gcp_disk.FakeClient({"z": [test_gcp_disk.disk("old", days=400)]})
+    with pytest.raises(ValueError, match="detach_age"):
+        _gcp_cleaner(monkeypatch, client)
+    assert client.calls == []
 
 
 @pytest.mark.parametrize(

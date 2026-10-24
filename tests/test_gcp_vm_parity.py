@@ -40,6 +40,9 @@ ACTION_CALLS = ("instances.delete.execute", "instances.stop.execute")
 WAIT_CALLS = ("zoneOperations.get.execute",)
 TS_ERR = "time data {!r} does not match format '%Y-%m-%dT%H:%M:%S.%f%z'"
 NO_ATTR = "'types.SimpleNamespace' object has no attribute {!r}"
+BUG_183 = frozenset(
+    {"age-empty-matches-everything", "age-none-matches-everything", "age-zero-days"}
+)
 FIX_186: dict[str, list[str]] = {
     "age-max-age-invalid-raises": [],
     "age-timestamp-unparseable": [],
@@ -647,6 +650,9 @@ def test_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run_cleaner(case, monkeypatch, caplog, capsys)
+    if case.id in BUG_183:
+        _assert_bug_183(old, new)
+        return
     bugs = _bugs(case, old)
     if "BUG-186" in bugs:
         assert (new.error, old.error is not None) == (None, True)
@@ -732,6 +738,9 @@ def test_cleaner_protocol_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run_cleaner(case, monkeypatch, caplog, capsys)
+    if case.id in BUG_183:
+        _assert_bug_183(old, new)
+        return
     actions = ACTION_CALLS
     if case.id in FIX_186:
         assert old.error is not None
@@ -757,6 +766,17 @@ def test_cleaner_protocol_matches_main(
     assert new.logs[-1] == expected[-2]
     if _listed(case) <= 1:
         assert new.logs == expected[:-1]
+
+
+def _assert_bug_183(old: Outcome, new: Outcome) -> None:
+    """BUG-183: main acted on every selected instance for an empty or zero `age`; a real run
+    now raises `ValueError` naming the flag before any cloud call."""
+    assert old.error is None
+    assert old.deleted == ["d"]
+    assert new.error is not None
+    assert new.error[0] == "ValueError"
+    assert new.error[1].startswith("age ")
+    assert (new.deleted, new.stopped, new.calls) == ([], [], [])
 
 
 def _listed(case: Case) -> int:
@@ -996,7 +1016,9 @@ def test_quirk_is_preserved(
     # against the frozen crc_service oracle. Fixed cases assert the new outcome only.
     if case_id not in BUG_004_FIXED:
         assert check(old), "oracle no longer shows the quirk"
-    if case_id in FIX_186:
+    if case_id in BUG_183:
+        _assert_bug_183(old, new)
+    elif case_id in FIX_186:
         assert new.error is None
         assert _done(new) == _fixed_done(case)
     else:

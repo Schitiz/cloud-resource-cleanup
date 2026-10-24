@@ -173,7 +173,12 @@ def test_bug_005_engine_and_registry_pass_notags() -> None:
     outcome = run_engine(DiskCleaner(client, settings(notags={"env": ["qa"]})), "disk", now=NOW)
     assert deleted_ids(outcome) == ["b"]
     assert ("delete_disk", "z", "a") not in client.calls
-    options = {"project_id": PROJECT, "notags": {"env": ["qa"]}, "name_regex": ["b"]}
+    options = {
+        "project_id": PROJECT,
+        "notags": {"env": ["qa"]},
+        "name_regex": ["b"],
+        "detach_age": {"days": 1},
+    }
     built = build_disk_cleaner(RunContext(False, Operation.DELETE, options, NOW))
     assert isinstance(built, DiskCleaner)
     assert built._settings.notags == {"env": ["qa"]}

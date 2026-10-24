@@ -59,7 +59,7 @@ def attached_disk(name: str, zone: str = "z1", auto_delete: bool = False) -> Any
 
 
 def address(name: str, status: str = "RESERVED") -> Any:
-    return types.SimpleNamespace(name=name, status=status)
+    return types.SimpleNamespace(name=name, status=status, creation_timestamp=OLD)
 
 
 @dataclass

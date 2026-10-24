@@ -10,6 +10,7 @@ import logging
 from collections.abc import Iterator, Mapping, Sequence
 from typing import cast
 
+from crc.core import age as core_age
 from crc.core import logger, policy
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext
 from crc.core.registry import register
@@ -204,8 +205,6 @@ class DiskCleaner:
         tags = policy.normalize_tags(disk.labels)
         return policy.filter_tags_any_key(tags, self._settings.filter_labels)
 
-    # TODO(BUG-124): GCP disk cleanup accepts an empty or zero detach_age
-    #  labels: bug, risk-high, crc
     def _older_than_detach_age(self, disk: DiskView, clock: Clock) -> bool:
         settings = self._settings
         return is_old_enough(
@@ -227,13 +226,16 @@ def build_disk_cleaner(context: RunContext) -> Cleaner:
     project_id = options.get("project_id")
     if not project_id:
         raise ValueError("project_id is required for GCP disk cleanup")
+    detach_age = options.get("detach_age") or {}
+    if not context.dry_run:
+        detach_age = core_age.require_positive_age(detach_age, "detach_age")
     settings = DiskSettings(
         project_id=project_id,
         filter_labels=options.get("filter_tags"),
         exception_labels=options.get("exception_tags"),
         exception_regex=options.get("exception_regex"),
         custom_age_tag_key=options.get("custom_age_tag_key") or "",
-        detach_age=options.get("detach_age") or {},
+        detach_age=detach_age,
         slack_notify_users=bool(options.get("slack_notify_users")),
         slack_user_label=options.get("slack_user_label") or "",
         notags=options.get("notags"),
