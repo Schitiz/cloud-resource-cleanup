@@ -19,6 +19,7 @@ make check-fast            # lint + tests minus the three slow CLI parity files,
 make check                 # everything CI runs, about 60 s; green before every commit
 make lint                  # ruff check, ruff format --check, mypy, lint-imports only
 make smoke-offline         # dry run per Jenkins (cloud, kind) pair, SDKs faked, network denied
+make doctor                # checks Python and tool versions; prints the install command
 make test-file F=tests/test_x.py     # one file while iterating
 make raise-test-floor      # after adding tests, raises the floor (never lowers it); never edit the file by hand
 ```
@@ -33,7 +34,7 @@ archtest check (ARCH-001..012, SAF-LOCK, the test-count floor) prints its rule I
 and a `REMEDIATION:` paragraph: follow it. Failures of ruff, mypy, import-linter and ordinary
 tests print no `REMEDIATION:`; read the tool's own message. Rule IDs are listed in
 [tests/archtest/README.md](tests/archtest/README.md); do not restate or bypass them.
-`make check-fast` skips the test-count floor check; only `make check` runs it.
+`make check-fast` skips the test-count floor; tests run with the network denied (`tests/conftest.py`).
 
 ## Map
 

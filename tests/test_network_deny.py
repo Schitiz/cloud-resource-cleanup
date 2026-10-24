@@ -1,6 +1,7 @@
 """The suite-wide network deny (tests/conftest.py) fires, and still lets local sockets through."""
 
 import socket
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -49,8 +50,13 @@ def test_loopback_connection_is_allowed() -> None:
             peer.close()
 
 
-def test_unix_socket_connection_is_allowed(tmp_path: Path) -> None:
-    path = str(tmp_path / "s.sock")
+def test_unix_socket_connection_is_allowed() -> None:
+    # A short directory: macOS caps AF_UNIX paths at 104 bytes, and pytest's tmp_path can be longer.
+    with tempfile.TemporaryDirectory(dir="/tmp") as short_dir:
+        _connect_unix(str(Path(short_dir) / "s.sock"))
+
+
+def _connect_unix(path: str) -> None:
     with socket.socket(socket.AF_UNIX) as server:
         server.bind(path)
         server.listen(1)
