@@ -199,7 +199,7 @@ reused. `tests/archtest/safety_lock.json` maps IDs to the tests that lock them.
 
 [SAF-041] All three require a positive `--age`. Custom age tags: absent → `--age`;
 present but empty/unparseable/invalid/zero → skip. [SAF-042] Azure skips untagged Spot
-VMs (same as `crc.azu.vm.VM`). [SAF-043] GCP/OCI match their regular VM label/tag
+VMs (same as `crc.azu.vm.VmCleaner`). [SAF-043] GCP/OCI match their regular VM label/tag
 helpers; GCP Spot also keeps an unlabelled Spot VM when `--filter_tags` is empty,
 while OCI with an empty filter relies on the age gate alone. GCP/OCI are opt-in via
 explicit `--cloud` (not `--cloud all`). [SAF-044] Leftover disks/volumes are skipped
@@ -255,7 +255,7 @@ No SAF ID is assigned to these yet.
 
 | Path | Notes |
 |------|--------|
-| `crc.py` | Entry point and re-export shim: `main`, `CRC`, the cleaner classes and constants are re-exported from `crc/cli/` and the cloud packages; holds no logic |
+| `crc.py` | Entry point and re-export shim: `main`, `get_argparser` and the input validators are re-exported from `crc/cli/`; holds no logic |
 | `crc/cli/` | CLI: `crc/cli/args.py` (flags), `crc/cli/inputs.py` (checks, target resolution), `crc/cli/pairs.py` (supported pairs), `crc/cli/dispatch.py` (`validate_targets`, AWS EBS breaker, the cloud and resource loops), `crc/cli/bridge.py` and `routes/<cloud>.py` (every pair runs through `crc.core.engine`), `crc/cli/scan.py` (read-only `--scan_tag`), `crc/cli/main.py`, `crc/cli/runner.py` (`CRC`, the run settings) |
 | `crc/service.py` | Shared `is_old` / `require_positive_age` / retention tags — empty age is True unless a module rejects it; `get_retention_age` returns `KEEP_AGE` for a bad tag |
 | `crc/core/` | Age helpers (`crc/core/age.py`, `KEEP_AGE`), tag and age policy (`crc/core/policy.py`), run log |

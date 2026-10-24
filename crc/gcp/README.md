@@ -63,7 +63,7 @@ The names below are synced with this README by ARCH-002. The spot_vm subpackage 
 
 ## Extension Rules
 
-1. New resources go in a new module with the `Cleaner` contract (`ARCHITECTURE.md`, "Add a resource cleaner"): a `Cleaner` registered with `@register("gcp", ...)`.
+1. New resources go in a new module with the `Cleaner` contract (`ARCHITECTURE.md`, "Add a cleaner"): a `Cleaner` registered with `@register("gcp", ...)`.
 2. Update this README and its symbol list with any public change (ARCH-002).
 3. GCP IP changes need `tests/test_gcp_ip_parity.py` (oracle `tests/legacy/gcp_ip.txt`, never edit it) to stay green.
 4. GCP disk changes need `tests/test_gcp_disk_parity.py` (oracle `tests/legacy/gcp_disk.txt`, never edit it) to stay green.

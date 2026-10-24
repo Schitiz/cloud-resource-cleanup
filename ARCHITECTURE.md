@@ -115,12 +115,13 @@ Use `crc/aws/keypairs/` (cleaner) and `crc/cli/routes/aws.py` (route) as the mod
    builder from `Options` to the keys the factory reads, and `"<kind>": Route(builder)`. Put gates
    the CLI must still raise (for example the AWS disk opt-in) in `Route.precheck`.
 6. A kind that is new to the CLI also needs, in this order: the value in `RESOURCES`
-   (`crc/cli/constants.py`) and the `--resource` choices (`crc/cli/args.py`); its pair rule in
-   `crc/cli/pairs.py` (`SUPPORTED_CLOUDS`) when some clouds lack it; a label constant in
-   `crc/core/report.py` and its entry in `KIND_LABELS` (`crc/core/engine.py`). This changes the
-   CLI contract: follow the flag workflow in [AGENTS.md](AGENTS.md). Add one `AddedResource` (and
-   the new `RESOURCE_HELP`) to the ADDED tables of `tests/helpers_ag_cli_added.py`; the oracle
-   `tests/legacy/crc_main.txt` is never edited, and new kinds are not blocked.
+   (`crc/cli/constants.py`, and `RESOURCES` or `EXTRA_RESOURCES` in `crc/core/selection.py`) and
+   the `--resource` choices (`crc/cli/args.py`); its pair rule in `crc/cli/pairs.py`
+   (`SUPPORTED_CLOUDS`) when some clouds lack it; a label constant in `crc/core/report.py` and its
+   entry in `KIND_LABELS` (`crc/core/engine.py`). This changes the CLI contract: follow the flag
+   workflow in [AGENTS.md](AGENTS.md). Add one `AddedResource` (and the new `RESOURCE_HELP`) to the
+   ADDED tables of `tests/helpers_ag_cli_added.py`; the oracle `tests/legacy/crc_main.txt` is never
+   edited, and new kinds are not blocked.
 7. Tests, all offline: the cleaner (happy path, fail-closed path, dry run makes no mutating call,
    call order of destructive steps) and the routed CLI path. Extend the CLI parity tests that
    reach the cleaner through the route: `tests/test_cli_main_parity.py` `ROUTED_CALLS` (AWS kinds;

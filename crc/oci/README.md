@@ -41,7 +41,7 @@ The names below are synced with this README by ARCH-002. The disk, vm and spot_v
 ## Extension Rules
 
 1. A behaviour fix names its `BUG-NNN` (`docs/refactor/BUGS.md`); do not fix a quirk inside an unrelated change.
-2. New resources go in a new module with the `Cleaner` contract (`ARCHITECTURE.md`, "Add a resource
+2. New resources go in a new module with the `Cleaner` contract (`ARCHITECTURE.md`, "Add a
    cleaner"): a `Cleaner` registered with `@register("oci", ...)`. Follow the `disk/` or `vm/` subpackage: pure policy from `crc.core.policy`,
    age from `crc.core.age`, SDK calls behind a Protocol in a client module (`crc/oci/disk/api.py`, `crc/aws/keypairs/client.py`), injected through the
    constructor.
