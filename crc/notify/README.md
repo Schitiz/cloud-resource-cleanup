@@ -53,4 +53,4 @@ InfluxDB (module influx.py):
 3. Declare every public name in `__all__` of `__init__.py` and list it under Public API.
 4. Add tests with fake clients that assert the exact calls (channel, text, blocks, link_names,
    Influx tags and fields), and extend the parity test when a path changes.
-5. Record every new bug or quirk in `docs/refactor/BUGS.md` with its `main` file:line.
+5. Record every new bug or quirk in `docs/refactor/BUGS.md` (a new row cites the current `file:line` in `crc/`).

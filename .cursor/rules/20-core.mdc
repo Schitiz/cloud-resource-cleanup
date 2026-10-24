@@ -15,5 +15,6 @@ alwaysApply: false
 - A CLI flag is an external contract (Jenkins jobs in `cloud-resource-cleanup-triggers`): never
   rename, remove, re-type or change a default; a new flag is optional. See the flag workflow in
   `AGENTS.md`.
-- New kinds run on the engine path (`crc/cli/routes/`), not as new legacy handlers.
+- Every kind runs on the engine path: a route in `crc/cli/routes/<cloud>.py`, no per-kind code
+  in `crc/cli` dispatch.
 - Run-log text follows `docs/logging.md`.

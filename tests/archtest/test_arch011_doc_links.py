@@ -1,4 +1,4 @@
-"""ARCH-011 check and self-tests."""
+"""ARCH-011 check and self-tests: links and backticked repo paths of the live markdown."""
 
 from pathlib import Path
 
@@ -46,17 +46,108 @@ def test_arch011_selftest_checks_cursor_files_and_directories(tmp_path: Path) ->
     ]
 
 
-def test_arch011_selftest_ignores_anchors_external_code_and_other_files(tmp_path: Path) -> None:
+def test_arch011_selftest_ignores_anchors_external_code_and_archive(tmp_path: Path) -> None:
     text = (
         "[a](ARCHITECTURE.md#section) [web](https://example.com/x) [mail](mailto:a@b.c) "
         "[here](#top) `[code](missing.md)`\n```\n[fenced](missing.md)\n```\n"
     )
     _write(tmp_path, "AGENTS.md", text)
     _write(tmp_path, "ARCHITECTURE.md")
-    _write(tmp_path, "docs/archive/old.md", "[dead](missing.md)\n")
-    _write(tmp_path, "docs/sub/old.md", "[dead](missing.md)\n")
-    _write(tmp_path, "README.md", "[dead](missing.md)\n")
+    _write(tmp_path, "docs/archive/old.md", "[dead](missing.md) `crc/gone.py`\n")
+    _write(tmp_path, "docs/archive/reviews/old.md", "[dead](missing.md)\n")
+    _write(tmp_path, "notes.txt", "[dead](missing.md)\n")
     assert check_doc_links(tmp_path) == []
+
+
+def test_arch011_selftest_scans_every_markdown_file_recursively(tmp_path: Path) -> None:
+    _write(tmp_path, "docs/sub/deep/old.md", "[dead](missing.md)\n")
+    _write(tmp_path, "README.md", "[dead](gone.md)\n")
+    _write(tmp_path, "crc/aws/vm/README.md", "[dead](nope.md)\n")
+    _write(tmp_path, "tests/archtest/README.md", "[dead](nada.md)\n")
+    messages = check_doc_links(tmp_path)
+    assert sorted(m.split("\n")[0].split(" links")[0] for m in messages) == [
+        "ARCH-011: README.md:1",
+        "ARCH-011: crc/aws/vm/README.md:1",
+        "ARCH-011: docs/sub/deep/old.md:1",
+        "ARCH-011: tests/archtest/README.md:1",
+    ]
+
+
+def test_arch011_selftest_backticked_paths_must_exist(tmp_path: Path) -> None:
+    _write(tmp_path, "crc/cli/main.py")
+    _write(tmp_path, "tests/test_a.py")
+    _write(tmp_path, ".github/workflows/ci.yml")
+    text = (
+        "ok `crc/cli/main.py` `crc/cli/main.py:12-30` `tests/test_a.py::test_x` "
+        "`.github/workflows/ci.yml`\n"
+        "bad `crc/cli/vm_ops.py` `tests/test_gone.py::test_y` `docs/refactor/PLAN.md:3`\n"
+    )
+    _write(tmp_path, "AGENTS.md", text)
+    messages = check_doc_links(tmp_path)
+    assert [m.split("\n")[0].split(", which")[0] for m in messages] == [
+        "ARCH-011: AGENTS.md:2 names `crc/cli/vm_ops.py`",
+        "ARCH-011: AGENTS.md:2 names `tests/test_gone.py`",
+        "ARCH-011: AGENTS.md:2 names `docs/refactor/PLAN.md`",
+    ]
+    assert "\n\nREMEDIATION: " in messages[0]
+
+
+def test_arch011_selftest_globs_and_placeholders_need_a_match(tmp_path: Path) -> None:
+    _write(tmp_path, "crc/aws/vm/README.md")
+    _write(tmp_path, "tests/helpers_routed_gcp.py")
+    text = (
+        "ok `crc/**/README.md` `crc/<cloud>/<kind>/README.md` `tests/helpers_routed_<cloud>.py` "
+        "`crc/aws/*/README.md`\n"
+        "bad `crc/*/gone.py` `tests/helpers_nope_<cloud>.py`\n"
+    )
+    _write(tmp_path, "AGENTS.md", text)
+    messages = check_doc_links(tmp_path)
+    assert [m.split("\n")[0].split(", which")[0] for m in messages] == [
+        "ARCH-011: AGENTS.md:2 names `crc/*/gone.py`",
+        "ARCH-011: AGENTS.md:2 names `tests/helpers_nope_<cloud>.py`",
+    ]
+
+
+def test_arch011_selftest_directories_and_ignored_spans(tmp_path: Path) -> None:
+    _write(tmp_path, "crc/aws/keypairs/README.md")
+    text = (
+        "dir `crc/aws/keypairs/` missing dir `crc/aws/gone/`\n"
+        "not paths `python crc.py` `crc.py` `main:crc/aws/disk.py` `crc/aws/disk` `see crc/x.py` "
+        "`other/dir/file.py` `crc/cli/` `crc/`\n"
+        "```\n`crc/in/fence.py`\n```\n"
+    )
+    _write(tmp_path, "AGENTS.md", text)
+    messages = check_doc_links(tmp_path)
+    assert [m.split("\n")[0].split(", which")[0] for m in messages] == [
+        "ARCH-011: AGENTS.md:1 names `crc/aws/gone/`",
+        "ARCH-011: AGENTS.md:2 names `crc/cli/`",
+    ]
+
+
+def test_arch011_selftest_bug_register_rows_are_exempt_from_path_checks(tmp_path: Path) -> None:
+    rows = (
+        "header names `docs/refactor/PLAN.md`\n"
+        "| BUG-001 | title `crc/gone.py` | `crc/old.py:3` | yes | cosmetic | low | R1 | open |\n"
+        "| NEW | title | `crc/older.py:3` | yes | cosmetic | low | R1 | open |\n"
+        "footer names `crc/footer_gone.py`\n"
+    )
+    _write(tmp_path, "docs/refactor/BUGS.md", rows)
+    _write(tmp_path, "docs/other.md", "| BUG-001 | `crc/gone.py` |\n")
+    messages = check_doc_links(tmp_path)
+    assert [m.split("\n")[0].split(", which")[0] for m in messages] == [
+        "ARCH-011: docs/other.md:1 names `crc/gone.py`",
+        "ARCH-011: docs/refactor/BUGS.md:1 names `docs/refactor/PLAN.md`",
+        "ARCH-011: docs/refactor/BUGS.md:4 names `crc/footer_gone.py`",
+    ]
+
+
+def test_arch011_selftest_skips_symlinks_and_cache_directories(tmp_path: Path) -> None:
+    _write(tmp_path, "AGENTS.md", "[x](missing.md)\n")
+    (tmp_path / "CLAUDE.md").symlink_to("AGENTS.md")
+    _write(tmp_path, ".venv/lib/pkg/README.md", "[dead](missing.md)\n")
+    _write(tmp_path, "node_modules/pkg/README.md", "[dead](missing.md)\n")
+    messages = check_doc_links(tmp_path)
+    assert [m.split("\n")[0].split(" links")[0] for m in messages] == ["ARCH-011: AGENTS.md:1"]
 
 
 def test_arch011_selftest_anchor_on_missing_file_fires(tmp_path: Path) -> None:

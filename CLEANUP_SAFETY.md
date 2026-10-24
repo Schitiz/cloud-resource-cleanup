@@ -48,12 +48,13 @@ reused. `tests/archtest/safety_lock.json` maps IDs to the tests that lock them.
 - [SAF-004] That “log rather than raise” path does not cover region listing:
   `get_all_regions` runs outside the per-region guard and only catches
   `CONNECTIVITY_ERRORS`. Auth / credential failures on `describe_regions`
-  still raise out of `AWS_Disk.delete`, and `CRC.delete_disks` re-raises them.
-- [SAF-005] Azure `SpotVM.delete` re-raises when the **list** call fails. Per-VM delete
-  failures are logged and skipped.
+  still raise out of `DiskCleaner.plan()` (`crc/aws/disk/cleaner.py`) before any volume is
+  deleted, and `engine.run` propagates them (the disk route reports first, then re-raises).
+- [SAF-005] The Azure Spot VM cleaner (`AzureSpotVmCleaner.list_vms`, called by `plan()`)
+  logs and re-raises when the **list** call fails. Per-VM delete failures are logged and skipped.
 - Engine path (BUG-388, BUG-391, BUG-408): a cleaner's `plan()` lists every region before `apply()` mutates,
   so a listing error in a later region stops the pair before any mutation (fewer deletes,
-  never more); the legacy adapter loop deleted region by region. Every AWS kind runs this way, and so
+  never more); a loop that deleted region by region would instead delete the earlier regions. Every AWS kind runs this way, and so
   does every Azure kind (BUG-392), where an error while paging the listing now stops the pair before
   any delete, the GCP kinds ip, disk and vm (BUG-400), the OCI kinds disk and vm (BUG-408), and GCP and OCI spot_instances (BUG-409).
 
@@ -117,7 +118,7 @@ reused. `tests/archtest/safety_lock.json` maps IDs to the tests that lock them.
   **running** instance. Not a last-detach timestamp; blind to attachments on
   stopped instances. Documented that way in the `crc/aws/disk/` error strings,
   README, and CLI `--help`.
-- [SAF-018] `AWS_Disk` requires `--age` and/or `--detach_age`. When `--age` is omitted,
+- [SAF-018] The AWS disk cleaner (`DiskCleaner`, settings in `crc/aws/disk/settings.py`) requires `--age` and/or `--detach_age`. When `--age` is omitted,
   `detach_age` is also the CreateTime floor (`test_detach_age_alone_is_enough`).
 - [SAF-019] Empty Complete CloudWatch series is not proof of long detach; CreateTime
   floor still applies.
@@ -126,9 +127,9 @@ reused. `tests/archtest/safety_lock.json` maps IDs to the tests that lock them.
 
 **GCP**
 
-- [SAF-021] `GCP_Disk` uses `disk.last_detach_timestamp` via
+- [SAF-021] The GCP disk cleaner (`DiskCleaner` in `crc/gcp/disk_cleaner.py`) uses `disk.last_detach_timestamp` via
   `is_old(retention_age or self.detach_age, ...)`.
-- [SAF-022] `--age` is passed into `GCP_Disk` but never read.
+- [SAF-022] `--age` never reaches the GCP disk cleaner's age gate; only `detach_age` is read.
 - [SAF-023] Omitting `--detach_age` with no custom age label leaves the age argument
   empty/`None`, so `Service.is_old` returns True and every matching unattached
   disk with a `last_detach_timestamp` is deleted.
@@ -255,11 +256,11 @@ No SAF ID is assigned to these yet.
 | Path | Notes |
 |------|--------|
 | `crc.py` | Entry point and re-export shim: `main`, `CRC`, the cleaner classes and constants are re-exported from `crc/cli/` and the cloud packages; holds no logic |
-| `crc/cli/` | CLI: `args.py` (flags), `inputs.py` (checks, target resolution), `dispatch.py` (`validate_targets`, AWS EBS breaker, per-resource handlers), `scan.py` (read-only `--scan_tag`), `main.py`, `runner.py` / `resource_ops.py` / `vm_ops.py` (`CRC`) |
+| `crc/cli/` | CLI: `args.py` (flags), `inputs.py` (checks, target resolution), `pairs.py` (supported pairs), `dispatch.py` (`validate_targets`, AWS EBS breaker, the cloud and resource loops), `bridge.py` and `routes/<cloud>.py` (every pair runs through `crc.core.engine`), `scan.py` (read-only `--scan_tag`), `main.py`, `runner.py` (`CRC`, the run settings) |
 | `crc/service.py` | Shared `is_old` / `require_positive_age` / retention tags — empty age is True unless a module rejects it; `get_retention_age` returns `KEEP_AGE` for a bad tag |
 | `crc/core/` | Age helpers (`age.py`, `KEEP_AGE`), tag and age policy (`policy.py`), run log |
 | `crc/aws/disk/` | AWS EBS; age validation in `settings.py`; detach_age via CloudWatch (`detach.py`); per-region errors logged (region-list auth failures still raise) |
-| `crc/gcp/disk.py` | GCP disks; detach_age via `last_detach_timestamp`; `--age` ignored; custom label replaces detach_age; notags and name_regex applied; delete waits for the zone operation; per-disk and per-zone errors are recorded and skipped |
+| `crc/gcp/disk_cleaner.py` | GCP disks; detach_age via `last_detach_timestamp`; `--age` ignored; custom label replaces detach_age; notags and name_regex applied; delete waits for the zone operation; per-disk and per-zone errors are recorded and skipped |
 | `crc/oci/disk/` | OCI block and boot volumes; unknown attachment state keeps the volume |
 | `crc/aws/spot_instance_requests/` | cancel→terminate→DoT=false EBS; cancel-fail skips terminate; age required; cancelled+InstanceId retried |
 | `crc/aws/connectivity.py` | Skip unreachable regions |

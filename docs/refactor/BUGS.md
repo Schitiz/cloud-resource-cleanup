@@ -1,17 +1,17 @@
 # Bug and quirk register
 
 Single register of every bug and quirk found in CRC. Rows are sorted by risk (critical, high,
-medium, low). Locations are `file:line` on the `main` branch, verified with
-`git show main:<path>`. The legacy modules on `refactor/python-agentic` are identical to
-`main` except `crc/service.py`, which only delegates age handling to `crc/core/age.py`; the
-age rows therefore cite `main`'s `crc/service.py`.
+medium, low). Location rule: a new row cites the current `file:line` in `crc/` (check it with
+`git grep -n`); an old row keeps its main location (the `Location on main` column, `file:line`
+on the `main` branch, verified with `git show main:<path>`), and the files it names have mostly
+moved or been replaced since. Grep the `BUG-NNN` ID to find the code that carries it today.
 
 ## Rules
 
-1. Every rung appends the bugs and quirks it finds here, with the `main` file:line. New bugs
-   do not go into `STATUS.md` any more (older lists there stay as they are).
-2. Do not fix a bug outside a behaviour-fix rung (`docs/refactor/PLAN.md`). A refactor rung
-   preserves the quirk and covers it with a test.
+1. A change that finds a bug or quirk appends a row here with the current `file:line` in
+   `crc/` (see the location rule above). Old rows are never rewritten.
+2. Do not fix a bug outside its own PR, which names the `BUG-NNN` and adds a failing test first
+   (`AGENTS.md`, `.cursor/skills/crc-maintain/fix-bug.md`).
 3. Never delete a row. When a bug is fixed, wrongly reported or superseded, change its status
    (`open`, `fixed in <rung>`, `not a bug`, `wontfix`) and keep the row.
 4. IDs are `BUG-NNN` and are never reused or renumbered. A new row takes the next free ID and
@@ -20,12 +20,13 @@ age rows therefore cite `main`'s `crc/service.py`.
    cosmetic. Risk is critical, high, medium or low. "Exists on main" is yes only after a check
    of `main`.
 
-From R3 the notification quirks (BUG-028 to BUG-034, BUG-041, BUG-042) live in `crc/notify/slack.py`
-and `crc/notify/influx.py`; `crc.py` still holds the duplicate definition and the `"#" + channel`
-prefix is applied by `SlackNotifier.post`. The `Location on main` column keeps citing `crc.py`.
+The notification quirks (BUG-028 to BUG-034, BUG-041, BUG-042) now live in `crc/notify/slack.py`
+and `crc/notify/influx.py`; the `"#" + channel` prefix is applied by `SlackNotifier.post`. Their
+`Location on main` cell keeps citing `crc.py`.
 
-Related: `docs/refactor/FILTER_VARIANTS.md` (how each module filters, section 7 open items),
-`CLEANUP_SAFETY.md` (SAF IDs), `docs/refactor/STATUS.md` (rung log).
+Related: `CLEANUP_SAFETY.md` (SAF IDs); archived history, only when a row sends you there:
+[FILTER_VARIANTS.md](../archive/FILTER_VARIANTS.md) (how each module filtered, section 7 open
+items), [STATUS.md](../archive/STATUS.md) (rung log), [PLAN.md](../archive/PLAN.md) (rung plan).
 
 | ID | Title | Location on main | Exists on main | Effect | Risk | Found in | Status |
 |----|-------|------------------|----------------|--------|------|----------|--------|
@@ -441,7 +442,7 @@ Related: `docs/refactor/FILTER_VARIANTS.md` (how each module filters, section 7 
 
 - The three Azure VM bugs (subscription-wide list versus resource group, `begin_power_off`
   without deallocate, unchecked `statuses[1]`) were known before R2c and are scheduled as
-  behaviour fixes in `docs/refactor/PLAN.md`.
+  behaviour fixes in [PLAN.md](../archive/PLAN.md).
 - R2c found one correction to earlier documentation: AWS Elastic IP `notags` does not
   "never skip" as `FILTER_VARIANTS.md` section 2 and `crc.core.policy.aws_eip_should_skip`
   describe; the call `all(<bool>,)` raises `TypeError` (BUG-011). Policy keeps the

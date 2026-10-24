@@ -12,8 +12,8 @@ _ROW = re.compile(r"^\|\s*(BUG-\d{3,})\s*\|", re.MULTILINE)
 _REMEDIATION = (
     "Bug IDs are never invented in code. Look the bug up in docs/refactor/BUGS.md and fix the "
     "ID if it is a typo. If it is a new bug or quirk, add a row to BUGS.md with the next free "
-    "ID and the main-branch file:line (AGENTS.md hard rule 11) before referencing it. Do not "
-    "remove the reference to make the check pass."
+    "ID and the current crc/ file:line (AGENTS.md rule 5; old rows keep their main location) "
+    "before referencing it. Do not remove the reference to make the check pass."
 )
 
 

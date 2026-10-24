@@ -13,8 +13,8 @@ assigns the real `BUG-NNN` IDs.
 
 ## Safety Invariants
 
-- Locations are `file:line` on `main` (the `BUGS.md` location column), verified with
-  `git show main:<path>`.
+- Location rule: a new row cites the current `file:line` in `crc/`, verified with `git grep -n`;
+  an old row of `BUGS.md` keeps its main location (the `Location on main` column).
 - A pending row never fixes anything: a fix is its own change with a test and a `BUGS.md` status.
 
 ## Extension Rules

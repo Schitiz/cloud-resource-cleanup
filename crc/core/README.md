@@ -56,10 +56,10 @@ key must be present). Functions named for a module are exact copies of that modu
 - `name_regex_search_matches()`: regex search, any pattern, empty list matches (AWS disk, keypair).
 - `exception_regex_search_matches()`: regex search, any pattern, empty list is False (AWS disk, keypair).
 - `exception_regex_match_matches()`: regex match anchored at the start, any pattern (GCP disk).
-- `filter_substring_matches()`: plain substring any, empty list matches (GCP IP filter_regex).
-- `gcp_ip_exception_excludes()`: GCP IP exception_regex as implemented, inverted.
-- `nic_name_included()`: Azure NIC name_regex, substring any, empty list is False.
-- `nic_name_excluded()`: Azure NIC exception_regex, substring any.
+- `filter_substring_matches()`: plain substring any, empty list matches (the GCP IP name filter; the IP cleaner applies its exception filter itself).
+- `gcp_ip_exception_excludes()`: dead helper (BUG-370): the old inverted GCP IP exception test, called by no cleaner and only exercised by the policy tests; BUG-001 is fixed.
+- `nic_name_included()`: dead helper (BUG-370): the Azure NIC name substring test, called by no cleaner (the NIC cleaner compiles and matches its patterns itself).
+- `nic_name_excluded()`: Azure NIC exception filter, plain substring any; used by the NIC cleaner.
 - `compile_patterns()`: compile regexes up front, ValueError on a bad pattern (AWS disk).
 - `state_in()`: exact state membership.
 - `state_is_substring_of_any()`: Azure disk state test (state is a substring of an allowed entry).
@@ -176,8 +176,8 @@ decides what a cleaner selects or deletes.
   resource is selected; call it after the CLI input validators to keep error order.
 - Registering the same cloud and kind twice raises; lookups of unknown names raise with the
   known names. No import-time cloud calls, no other global state than the default registry.
-- Policy keeps every quirk of the catalogue (inverted GCP IP exception, Elastic IP notags that
-  never match, KMS multi-value filters that never match, empty `notags` never skips). A quirk
+- Policy keeps the quirks of the catalogue that are not yet fixed (Elastic IP notags that never
+  match, KMS multi-value filters that never match, empty `notags` never skips). A quirk
   is only fixed with its own `docs/refactor/BUGS.md` row and test, never as a side effect.
 - An empty `exception_tags` or `notags` never skips; an untagged resource never matches a
   non-empty `notags`. Callers must keep the catalogued untagged mode of each module.

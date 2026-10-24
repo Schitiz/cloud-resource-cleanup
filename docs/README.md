@@ -20,6 +20,7 @@ agent entry point (that is `AGENTS.md`). Docs here state what the code does toda
 ## Extension Rules
 
 1. Add a current-state document as `docs/<topic>.md` and link it from `AGENTS.md` or the document
-   that needs it. Every relative link must resolve (ARCH-011).
+   that needs it. Every relative link and every backticked repo path (`crc/...`, `tests/...`,
+   `docs/...`) must resolve (ARCH-011); write a path that exists only on `main` as `main:<path>`.
 2. Record every bug in `refactor/BUGS.md` with the next free ID, not in free-form notes.
 3. Do not add history or progress logs; use the PR description and git history.
