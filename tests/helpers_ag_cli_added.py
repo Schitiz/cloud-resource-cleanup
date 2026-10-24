@@ -11,9 +11,10 @@ READMEs say, then add one entry below (and nothing in the oracle):
 * a new flag: `AddedFlag(option, dest, default, help, short=..., examples=...)`;
 * a new `--resource` kind: `AddedResource(kind, clouds, in_all)` plus the full new help text of
   `--resource` in `RESOURCE_HELP`; `in_all=True` when `--resource all` expands to it;
-* a new choice of any other flag: `AddedChoice(option, choice, help)` with the new help text.
+* a new choice of any other flag: `AddedChoice(option, choice, help)` with the new help text
+  (`help=None` keeps the oracle help).
 
-The Jenkins contract (`tests/test_jenkins_contract.py`) is separate and never relaxed by this table.
+The Jenkins contract (`tests/test_jenkins_contract.py`) is separate and never relaxed here.
 """
 
 from dataclasses import dataclass
@@ -34,7 +35,7 @@ class AddedFlag:
 class AddedChoice:
     option: str
     choice: str
-    help: str
+    help: str | None = None
 
 
 @dataclass(frozen=True)
@@ -47,7 +48,7 @@ class AddedResource:
 ADDED_FLAGS: tuple[AddedFlag, ...] = ()
 ADDED_CHOICES: tuple[AddedChoice, ...] = ()
 ADDED_RESOURCES: tuple[AddedResource, ...] = ()
-RESOURCE_HELP: str | None = None
+RESOURCE_HELP: str | None = None  # None: --resource help unchanged
 ADDED_HINT = "add it to the ADDED table in tests/helpers_ag_cli_added.py (with default and help)"
 
 

@@ -29,6 +29,7 @@ from tests.helpers_oracle import load_legacy_crc
 
 ROOT = Path(__file__).resolve().parent.parent
 ORACLE_EXTRA_RESOURCES = ["vpc", "spot_instance_requests", "spot_instances"]
+ORACLE_KINDS = [r for r in [*RESOURCES, *EXTRA_RESOURCES] if r not in added_table.added_kinds()]
 KMS_OPTIONS = SelectionOptions(kms_key_description="desc", kms_user="arn:user")
 EBS_MESSAGE = "AWS EBS volume cleanup requires '--cloud aws --resource disk'"
 
@@ -441,7 +442,7 @@ def test_warning_texts_match_crc_py(
 
 
 @pytest.mark.parametrize("cloud", [*CLOUDS, "all"])
-@pytest.mark.parametrize("resource", [*RESOURCES, *EXTRA_RESOURCES, "all"])
+@pytest.mark.parametrize("resource", [*ORACLE_KINDS, "all"])
 @pytest.mark.parametrize("operation", [Operation.DELETE, Operation.STOP])
 def test_exhaustive_grid_matches_crc_main(
     crc_cli: ModuleType,

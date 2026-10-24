@@ -11,7 +11,7 @@ import contextlib
 import functools
 import importlib.util
 import sys
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -61,23 +61,6 @@ def oracle() -> ModuleType:
     return load_legacy_crc("legacy_crc_main")
 
 
-@contextlib.contextmanager
-def _stripping(oracle_parser: argparse.ArgumentParser | None) -> Iterator[None]:
-    """While active, every parser parses without the flags and choices listed as ADDED."""
-    if oracle_parser is None:
-        yield
-        return
-    original = argparse.ArgumentParser.parse_args
-
-    def parse_args(self: argparse.ArgumentParser, *args: Any, **kwargs: Any) -> Any:
-        added_args.strip_additions(self, oracle_parser)
-        return original(self, *args, **kwargs)
-
-    with pytest.MonkeyPatch.context() as local:
-        local.setattr(argparse.ArgumentParser, "parse_args", parse_args)
-        yield
-
-
 @functools.cache
 def _oracle_parser(oracle: ModuleType) -> argparse.ArgumentParser:
     with pytest.MonkeyPatch.context() as patch:
@@ -95,7 +78,7 @@ def _run(
     monkeypatch.setenv("COLUMNS", "100")
     capsys.readouterr()
     try:
-        with _stripping(strip_to):
+        with added_args.stripping(strip_to) if strip_to else contextlib.nullcontext():
             result = parse()
     except SystemExit as exc:
         captured = capsys.readouterr()

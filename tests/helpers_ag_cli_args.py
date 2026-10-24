@@ -9,7 +9,10 @@ on every flag and value form the oracle knows.
 """
 
 import argparse
-from collections.abc import Sequence
+import contextlib
+import functools
+import runpy
+from collections.abc import Iterator, Sequence
 from typing import Any
 
 from tests.helpers_ag_cli_added import (
@@ -20,16 +23,17 @@ from tests.helpers_ag_cli_added import (
     RESOURCE_HELP,
     AddedFlag,
 )
+from tests.helpers_oracle import load_legacy_crc
 
 COMPARED_FIELDS = ["option_strings", "dest", "nargs", "const", "default", "type", "required"]
 COMPARED_FIELDS += ["metavar"]
 
 
-def added_choices(option_strings: Sequence[str]) -> list[tuple[str, str]]:
-    """The (choice, new help text) pairs the ADDED table lists for the option."""
+def added_choices(option_strings: Sequence[str]) -> list[tuple[str, str | None]]:
+    """The (choice, new help text or None for unchanged) pairs ADDED lists for the option."""
     pairs = [(c.choice, c.help) for c in ADDED_CHOICES if c.option in option_strings]
     if "--resource" in option_strings:
-        pairs += [(r.kind, RESOURCE_HELP or "") for r in ADDED_RESOURCES]
+        pairs += [(r.kind, RESOURCE_HELP) for r in ADDED_RESOURCES]
     return pairs
 
 
@@ -64,12 +68,12 @@ def _check_choices(action: argparse.Action, old: argparse.Action) -> None:
     assert sorted(map(str, extra)) == sorted(str(c) for c, _ in listed), (
         _fail_choices(old, extra) + f" (listed: {[c for c, _ in listed]})"
     )
-    helps = {h for _, h in listed}
-    if not extra:
-        assert action.help == old.help, f"help of {old.option_strings} changed vs the oracle"
-    else:
-        assert len(helps) == 1, f"one new help text per option is expected, got {helps}"
-        assert action.help == helps.pop(), f"help of {old.option_strings} differs from ADDED"
+    helps = {h for _, h in listed if h is not None}
+    assert len(helps) <= 1, f"one new help text per option is expected, got {helps}"
+    expected_help = helps.pop() if helps else old.help
+    assert action.help == expected_help, (
+        f"help of {old.option_strings} differs from the oracle and from ADDED"
+    )
 
 
 def _check_added_flag(action: argparse.Action) -> None:
@@ -148,5 +152,59 @@ def abbreviation_problems(new: argparse.ArgumentParser, old: argparse.ArgumentPa
             before = {old._option_string_actions[o].dest for o in old_longs if o.startswith(prefix)}
             after = {new._option_string_actions[o].dest for o in new_longs if o.startswith(prefix)}
             if len(before) == 1 and after != before:
-                problems.append(f"{prefix} meant {sorted(before)}, now {sorted(after)}")
+                problems.append(
+                    f"{prefix} meant {sorted(before)}, now {sorted(after)}: a new long flag must "
+                    f"not start with {prefix!r}; pick another name"
+                )
     return problems
+
+
+class _Built(Exception):
+    def __init__(self, parser: argparse.ArgumentParser) -> None:
+        super().__init__()
+        self.parser = parser
+
+
+@functools.cache
+def oracle_parser() -> argparse.ArgumentParser:
+    """The parser the oracle `get_argparser` builds (parse_args is stopped before it parses)."""
+    original = argparse.ArgumentParser.parse_args
+
+    def stop(self: argparse.ArgumentParser, *_: Any, **__: Any) -> Any:
+        raise _Built(self)
+
+    argparse.ArgumentParser.parse_args = stop  # type: ignore[method-assign]
+    try:
+        load_legacy_crc("ag_cli_oracle_parser").get_argparser()
+    except _Built as built:
+        return built.parser
+    finally:
+        argparse.ArgumentParser.parse_args = original  # type: ignore[method-assign]
+    raise AssertionError("the oracle get_argparser did not reach parse_args")
+
+
+@contextlib.contextmanager
+def stripping(parser: argparse.ArgumentParser | None = None) -> Iterator[None]:
+    """While active, every parser parses without the flags and choices listed as ADDED."""
+    oracle = parser or oracle_parser()
+    original = argparse.ArgumentParser.parse_args
+
+    def parse_args(self: argparse.ArgumentParser, *args: Any, **kwargs: Any) -> Any:
+        strip_additions(self, oracle)
+        return original(self, *args, **kwargs)
+
+    argparse.ArgumentParser.parse_args = parse_args  # type: ignore[method-assign]
+    try:
+        yield
+    finally:
+        argparse.ArgumentParser.parse_args = original  # type: ignore[method-assign]
+
+
+def has_additions() -> bool:
+    return bool(ADDED_FLAGS or ADDED_CHOICES or ADDED_RESOURCES)
+
+
+def run_script_without_additions(script: str) -> None:
+    """Subprocess entry: run `script` as `__main__` with the ADDED flags and choices stripped."""
+    with stripping():
+        runpy.run_path(script, run_name="__main__")

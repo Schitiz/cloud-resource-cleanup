@@ -7,6 +7,7 @@ and constructor arguments, the printed output, the warnings logged, `os.environ[
 after the run and the raised error (type and message) or exit code must be equal.
 """
 
+import contextlib
 import functools
 import importlib
 import importlib.util
@@ -35,6 +36,7 @@ from crc.cli.routes import skips
 from crc.core import logger
 from crc.core.cleaner import Candidate, Operation, Plan, Result, RunContext
 from tests import helpers_ag_cli_added as added_table
+from tests import helpers_ag_cli_args as added_args
 from tests.helpers_cli_routes import FakeCleaners
 from tests.helpers_oracle import load_legacy_crc
 from tests.helpers_routed_calls import RoutedCall
@@ -104,6 +106,10 @@ MIN_CASES = 8000
 RUN_ORACLE = (
     "import sys; sys.argv = ['crc.py', *sys.argv[2:]]; "
     "from tests.helpers_oracle import load_legacy_crc; load_legacy_crc().main()"
+)
+RUN_NEW = (
+    "import sys; script = sys.argv[1]; sys.argv = ['crc.py', *sys.argv[2:]]; "
+    "from tests.helpers_ag_cli_args import run_script_without_additions as run; run(script)"
 )
 Events = list[Any]
 
@@ -313,7 +319,9 @@ def run_oracle(case: Case, monkeypatch: pytest.MonkeyPatch) -> Outcome:
     return outcome
 
 
-def run_new(case: Case, monkeypatch: pytest.MonkeyPatch, fakes: Fakes | None = None) -> Outcome:
+def run_new(
+    case: Case, monkeypatch: pytest.MonkeyPatch, fakes: Fakes | None = None, strip: bool = True
+) -> Outcome:
     fakes = fakes or Fakes(case)
     monkeypatch.setattr(cli_context, "CRC", fakes.CRC)
     monkeypatch.setattr(cli_clients, "WebClient", fakes.WebClient)
@@ -325,7 +333,8 @@ def run_new(case: Case, monkeypatch: pytest.MonkeyPatch, fakes: Fakes | None = N
         lambda crc, key, value: crc.scan_instances_with_tag(key, value),
     )
     install_routed_fakes(fakes, monkeypatch)
-    return execute(NEW_MODULE.main, case, fakes)
+    with added_args.stripping() if strip else contextlib.nullcontext():
+        return execute(NEW_MODULE.main, case, fakes)
 
 
 EVENT_WITH_KWARGS = 3
@@ -1017,7 +1026,10 @@ def test_script_entry_point_matches_oracle(argv: list[str]) -> None:
         return done.returncode, done.stdout, stderr[-1] if stderr else ""
 
     oracle = run(["-c", RUN_ORACLE, str(ORACLE)])
-    new = run([str(ROOT / "crc.py")])
+    if added_args.has_additions():
+        new = run(["-c", RUN_NEW, str(ROOT / "crc.py")])
+    else:
+        new = run([str(ROOT / "crc.py")])
     assert new[0] == oracle[0]
     assert new[1] == oracle[1]
     assert new[2] == oracle[2]
@@ -1096,7 +1108,7 @@ def test_added_resources_reach_their_cleaner_through_main(
     argv = ("--cloud", cloud, "--resource", kind, "--dry_run", "--age", "{'days': 2}")
     case = Case(f"added-{cloud}-{kind}", argv)
     fakes = Fakes(case)
-    outcome = run_new(case, monkeypatch, fakes)
+    outcome = run_new(case, monkeypatch, fakes, strip=False)
     assert outcome.result in (("returned",), ("exit", 0)), outcome.result
     assert fakes.cleaners is not None
     pairs = [(c, k) for c, k, _ in fakes.cleaners.runs]
