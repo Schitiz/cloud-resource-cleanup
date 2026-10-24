@@ -9,6 +9,7 @@ import pytest
 from crc.azu.disk import AzureDiskCleaner, DiskSettings
 from crc.core import logger
 from crc.core.cleaner import Operation, RunContext
+from tests.helpers_azu_age_shim import legacy_age_rules  # noqa: F401 - autouse fixture
 from tests.helpers_azure_disk import NOW, FakeAzure, disk
 from tests.helpers_wc_azu_engine import candidate_ids, engine_run
 

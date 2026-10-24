@@ -13,7 +13,8 @@ from typing import Any
 
 from crc.azu import _logger
 from crc.azu._base import Base
-from crc.azu._common import kept, log_delete_summary, log_would_delete
+from crc.azu._common import kept, log_delete_summary, log_would_delete, real_run_age
+from crc.azu._created import NIC_TYPE, AgeGate
 from crc.azu.nic.client import ClientFactory
 from crc.core import policy
 from crc.core.cleaner import (
@@ -77,11 +78,13 @@ class AzureNicCleaner:
         resource_group: str,
         name_regex: Sequence[str] | None,
         exception_regex: Sequence[str] | None,
+        age_gate: AgeGate | None = None,
     ) -> None:
         self._client_factory = client_factory
         self._resource_group = resource_group
         self._name_regex = name_regex
         self._exception_regex = exception_regex
+        self._age_gate = age_gate
         self._include: tuple[str, ...] | None = None
         self._exclude: tuple[str, ...] = ()
 
@@ -108,6 +111,8 @@ class AzureNicCleaner:
         skipped: list[Skipped] = []
         started = _logger.started()
         scanned = 0
+        if self._age_gate is not None:
+            self._age_gate.load(context.now)
         for nic in self.list_nics():
             scanned += 1
             candidate, reason = self.decide(nic)
@@ -178,8 +183,6 @@ class AzureNicCleaner:
         _logger.failed(self._resource_group, nic_name, last_exception or last_error)
         return last_error
 
-    # TODO(BUG-112): Azure NIC cleanup has no age gate and no tag filter
-    #  labels: bug, risk-high, crc
     def decide(self, nic: Any) -> tuple[Candidate | None, str]:
         """Select one SDK NIC: the candidate, or None with the reason it was kept."""
         if (
@@ -202,17 +205,25 @@ class AzureNicCleaner:
             return kept("no name_regex match")
         if excluded:
             return kept("matches exception_regex")
+        if self._age_gate is not None:
+            reason = self._age_gate.keep_reason(getattr(nic, "id", None))
+            if reason:
+                return kept(reason)
         return Candidate(id=name, name=name), ""
 
 
 @register("azure", "nic")
 def build_nic_cleaner(context: RunContext) -> Cleaner:
-    """Registry factory. Options: `resource_group`, `name_regex`, `exception_regex`."""
+    """Registry factory. Options: `resource_group`, `name_regex`, `exception_regex`, `age`
+    (positive on a real run)."""
     options = context.options
+    age = real_run_age(context, "NIC")
     base = Base(options.get("resource_group") or "")
+    gate = AgeGate(age, base.get_resource_client, base.resource_group, NIC_TYPE) if age else None
     return AzureNicCleaner(
         client_factory=base.get_network_client,
         resource_group=base.resource_group,
         name_regex=options.get("name_regex"),
         exception_regex=options.get("exception_regex"),
+        age_gate=gate,
     )

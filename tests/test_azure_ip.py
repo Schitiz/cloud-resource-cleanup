@@ -6,6 +6,7 @@ import pytest
 
 from crc.azu.ip import AzureIpCleaner
 from crc.core.cleaner import Operation, Plan, RunContext
+from tests.helpers_azu_age_shim import legacy_age_rules  # noqa: F401 - autouse fixture
 from tests.helpers_azure_ip import NOW, FakeAzure, ip
 from tests.helpers_wc_azu_engine import candidate_ids, engine_run
 

@@ -13,7 +13,8 @@ from typing import Any
 
 from crc.azu import _logger
 from crc.azu._base import Base
-from crc.azu._common import kept, log_delete_summary, log_would_delete
+from crc.azu._common import kept, log_delete_summary, log_would_delete, real_run_age
+from crc.azu._created import IP_TYPE, AgeGate
 from crc.azu.ip.client import ClientFactory, TagSpec
 from crc.core import policy
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext, Skipped
@@ -51,12 +52,14 @@ class AzureIpCleaner:
         filter_tags: TagSpec | None,
         exception_tags: TagSpec | None,
         notags: TagSpec | None,
+        age_gate: AgeGate | None = None,
     ) -> None:
         self._client_factory = client_factory
         self._resource_group = resource_group
         self._filter_tags = filter_tags
         self._exception_tags = exception_tags
         self._notags = notags
+        self._age_gate = age_gate
         self._started = 0.0
 
     def supports(self, operation: Operation) -> bool:
@@ -68,6 +71,8 @@ class AzureIpCleaner:
         skipped: list[Skipped] = []
         self._started = started = _logger.started()
         scanned = 0
+        if self._age_gate is not None:
+            self._age_gate.load(context.now)
         for ip in self.list_ips():
             scanned += 1
             candidate, reason = self.decide(ip)
@@ -116,8 +121,6 @@ class AzureIpCleaner:
         logging.info("Deleted IP address: %s", candidate.id)
         _logger.acted("deleted", self._resource_group, candidate.id)
 
-    # TODO(BUG-075): Azure IP cleanup has no age gate (SAF-011 not met)
-    #  labels: bug, risk-high, crc
     def decide(self, ip: Any) -> tuple[Candidate | None, str]:
         """Select one SDK address: the candidate, or None with the reason it was kept."""
         exception_tags = self._exception_tags or {}
@@ -136,19 +139,27 @@ class AzureIpCleaner:
             return kept("matches exception_tags or notags")
         if _in_use(ip):
             return kept("in_use")
+        if self._age_gate is not None:
+            reason = self._age_gate.keep_reason(getattr(ip, "id", None))
+            if reason:
+                return kept(reason)
         tags = policy.normalize_tags(getattr(ip, "tags", None))
         return Candidate(id=ip.name, name=ip.name, tags=tags), ""
 
 
 @register("azure", "ip")
 def build_ip_cleaner(context: RunContext) -> Cleaner:
-    """Registry factory. Options: `resource_group`, `filter_tags`, `exception_tags`, `notags`."""
+    """Registry factory. Options: `resource_group`, `filter_tags`, `exception_tags`, `notags`, `age`
+    (positive on a real run)."""
     options = context.options
+    age = real_run_age(context, "IP")
     base = Base(options.get("resource_group") or "")
+    gate = AgeGate(age, base.get_resource_client, base.resource_group, IP_TYPE) if age else None
     return AzureIpCleaner(
         client_factory=base.get_network_client,
         resource_group=base.resource_group,
         filter_tags=options.get("filter_tags"),
         exception_tags=options.get("exception_tags"),
         notags=options.get("notags"),
+        age_gate=gate,
     )

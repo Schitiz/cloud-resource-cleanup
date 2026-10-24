@@ -23,7 +23,7 @@ Modules:
 ## Safety Invariants
 
 - Authoritative text: `CLEANUP_SAFETY.md`; the per-module invariants are in `crc/azu/README.md` (Azure disks). `plan()` makes no mutating call and never in a dry run (ARCH-005); the delete calls run from `apply()` only.
-- Each delete is isolated and its poller awaited; age through `crc.core.age`; an empty `filter_tags` selects every disk (SAF-011 not met by the tag filter).
+- Each delete is isolated and its poller awaited; age through `crc.core.age`; an empty `filter_tags` selects every disk, so a real run needs a positive `--age` (BUG-173): `build_disk_cleaner` raises `ValueError` naming `--age` before any cloud call; a dry run needs none.
 - Do not call real cloud APIs in tests; mock every SDK client.
 
 ## Extension Rules

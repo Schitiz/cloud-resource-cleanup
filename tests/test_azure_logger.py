@@ -27,6 +27,7 @@ from tests import helpers_azure_spot as hs
 from tests import helpers_azure_vm as hv
 from tests.helpers_ad_spot_engine import run_through_engine
 from tests.helpers_ad_vm_engine import run_vm
+from tests.helpers_azu_age_shim import legacy_age_rules  # noqa: F401 - autouse fixture
 from tests.helpers_wc_azu_engine import candidate_ids, engine_run
 
 _PREFIXES = ("RUN START", "REGION", "ACTION", "SKIPPED", "ERRORS", "FAILED", "RESULT")

@@ -22,7 +22,7 @@ Modules:
 ## Safety Invariants
 
 - Authoritative text: `CLEANUP_SAFETY.md`; the per-module invariants are in `crc/azu/README.md` (Azure NICs). `plan()` makes no mutating call and never in a dry run (ARCH-005); the delete calls run from `apply()` only.
-- Patterns are compiled before any SDK call (`ValueError` when invalid); a failed delete is retried three times, logged and swallowed; no tag filter and no age gate (SAF-011 not met).
+- Patterns are compiled before any SDK call (`ValueError` when invalid); a failed delete is retried three times, logged and swallowed; no tag filter; a real run needs a positive `--age` (BUG-112; creation time read from `azure-mgmt-resource`, unknown or failed lookup keeps the NIC; `ValueError` naming `--age` otherwise; a dry run needs none).
 - Do not call real cloud APIs in tests; mock every SDK client.
 
 ## Extension Rules

@@ -83,7 +83,11 @@ reused. `tests/archtest/safety_lock.json` maps IDs to the tests that lock them.
 
 **When adding a new destructive module**
 
-- [SAF-011] Require a real age (or equivalent) gate in `__init__`.
+- [SAF-011] Require a real age (or equivalent) gate in `__init__`. Azure disk, ip and nic
+  meet it: a real run (not `--dry_run`) without a positive `--age` raises `ValueError`
+  naming `--age` before any cloud call; a dry run needs none. Azure IP and NIC read the
+  creation time from `azure-mgmt-resource` (`createdTime`, one listing per run); a resource
+  without one, or every resource when the lookup fails, is kept.
 - [SAF-012] Reject or skip unknown keys, zero durations, and bad custom age tags.
 - [SAF-013] Avoid having `--max_age` / `MAX_AGE` silently shorten a floor another flag
   (for example AWS `--detach_age`) just established, unless that change is

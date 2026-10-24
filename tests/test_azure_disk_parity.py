@@ -34,6 +34,7 @@ import pytest
 from crc.azu.disk import AzureDiskCleaner, build_disk_cleaner
 from crc.core.cleaner import Cleaner, Operation, RunContext
 from crc.core.registry import get
+from tests.helpers_azu_age_shim import legacy_age_rules  # noqa: F401 - autouse fixture
 from tests.helpers_azure_disk import NOW, FakeAzure, ago, disk
 from tests.helpers_log_fix import expected_logs
 from tests.helpers_wc_azu_engine import candidate_ids, engine_run

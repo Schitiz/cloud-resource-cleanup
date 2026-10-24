@@ -26,6 +26,7 @@ import pytest
 from crc.azu.nic import AzureNicCleaner, build_nic_cleaner
 from crc.core.cleaner import Cleaner, Operation, RunContext
 from crc.core.registry import get
+from tests.helpers_azu_age_shim import legacy_age_rules  # noqa: F401 - autouse fixture
 from tests.helpers_azure_nic import NOW, FakeAzure, nic
 from tests.helpers_wc_azu_engine import candidate_ids, engine_run
 

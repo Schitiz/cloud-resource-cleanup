@@ -23,6 +23,7 @@ import pytest
 from crc.azu.ip import AzureIpCleaner, build_ip_cleaner
 from crc.core.cleaner import Cleaner, Operation, RunContext
 from crc.core.registry import get
+from tests.helpers_azu_age_shim import legacy_age_rules  # noqa: F401 - autouse fixture
 from tests.helpers_azure_ip import NOW, FakeAzure, ip
 from tests.helpers_wc_azu_engine import candidate_ids, engine_run
 

@@ -36,6 +36,7 @@ from crc.cli.inputs import Targets, read_options
 from crc.cli.routes import NotifyMode, skips
 from crc.cli.runner import CRC
 from crc.core import logger
+from tests.helpers_azu_age_shim import legacy_age_rules  # noqa: F401 - autouse fixture
 from tests.helpers_cl2_azu import FULL, Logs, Scenario, build, oracle_module, run_oracle_pair
 from tests.helpers_cl2_azu_frozen import FIXED, RUN_LOG
 from tests.helpers_cli_azu import KINDS, Kind, case_key
