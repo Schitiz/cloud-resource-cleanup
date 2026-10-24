@@ -32,7 +32,6 @@ We support below Cloud Providers:
   * Stop VMs
   * Delete KMS
   * Delete EBS snapshots older than 90 days
-  * Delete VPCs and attached resources
   * Delete Spot Instance Requests & associated Instances (one-time **and** persistent). Cancels the request **before** terminating the instance; deletes `DeleteOnTermination=false` EBS that CRC sees while the instance is still running/shutting-down (tagged for retry). Tags are matched on the **spot request** (instances may be untagged).
 * Azure
   * Delete Orphan disks
@@ -132,16 +131,16 @@ python crc.py --cloud <cloud_name> --operation_type <operation_type> --resource 
 ```
 * `cloud` (`-c`): Specify the cloud name (aws, azure, gcp, oci or all). Required.
 * `project_id` (`-p`): Required for gcp, including `--cloud all`, which runs GCP too
-* `resource` (`-r`): Indicate the type of resource you want to target: `disk`, `ip`, `keypair`, `vm`, `vpc`, `kms`, `nic`, `snapshot`, `spot_instance_requests` (AWS only: cancel the request, then terminate), `spot_instances` (Azure, GCP and OCI Spot or preemptible VMs) or `all`. Default: 'all'. `keypair`, `kms`, `snapshot` and `vpc` are AWS only, `nic` is Azure only and `ip` is not available on OCI. A pair that is not supported raises before anything is deleted; under `--cloud all` it is skipped only when no supported pair follows it. `--resource all` needs `--cloud all`, and `--cloud all` cannot be combined with `--resource all` or `--resource disk` (see below). AWS EBS volume deletion is opt-in and needs both `--cloud aws` and `--resource disk`. Any other combination that would hit the aws+disk path raises (it does not skip and continue), so `--cloud all` / `--resource all` cannot unlock other destructive AWS cleanups as a side effect. GCP and OCI `spot_instances` need an explicit `--cloud gcp` / `--cloud oci`; under `--cloud all` only Azure `spot_instances` runs.
+* `resource` (`-r`): Indicate the type of resource you want to target: `disk`, `ip`, `keypair`, `vm`, `kms`, `nic`, `snapshot`, `spot_instance_requests` (AWS only: cancel the request, then terminate), `spot_instances` (Azure, GCP and OCI Spot or preemptible VMs) or `all`. Default: 'all'. `keypair`, `kms` and `snapshot` are AWS only, `nic` is Azure only and `ip` is not available on OCI. A pair that is not supported raises before anything is deleted; under `--cloud all` it is skipped only when no supported pair follows it. `--resource all` needs `--cloud all`, and `--cloud all` cannot be combined with `--resource all` or `--resource disk` (see below). AWS EBS volume deletion is opt-in and needs both `--cloud aws` and `--resource disk`. Any other combination that would hit the aws+disk path raises (it does not skip and continue), so `--cloud all` / `--resource all` cannot unlock other destructive AWS cleanups as a side effect. GCP and OCI `spot_instances` need an explicit `--cloud gcp` / `--cloud oci`; under `--cloud all` only Azure `spot_instances` runs.
 * `resource_group`: Use this option to specify the resource group for Azure. If this flag is provided, the script will only operate on resources within the specified resource group. This allows for more precise targeting of resources in your Azure environment.
 * `operation_type` (`-o`): Specify the type of operation to perform on the resource (delete or stop). Default: 'delete'. `stop` is supported only with `--resource vm`.
 * `dry_run`: Enabling this option will only list resources that match the specified criteria without performing any operations on them. Use the `-d` or `--dry_run` flag to enable this feature. If this option is not specified, the script will perform the operation specified by the `operation_type` argument.
 * `resource_states` (`-s`): Specify the state of the resource you want to delete. Only applicable for virtual machines (VMs) and can be either 'RUNNING' or 'STOPPED'. Default: ['RUNNING']. This means that by default, only running VMs will be considered for deletion.
-* `filter_tags` (`-f`): Use this option to filter resources based on their tags. Leave value of Key empty to indicate `any` value. If not specified all available resources will be picked (except `--resource vpc`, which requires a non-empty `filter_tags`). **This option does not apply to AWS keypairs, AWS snapshots, GCP IPs and Azure NICs**. Resources will be included if `any` (or `all`, depending on the cleaner) of the key with `any` value pair matches. (e.g. {'test_task': ['test', 'stress-test']}).
+* `filter_tags` (`-f`): Use this option to filter resources based on their tags. Leave value of Key empty to indicate `any` value. If not specified all available resources will be picked. **This option does not apply to AWS keypairs, AWS snapshots, GCP IPs and Azure NICs**. Resources will be included if `any` (or `all`, depending on the cleaner) of the key with `any` value pair matches. (e.g. {'test_task': ['test', 'stress-test']}).
 * `exception_tags` (`-e`): Use this option to exclude resources based on their tags. Leave the value of Key empty to indicate `any` value. Resources will be excluded if `any` of the key with `any` value pair matches. **This option does not apply to AWS keypairs, GCP IPs and Azure NICs** (e.g. {'test_task': ['test-keep-resources', 'stress-test-keep-resources']}).
 * `name_regex` (`-n`): Use this option to filter resources based on regular expressions applied to their names. If not specified, all available resources will be picked (except Azure NICs, where an empty `name_regex` selects nothing). **This option applies to AWS keypairs, AWS disks, GCP IPs, GCP disks and Azure NICs**. Resources will be included if `any` of the specified regular expressions match their names. (e.g. ['perftest_', 'feature_']).
 * `exception_regex` (`-x`): Use this option to exclude resources based on regular expressions applied to their names. Resources will be excluded if `any` of the specified regular expressions match their names. **This option applies to AWS keypairs, AWS disks, GCP IPs, GCP disks and Azure NICs** (e.g. ['perftest_keep_resources', 'feature_keep_resources'])
-* `age` (`-a`): Use this option to specify an age threshold for resources when deleting resources other than `IPs` (e.g. {'days': 3, 'hours': 12}). It is not used for GCP disks (use `--detach_age`), VPCs and NICs, and `snapshot` always uses a fixed 90-day threshold. `--resource spot_instance_requests` and `--resource spot_instances` require a positive `age`.
+* `age` (`-a`): Use this option to specify an age threshold for resources when deleting resources other than `IPs` (e.g. {'days': 3, 'hours': 12}). A real (non dry-run) `--resource vm` run on AWS requires a positive `age` (BUG-213). It is not used for GCP disks (use `--detach_age`), NICs, and `snapshot` always uses a fixed 90-day threshold. `--resource spot_instance_requests` and `--resource spot_instances` require a positive `age`.
 * `custom_age_tag_key`: Define a custom tag key for the age threshold of resources on your cloud resource. This tag is ignored for `IPs` and `Keypairs` (e.g. value of the tag {'days': 3, 'hours': 12}; an integer value is read as days). A tag that is present but empty, unparseable, zero or negative keeps the resource instead of falling back to `age`.
 * `max_age`: Specify the maximum age threshold for resources. This value will override the value of the tag specified by `custom_age_tag_key` (e.g. "{'days': 14, 'hours': 12}"). It is exported as the `MAX_AGE` environment variable for the run; never pass a zero duration.
 * `notags` (`-t`): Use this option to filter resources based on tags that are not present. Leave the value of Key empty to indicate `any` value. Resources will be excluded if `all` of the key-value pair match. This option can be used independently of the `filter_tags` option. **This option does not apply to AWS keypairs, AWS KMS, AWS snapshots, GCP IPs and Azure NICs**. Format: -t or --notags {'test_task': ['test'], 'test_owner': []}
@@ -183,44 +182,39 @@ python crc.py --cloud all --project_id <project> --resource vm --filter_tags "{'
 python crc.py --cloud all --project_id <project> --resource vm --age "{'days': 2}" --notags "{'test_task': []}" --dry_run
 ```
 
-6. To Delete AWS VPCs and all attached resources
-```
-python crc.py --cloud aws --resource vpc --filter_tags "{'test_task': ['stress-test', 'perf-test']}" --notags "{'test_owner': []}"
-```
-
-7. To Delete AWS KMS that are older than 3 days
+6. To Delete AWS KMS that are older than 3 days
 ```
 python3 crc.py --cloud aws --resource kms --kms_key_description <key-description> --kms_user <AWS-ARN> --age "{'days': 3}"
 ```
 
-8. To delete all AWS Spot Instance Requests (including Type=persistent) & associated Instances that are older than 3 days and 12 hours and have the tag `test_task` with the value `stress-test`. Tags are matched on the spot request. Order is cancel request → terminate instance → delete leftover volumes with DeleteOnTermination=false:
+7. To delete all AWS Spot Instance Requests (including Type=persistent) & associated Instances that are older than 3 days and 12 hours and have the tag `test_task` with the value `stress-test`. Tags are matched on the spot request. Order is cancel request → terminate instance → delete leftover volumes with DeleteOnTermination=false:
 ```
 python crc.py --cloud aws --resource spot_instance_requests --filter_tags "{'test_task': ['stress-test']}" --age "{'days': 3, 'hours': 12}"
 ```
 
-9. Azure / GCP / OCI Spot (or preemptible) VMs — use `--resource spot_instances`:
+8. Azure / GCP / OCI Spot (or preemptible) VMs — use `--resource spot_instances`:
 ```
 python crc.py --cloud azure --resource_group <rg> --resource spot_instances --filter_tags "{'yb_task': ['itest']}" --age "{'days': 3}"
 python crc.py --cloud gcp --project_id <project> --resource spot_instances --filter_tags "{'yb_task': ['itest']}" --age "{'days': 3}"
 python crc.py --cloud oci --resource spot_instances --filter_tags "{'yb_task': ['itest']}" --age "{'days': 3}"
 ```
 
-10. To delete unattached AWS EBS volumes with `--age` 3 days and `--detach_age` 7 days (with both set, CreateTime must be at least 3 + 7 = 10 days old and CloudWatch must show no running-instance attachment activity in the last 7 days; opt-in: needs `--cloud aws --resource disk`):
+9. To delete unattached AWS EBS volumes with `--age` 3 days and `--detach_age` 7 days (with both set, CreateTime must be at least 3 + 7 = 10 days old and CloudWatch must show no running-instance attachment activity in the last 7 days; opt-in: needs `--cloud aws --resource disk`):
 ```
 python crc.py --cloud aws --resource disk --filter_tags "{'test_task': ['stress-test']}" --age "{'days': 3}" --detach_age "{'days': 7}"
 ```
 
-11. To delete Azure NICs in `test-rg` whose name matches a pattern:
+10. To delete Azure NICs in `test-rg` whose name matches a pattern:
 ```
 python crc.py --cloud azure --resource_group test-rg --resource nic --name_regex "['perftest_']"
 ```
 
-12. To delete AWS EBS snapshots older than 90 days (the threshold is fixed; `--age` is not used), previewing first:
+11. To delete AWS EBS snapshots older than 90 days (the threshold is fixed; `--age` is not used), previewing first:
 ```
 python crc.py --cloud aws --resource snapshot --dry_run
 ```
 
-13. To list (read-only) the AWS VMs that carry the tag `auto_clean=false`:
+12. To list (read-only) the AWS VMs that carry the tag `auto_clean=false`:
 ```
 python crc.py --cloud aws --resource vm --scan_tag auto_clean=false
 ```
@@ -233,7 +227,6 @@ python crc.py --cloud aws --resource vm --scan_tag auto_clean=false
 * Use the `resource_states`, `name_regex`, and `exception_regex` options in list format (`List[str]`)
 * When giving a value to the `resource_states` parameter, be aware that different cloud libraries have different formats. (For eg. `running` state for AWS, AZU but `RUNNING` for GCP)
 * Use the `age` and `influxdb` option in JSON format. Example: `{"days": 60}` (`Dict[str, int]`)
-* VPCs support only `Delete` operation and do not respect `age` threshold.
 * `stop` works only with `--resource vm`.
 
 # Need Help?

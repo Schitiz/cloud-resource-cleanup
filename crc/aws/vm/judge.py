@@ -112,8 +112,6 @@ class InstanceJudge:
             return Skipped(id=_safe_id(inst), reason="no Name tag")
         return name, tags
 
-    # TODO(BUG-213): AWS VM cleanup accepts an empty age (no require_positive_age)
-    #  labels: bug, risk-high, crc
     def _judge(
         self,
         client: VmClient,
@@ -132,6 +130,8 @@ class InstanceJudge:
         if retention_age:
             logging.info("Updating age for instance_id: %s", instance_id)
         age = policy.effective_age(retention_age, self._settings.age)
+        if self._settings.require_age and not age:
+            return Skipped(id=instance_id, name=name, reason="no age")
         if not core_age.is_old(age, now.astimezone(attached.tzinfo), attached):
             return Skipped(id=instance_id, name=name, reason="younger than age")
         logging.info(

@@ -66,7 +66,6 @@ RESOURCE_ARGS = [
     "ip",
     "keypair",
     "vm",
-    "vpc",
     "kms",
     "nic",
     "spot_instance_requests",
@@ -353,7 +352,6 @@ ROUTED_CALLS: dict[str, RoutedCall] = {
             "custom_age_tag_key",
         ),
     ),
-    "vpc": RoutedCall("delete_vpc", ("filter_tags", "exception_tags")),
     "vm": RoutedCall(
         "delete_vm",
         ("filter_tags", "exception_tags", "age", "custom_age_tag_key", "instance_state"),
@@ -455,7 +453,7 @@ def install_routed_fakes(fakes: Fakes, monkeypatch: pytest.MonkeyPatch) -> None:
             call: RoutedCall = call,
         ) -> None:
             assert context.dry_run is ("--dry_run" in fakes.case.argv)
-            if kind in {"vpc", "vm", "spot_instance_requests", "spot_instances", "disk"} or (
+            if kind in {"vm", "spot_instance_requests", "spot_instances", "disk"} or (
                 kind == "ip" and cloud in {"aws", "azure"}
             ):
                 assert "notags" in context.options
@@ -652,7 +650,6 @@ def failure_cases() -> list[Case]:
         ("keypair", "delete_keypairs"),
         ("nic", "delete_nic"),
         ("vm", "delete_vm"),
-        ("vpc", "delete_vpc"),
         ("kms", "delete_kms"),
         ("spot_instance_requests", "delete_spot_instance_requests"),
         ("spot_instances", "delete_spot_instances"),
@@ -816,7 +813,7 @@ def test_table_is_large_and_has_unique_names() -> None:
 
 SCAN_FORMAT_ERROR = "--scan_tag must be in KEY=VALUE format, e.g. auto_clean=false"
 BLANK_SCAN_ERROR = "--scan_tag must not be empty; use KEY=VALUE format, e.g. auto_clean=false"
-AWS_ONLY = ("snapshot", "vpc")
+AWS_ONLY = ("snapshot",)
 SKIP_SUFFIX = "; skipped under --cloud all"
 CLIENT_EVENTS = ("WebClient", "InfluxDBClient")
 
@@ -835,11 +832,9 @@ def diverges(case: Case, expected: Outcome) -> str | None:
         return None
     cloud, resource = option_value(case, "--cloud"), option_value(case, "--resource")
     if resource in AWS_ONLY and cloud in ("azure", "gcp", "oci"):
-        return "BUG-009" if resource == "snapshot" else "BUG-084"
+        return "BUG-009"
     if cloud == "all" and any(event[0] == "Snapshot" for event in expected.events):
         return "BUG-009"
-    if cloud == "all" and any(event[0] == "crc.delete_vpc" for event in expected.events):
-        return "BUG-084"
     return None
 
 
@@ -876,7 +871,7 @@ def expected_fixed(case: Case, bug: str, oracle: Outcome) -> Outcome:
 
 
 def fixed_all(case: Case, oracle: Outcome) -> Outcome:
-    """`--cloud all`: vpc and snapshot run for AWS only; no CRC is built for the skipped clouds
+    """`--cloud all`: snapshot runs for AWS only; no CRC is built for the skipped clouds
     (the up-front pair check) and each logs a skip warning."""
     events: Events = []
     seen_snapshot = False
@@ -890,7 +885,7 @@ def fixed_all(case: Case, oracle: Outcome) -> Outcome:
         if event[0] == "Snapshot.delete" and drop_delete:
             drop_delete = False
             continue
-        if event[0] in ("crc.delete_vpc", "crc.get_msg") and event[1] != "aws":
+        if event[0] == "crc.get_msg" and event[1] != "aws":
             continue
         if event[0] == "CRC" and event[1][0] != "aws":
             continue
@@ -959,7 +954,7 @@ def test_every_fixed_bug_has_diverging_cases() -> None:
                 seen.add(bug)
     finally:
         mp.undo()
-    assert seen == {"BUG-009", "BUG-084", "BUG-344"}
+    assert seen == {"BUG-009", "BUG-344"}
 
 
 def test_diverging_cases_exist_and_differ_from_the_oracle(monkeypatch: pytest.MonkeyPatch) -> None:

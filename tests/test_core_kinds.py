@@ -46,7 +46,6 @@ def test_parser_choices_keep_their_order(monkeypatch: pytest.MonkeyPatch) -> Non
         "ip",
         "keypair",
         "vm",
-        "vpc",
         "kms",
         "nic",
         "spot_instance_requests",
@@ -80,7 +79,6 @@ def test_expansion_constants_keep_their_order() -> None:
         "snapshot",
     )
     assert tuple(r for r in selection.EXTRA_RESOURCES if r not in added) == (
-        "vpc",
         "spot_instance_requests",
         "spot_instances",
     )
@@ -97,9 +95,8 @@ def test_pair_rules_keep_their_content() -> None:
         "kms": ("aws",),
         "ip": ("aws", "azure", "gcp"),
         "snapshot": ("aws",),
-        "vpc": ("aws",),
     }
-    assert {k for k in pairs.AWS_ONLY_RESOURCES if k not in added} == {"snapshot", "vpc"}
+    assert {k for k in pairs.AWS_ONLY_RESOURCES if k not in added} == {"snapshot"}
     for resource in added_table.ADDED_RESOURCES:
         assert resource.kind in KINDS_BY_NAME
         kind = KINDS_BY_NAME[resource.kind]
@@ -119,7 +116,6 @@ def test_pair_rules_keep_their_content() -> None:
             "Invalid cloud provided: oci. Supported clouds are ['aws', 'azure', 'gcp', 'oci']",
         ),
         ("gcp", "snapshot", "--resource snapshot is AWS-only; use --cloud aws (got --cloud gcp)"),
-        ("azure", "vpc", "--resource vpc is AWS-only; use --cloud aws (got --cloud azure)"),
     ],
 )
 def test_unsupported_pair_messages_are_unchanged(cloud: str, resource: str, message: str) -> None:
@@ -140,7 +136,6 @@ def test_report_labels_are_unchanged() -> None:
         "snapshot": SNAPSHOT,
         "spot_instance_requests": SPOT_INSTANCE_REQUEST,
         "spot_instances": VM,
-        "vpc": "VPC",
     }
 
 

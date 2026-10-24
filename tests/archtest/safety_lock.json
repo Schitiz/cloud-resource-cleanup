@@ -8,10 +8,6 @@
       {
         "test": "tests/test_aws_disk_cleaner.py::test_connectivity_error_skips_the_region",
         "sha256": "f0d02e8435c0ba964e2f4937e5cf6c606161bb87499ad3876c92b7e385fb3e12"
-      },
-      {
-        "test": "tests/test_aws_vpc.py::test_plan_skips_region_on_connectivity_error",
-        "sha256": "97f036db484524f148a0dc21dea26d29535845b288ca911a086c675906a670d4"
       }
     ],
     "SAF-002": [

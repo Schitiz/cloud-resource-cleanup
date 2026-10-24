@@ -1,7 +1,7 @@
 """Parity: the engine bridge against the oracle `CRC` methods for the AWS kinds
 routed through the engine.
 
-The oracle (`tests/legacy/crc_main.txt`) runs `delete_ip`, `delete_kms`, `delete_vpc`, `delete_vm`,
+The oracle (`tests/legacy/crc_main.txt`) runs `delete_ip`, `delete_kms`, `delete_vm`,
 `stop_vm`, `delete_spot_instance_requests` and `delete_disks` of the AWS cloud with a fake adapter;
 the bridge runs the engine with a fake cleaner that plans and applies the same ids. Both use the
 same fake Slack and Influx clients: the Slack calls, the Influx calls, the printed output and the
@@ -86,14 +86,6 @@ KINDS = [
             "age": AGE,
             "custom_age_tag_key": "age_tag",
         },
-    ),
-    Kind(
-        "vpc",
-        "VPC",
-        lambda c: c.delete_vpc(TAGS, {}),
-        {},
-        dict(COMMON),
-        notified=False,
     ),
     Kind(
         "vm",
@@ -268,7 +260,7 @@ def test_bridge_matches_the_oracle_crc_method(
 
 def test_route_notify_modes() -> None:
     modes = {kind: route.notify for kind, route in bridge.TABLES["aws"].items()}
-    assert modes["vpc"] is NotifyMode.NONE
+    assert "vpc" not in modes
     assert modes["snapshot"] is NotifyMode.NONE
     assert modes["disk"] is NotifyMode.REPORT_THEN_RERAISE
     assert {modes[k] for k in ("ip", "kms", "vm", "spot_instance_requests", "keypair")} == {

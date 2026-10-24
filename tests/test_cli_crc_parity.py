@@ -143,7 +143,6 @@ ROUTED: dict[str, Callable[[str], Op | None]] = {
     "nic": _fixed("nic", {"name_regex": ["n"], "exception_regex": ["x"]}),
     "disks": _fixed("disk", DISK_FLAGS),
     "disks_delete_error": _fixed("disk", DISK_FLAGS),
-    "vpc": _fixed("vpc", {"filter_tags": TAGS, "exception_tags": {}}),
     "kms": _fixed("kms", KMS_FLAGS),
 }
 
@@ -197,14 +196,7 @@ def compare(oracle_module: ModuleType, case: Case) -> Recorded:
         if case.cloud in CLOUDS:
             with pytest.raises(ValueError):
                 dispatch.validate_targets(Targets(case.cloud, False, [case.cloud], [op.kind]))
-        if (case.cloud, op.kind) == ("azure", "vpc"):
-            # BUG-084 / BUG-017: main's delete_vpc did not check self.cloud; routed rejects it.
-            expected = (
-                ("error", "ValueError", "boom") if case.scenario.delete_error else ("ok", "None")
-            )
-            assert old["result"] == expected
-        else:
-            assert old["result"][:2] == ("error", "ValueError")
+        assert old["result"][:2] == ("error", "ValueError")
         return old
     values = case.scenario.values
     new, seen = run_routed(case, case.cloud, op, values)
@@ -269,7 +261,6 @@ op(
     lambda c: c.delete_disks(*DISK_ARGS),
     delete_error=ValueError("boom"),
 )
-op("vpc", ["aws", "azure"], lambda c: c.delete_vpc(TAGS, {}))
 op("kms", ["aws", "gcp"], lambda c: c.delete_kms(TAGS, {}, "desc", "arn", 7, AGE, "age_tag"))
 
 

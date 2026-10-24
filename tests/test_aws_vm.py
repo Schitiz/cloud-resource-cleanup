@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from crc.aws.vm.cleaner import VmCleaner, VmSettings
+from crc.aws.vm.cleaner import VmCleaner, VmSettings, build_vm_cleaner
 from crc.core.cleaner import Candidate, Operation, Plan, RunContext
 from tests.helpers_ad_vm_engine import done_ids, run_vm
 
@@ -131,3 +131,40 @@ def test_engine_runs_with_injected_cleaner() -> None:
     client = FakeClient([instance("a")])
     outcome = run_vm("aws", make(client), now=NOW)
     assert done_ids(outcome) == ["n-a"]
+
+
+# BUG-213: a real run needs a positive --age --------------------------------------------------
+
+
+def _factory_ctx(options: dict[str, Any], *, dry_run: bool) -> RunContext:
+    return RunContext(dry_run=dry_run, operation=Operation.DELETE, options=options, now=NOW)
+
+
+@pytest.mark.parametrize("age", [None, {}, {"days": 0}, {"hours": 0}])
+@pytest.mark.parametrize("operation", [Operation.DELETE, Operation.STOP])
+def test_bug_213_real_run_without_positive_age_raises_before_any_call(
+    age: Any, operation: Operation
+) -> None:
+    context = RunContext(
+        dry_run=False, operation=operation, options={"filter_tags": {}, "age": age}, now=NOW
+    )
+    with pytest.raises(ValueError, match="--age"):
+        build_vm_cleaner(context)
+
+
+@pytest.mark.parametrize("age", [None, {}, {"days": 0}])
+def test_bug_213_dry_run_without_age_still_builds(age: Any) -> None:
+    assert build_vm_cleaner(_factory_ctx({"age": age}, dry_run=True)) is not None
+
+
+def test_bug_213_real_run_with_positive_age_builds() -> None:
+    assert build_vm_cleaner(_factory_ctx({"age": {"hours": 6}}, dry_run=False)) is not None
+
+
+def test_bug_213_custom_age_tag_without_age_keeps_untagged_instances() -> None:
+    client = FakeClient([instance("i-1")])
+    settings = VmSettings({}, {}, {}, None, "max_retention_age", ["running"], require_age=True)
+    cleaner = VmCleaner(lambda region: client, lambda: ["us-west-2"], settings)
+    plan = cleaner.plan(ctx())
+    assert plan.candidates == ()
+    assert [s.reason for s in plan.skipped] == ["no age"]

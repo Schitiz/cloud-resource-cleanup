@@ -9,8 +9,7 @@ import crc.aws.keypairs
 import crc.aws.kms
 import crc.aws.snapshot
 import crc.aws.spot_instance_requests
-import crc.aws.vm
-import crc.aws.vpc  # noqa: F401
+import crc.aws.vm  # noqa: F401
 from crc.cli.inputs import Options, Targets
 from crc.cli.pairs import AWS_DISK_OPT_IN_MESSAGE
 from crc.cli.routes import NotifyMode, Route, skips
@@ -65,14 +64,6 @@ def _snapshot_message(crc: Any, options: Options, outcomes: Sequence[RunOutcome]
     print(msg)
 
 
-def _vpc(options: Options) -> dict[str, Any]:
-    return {
-        "filter_tags": options.filter_tags,
-        "exception_tags": options.exception_tags,
-        "notags": options.notags,
-    }
-
-
 def _vm(options: Options) -> dict[str, Any]:
     """The legacy handler passed the states to delete only (stop used the cleaner default)."""
     values: dict[str, Any] = {
@@ -121,7 +112,6 @@ ROUTES: dict[str, Route] = {
     "ip": Route(_ip),
     "kms": Route(_kms),
     "snapshot": Route(_snapshot, notify=NotifyMode.NONE, after=_snapshot_message),
-    "vpc": Route(_vpc, notify=NotifyMode.NONE),
     "vm": Route(_vm),
     "spot_instance_requests": Route(_spot_instance_requests),
     "disk": Route(_disk, notify=NotifyMode.REPORT_THEN_RERAISE, precheck=_disk_opt_in),

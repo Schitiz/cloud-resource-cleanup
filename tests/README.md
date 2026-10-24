@@ -30,7 +30,7 @@ credentials; SDK clients are mocked. Layout:
   parity files are: AWS `test_aws_base_parity.py`, `test_aws_connectivity_parity.py`,
   `test_aws_disk_parity.py`, `test_aws_ip_parity.py` (Elastic IP), `test_aws_keypair_parity.py`,
   `test_aws_kms_parity.py`, `test_aws_snapshot_parity.py`, `test_aws_spot_instance_requests_parity.py`,
-  `test_aws_vm_parity.py`, `test_aws_vpc_parity.py`; Azure `test_azure_base_parity.py`,
+  `test_aws_vm_parity.py`; Azure `test_azure_base_parity.py`,
   `test_azure_disk_parity.py`, `test_azure_ip_parity.py`, `test_azure_nic_parity.py`,
   `test_azure_spot_instances_parity.py`, `test_azure_vm_parity.py`,
   `test_azure_vm_delete_helpers_parity.py`; GCP `test_gcp_base_parity.py`, `test_gcp_disk_parity.py`,

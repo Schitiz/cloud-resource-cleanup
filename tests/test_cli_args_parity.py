@@ -562,7 +562,10 @@ def test_raw_parser_definition_matches_main(
         new_action = by_dest[old_action.dest]
         assert type(new_action) is type(old_action)
         for field in ACTION_FIELDS:
-            if field in ("choices", "help") and added_args.added_choices(old_action.option_strings):
+            if field in ("choices", "help") and (
+                added_args.added_choices(old_action.option_strings)
+                or added_args.removed_choices(old_action.option_strings)
+            ):
                 continue
             assert getattr(new_action, field) == getattr(old_action, field), (old_action, field)
 
@@ -625,6 +628,7 @@ def _parser_with(
         ("ADDED_CHOICES", ()),
         ("ADDED_RESOURCES", ()),
         ("RESOURCE_HELP", None),
+        ("REMOVED_RESOURCES", ()),
     ):
         monkeypatch.setattr(added_args, name, empty)
     return new, old
@@ -689,6 +693,54 @@ def test_a_changed_oracle_flag_always_fails(
         new._actions.remove(cloud)
     with pytest.raises(AssertionError):
         added_args.check_additions(new, old)
+
+
+def _without_resource(parser: argparse.ArgumentParser, kind: str) -> None:
+    action = next(a for a in parser._actions if "--resource" in a.option_strings)
+    action.choices = [c for c in action.choices or [] if c != kind]
+
+
+def test_bug_083_unlisted_resource_removal_fails(
+    oracle: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    new, old = _parser_with(oracle, monkeypatch, fake_flag=False)
+    _without_resource(new, "keypair")
+    with pytest.raises(AssertionError, match=r"REMOVED_RESOURCES in tests/helpers_ag_cli_added"):
+        added_args.check_additions(new, old)
+
+
+def test_bug_083_listed_resource_removal_passes_and_is_put_back_for_the_oracle_compare(
+    oracle: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    new, old = _parser_with(oracle, monkeypatch, fake_flag=False)
+    _without_resource(new, "vpc")
+    monkeypatch.setattr(
+        added_args, "REMOVED_RESOURCES", (added_table.RemovedResource("vpc", "BUG-083"),)
+    )
+    added_args.check_additions(new, old)
+    added_args.strip_additions(new, old)
+    action = next(a for a in new._actions if "--resource" in a.option_strings)
+    assert "vpc" in (action.choices or [])
+
+
+def test_bug_083_a_listed_removal_that_is_still_a_choice_fails(
+    oracle: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    new, old = _parser_with(oracle, monkeypatch, fake_flag=False)
+    monkeypatch.setattr(
+        added_args, "REMOVED_RESOURCES", (added_table.RemovedResource("vpc", "BUG-083"),)
+    )
+    with pytest.raises(AssertionError, match="REMOVED"):
+        added_args.check_additions(new, old)
+
+
+def test_bug_083_resource_vpc_exits_2_with_the_invalid_choice_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    outcome = _run(cli_args.get_argparser, [*BASE, "--resource", "vpc"], monkeypatch, capsys)
+    assert outcome[:2] == ("exit", 2)
+    assert "argument -r/--resource: invalid choice: 'vpc' (choose from " in outcome[3]
+    assert "'vpc'," not in outcome[3].split("choose from", 1)[1]
 
 
 _FAKE_FLAG = added_table.AddedFlag("--fake_flag", "fake_flag", None, "fake")
