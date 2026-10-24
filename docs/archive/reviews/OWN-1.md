@@ -244,3 +244,21 @@ Removed `paramiko`, `requests`, `beautifulsoup4`; every other line unchanged.
 - Package READMEs (`crc/aws/README.md` item 3 and similar in azu/gcp/oci) list `tests/test_aws_disk.py`, `tests/test_aws_spot_instance_requests.py` and the other four deleted files as tests: point them at the `*_engine.py` files.
 - `CLEANUP_SAFETY.md`: no rule changed. Optionally name the new lock tests.
 
+## Round 1 (Argon)
+
+### Findings
+
+1. **Lock pairs (65 entries across 30 previously-locked SAF IDs):** Inspected every old test in `tests/test_aws_disk.py`, `tests/test_aws_spot_instance_requests.py`, `tests/test_azu_spot_vm.py`, `tests/test_gcp_spot_vm.py`, and `tests/test_oci_spot_vm.py` at `a0b3d09` side-by-side against its replacement in `tests/test_*_engine.py`. Every replacement drives the production `Cleaner` / `crc.core.engine.run` / registered factory or production rule helper with the same inputs and assertions at least as strict (and in several cases stricter, e.g. asserting exact mutating call arguments, `outcome.result` fields, and CloudWatch queries through `plan()`). No lock points at a legacy file.
+2. **Closed SAF gaps (16 IDs: SAF-001, 002, 004, 005, 006, 009, 010, 014, 016, 021, 022, 023, 024, 034, 036, 037):** Checked each rule in `CLEANUP_SAFETY.md` against its locked test(s) in `tests/archtest/safety_lock.json` (total 46 SAF IDs, 94 locked test entries, `"gaps": []`). Each locked test directly exercises and asserts the invariant described in `CLEANUP_SAFETY.md` on the production path.
+3. **Deleted legacy tests and floor math:** Verified that the five deleted files contained 110 tests (`test_aws_disk.py`: 33, `test_aws_spot_instance_requests.py`: 36, `test_azu_spot_vm.py`: 11, `test_gcp_spot_vm.py`: 15, `test_oci_spot_vm.py`: 15). Every deleted test has a named covering engine test in Table 3, and `tests/archtest/test_count_floor.txt` dropped by exactly 110 (`44415` -> `44305`). `pyproject.toml` ruff `extend-exclude` and mypy legacy ratchet overrides are now empty, and `tests/archtest/legacy_baseline.txt` only shrank (dropped the 5 deleted test files and 17 non-existent legacy paths).
+4. **Dependencies and guardrail tamper check:** Confirmed via `git grep` that `paramiko`, `requests`, and `beautifulsoup4` are not imported anywhere in the repository, no other lines in `requirements.txt` changed, and `tests/archtest/frozen_inputs.json` was regenerated. Mutated an assertion in `tests/test_aws_disk_engine.py::test_saf_003_had_errors_logs_without_raising` locally and confirmed `tests/archtest/test_safety_lock.py::test_saf_lock_locked_tests_are_unchanged` failed with `SAF-LOCK: ... changed (AST hash mismatch)` before restoring.
+5. **Scope:** Only allowed files in the lane contract were modified (`docs/archive/reviews/OWN-1.md`, `pyproject.toml`, `requirements.txt`, `tests/archtest/{frozen_inputs.json,legacy_baseline.txt,safety_lock.json,test_count_floor.txt}`, the 5 deleted legacy test files, and `tests/{test_aws_disk_engine.py,test_aws_spot_instance_requests_engine.py,test_own1_saf_gaps.py}`). Zero changes to `crc/**`, docs outside `docs/archive/reviews/OWN-1.md`, `Makefile`, or CI.
+
+### Gates & Verification
+
+- `pip install -r requirements.txt -r requirements-dev.txt`: pass
+- `make check` (`ruff check`, `ruff format --check`, `mypy`, `lint-imports`, `pytest`, `tests.archtest.test_count check`): pass
+- **Test count & runtime:** `44350 passed in 51.78s` (floor `44305`, ARCH-008 green; 174 archtest items passed)
+
+VERDICT: APPROVE
+
