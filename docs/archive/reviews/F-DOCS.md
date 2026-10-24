@@ -62,3 +62,29 @@ Lane F-DOCS (branch `fw/docs`): documentation drift, agent pointers, ARCH-011 ba
 
 VERDICT: APPROVE
 
+
+## Round 2 (Opus)
+
+### Round 1 fixes re-checked
+
+All four Round 1 fixes are present and true: `CLEANUP_SAFETY.md` cites `crc.azu.vm.VmCleaner` and the real `crc.py` re-exports; `crc/azu/vm/README.md` no longer implies an environment read in `crc/core`; `ARCHITECTURE.md` step 6 names `RESOURCES` / `EXTRA_RESOURCES` in `crc/core/selection.py` (both exist); the gcp and oci READMEs cite "Add a cleaner"; the ARCH-011 row ends with a period.
+
+### Findings (fixed in this round)
+
+1. `crc/core/README.md:17` said the AWS disk opt-in gate is `Route.precheck` only. The opt-in is also enforced by the breaker in `crc/cli/dispatch.py:68` (as the `crc/core/selection.py` docstring says); the line now names both.
+2. `tests/archtest/README.md` ARCH-011 row said the bug register rows are exempt from "the path check"; `_bare_names` skips them too, so the row now says "path and bare-filename checks".
+
+No other drift found: a sweep of live markdown for adapters, five hash-locked files, 30 of 46, `is_old` reading `MAX_AGE`, blocked flags and the `VM` class finds only the two correct negative statements in `tests/README.md`.
+
+### Checklist
+
+1. Task items, checked against code and data: `safety_lock.json` has 46 locks and `gaps: []` (46 `[SAF-NNN]` tags in `CLEANUP_SAFETY.md`); `PACKAGE_BANS` bans `env` and `clock_ref` in `crc/core` and `re`, `clock_ref` in `crc/cli`; ruff `extend-exclude` is `[]`; `crc/cli/context.py` `install_max_age_source` calls `crc.core.age.set_max_age_source`; `crc/core/selection.py` holds only `CLOUDS`, `RESOURCES`, `EXTRA_RESOURCES` and `Selection`; BUGS.md has 403 rows (5/27/65/306), 64 fixed, 5 partly fixed, so the counts line is right and no row changed. `constraints.txt`, `make smoke-offline`, the 47 commands in `tests/fixtures/jenkins_commands.txt`, `tests/test_jenkins_contract.py` and `ADDED_FLAGS` / `ADDED_CHOICES` / `ADDED_RESOURCES` / `RESOURCE_HELP` all exist as documented. `AGENTS.md` is 119 lines and says to search BUGS.md by ID or resource. `.claude/skills` and `.agents/skills` are symlinks to `../.cursor/skills` (the old `.claude/skills/crc-maintain` link is gone; there was no `crc-python-refactor` link); no settings files.
+2. `python crc.py --help` at `f8ed6dd` and at HEAD: byte-identical (128 lines). No change under `crc/**/*.py`, `crc.py`, `tests/test_jenkins_contract.py`, `tests/fixtures/`, `tests/test_*parity*.py` or `tests/helpers*`.
+3. `tests/legacy/*.txt`, `safety_lock.json`, `frozen_inputs.json` and `test_count_floor.txt` untouched; no test weakened (one self-test only gained a `crc.py` fixture file so the existing `crc.py` span stays valid). Negative proof (not committed): adding `` `ghost_module.py` `` and `` `routes.md` `` to `crc/cli/README.md` made `test_arch011_every_relative_link_resolves` fail with two `ARCH-011: crc/cli/README.md:5 names ..., found in neither its directory nor the root` lines; reverted.
+4. Every path in `git diff --name-only f8ed6dd..HEAD` is owned by F-DOCS.
+5. `tests/archtest/doc_links.py` 146 lines (longest function 18), `tests/archtest/test_arch011_doc_links.py` 237 lines (longest 17); ARCH-002 and ARCH-004 pass; no Public API symbol changed.
+6. `pip install -r requirements.txt -r requirements-dev.txt -c constraints.txt`, then `make check`: green. Lint clean (mypy 370 files), **44,602 passed, 1 skipped** in 52.8 s, `make check` 72 s wall; ARCH-008 44,603 collected, floor 44,597. Archtests rerun after the Round 2 edits: 237 passed.
+
+Owner action unchanged: `make raise-test-floor` after the lanes merge.
+
+ROUND 2 VERDICT: APPROVE

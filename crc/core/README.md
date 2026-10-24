@@ -14,7 +14,7 @@ and its frozen DTOs), `crc.core.registry` (decorator registration by cloud and k
 `crc.core.report` (the report model of the Slack messages and InfluxDB points).
 `crc.core.engine` runs the registered cleaners of a selection and `crc.core.selection`
 holds only the `Selection` the engine runs and the cloud and resource order constants; the CLI
-does the `--cloud` / `--resource` expansion (`resolve_targets` in `crc/cli/inputs.py`) and the AWS disk opt-in gate (`Route.precheck`). Every cleaner of the four cloud packages is registered (AWS: disk, ip, keypair, kms, snapshot, spot_instance_requests, vm, vpc; Azure: disk, ip, nic, spot_instances, vm; GCP: disk, ip, spot_instances, vm; OCI: disk, spot_instances, vm). The CLI runs them through the engine: CLI -> `crc/cli/bridge.py` -> route tables -> `engine.run` ->
+does the `--cloud` / `--resource` expansion (`resolve_targets` in `crc/cli/inputs.py`) and the AWS disk opt-in gate (`Route.precheck` in `crc/cli/routes/aws.py` and the breaker in `crc/cli/dispatch.py`). Every cleaner of the four cloud packages is registered (AWS: disk, ip, keypair, kms, snapshot, spot_instance_requests, vm, vpc; Azure: disk, ip, nic, spot_instances, vm; GCP: disk, ip, spot_instances, vm; OCI: disk, spot_instances, vm). The CLI runs them through the engine: CLI -> `crc/cli/bridge.py` -> route tables -> `engine.run` ->
 registered cleaners -> notifiers. The Slack and Influx notifiers that implement the engine's
 `Notifier` protocol live in `crc.notify`.
 
