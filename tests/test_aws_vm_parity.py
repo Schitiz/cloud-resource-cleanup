@@ -93,6 +93,7 @@ class Case:
     op_errors: Mapping[tuple[str, str], Exception] = field(default_factory=dict)
     regions_error: Exception | None = None
     env: Mapping[str, str] = field(default_factory=dict)
+    diverges: str | None = None
 
 
 def one(*instances: dict[str, Any], region: str = "us-west-2", **kw: Any) -> dict[str, Region]:
@@ -136,7 +137,8 @@ CASES: list[Case] = [
     *both(
         "age-days-hours", one(inst("a", hours=30), inst("b", hours=20)), age={"days": 1, "hours": 2}
     ),
-    *both("age-empty-matches-all", one(inst("a", hours=0.01)), age={}, dry_run=True),
+    *both("age-empty-matches-all", one(inst("a", hours=0.01)), age={}, diverges="BUG-213"),
+    *both("age-empty-matches-all-dry", one(inst("a", hours=0.01)), age={}, dry_run=True),
     *both("age-future-attach", one(inst("a", hours=-5))),
     *both(
         "max-age-env",
@@ -661,7 +663,22 @@ def _stream(
     return [r for r in logs if pick(r)]
 
 
+def _assert_bug_213(old: Outcome, new: Outcome) -> None:
+    """BUG-213: main accepted an empty age and deleted or stopped the young instance; a real
+    run now raises `ValueError` naming `--age` before any cloud call."""
+    assert old.error is None
+    assert old.deleted == ["vm-a"]
+    assert new.error is not None
+    assert new.error[0] == "ValueError"
+    assert "--age" in new.error[1]
+    assert new.calls == []
+    assert new.deleted == []
+
+
 def _assert_matches_main(case: Case, old: Outcome, new: Outcome) -> None:
+    if case.diverges == "BUG-213":
+        _assert_bug_213(old, new)
+        return
     old = dataclasses.replace(old, logs=expected_logs(old.logs, FIXED_BUGS, rules=RULES))
     assert new.error == old.error
     assert new.stdout == old.stdout
@@ -824,6 +841,9 @@ def test_quirk_is_preserved(
     # against the frozen crc_service oracle. Fixed cases assert the new outcome only.
     if case_id not in BUG_004_FIXED:
         assert check(old), "oracle no longer shows the quirk"
+    if case.diverges == "BUG-213":
+        _assert_bug_213(old, new)
+        return
     assert check(new)
 
 

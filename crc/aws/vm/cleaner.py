@@ -209,10 +209,10 @@ def build_vm_cleaner(context: RunContext) -> Cleaner:
     """Registry factory. Options: `filter_tags`, `exception_tags`, `notags` (dicts of key to
     values), `age` (days/hours dict), `custom_age_tag_key` and `instance_state` (default
     `["running"]`). A real run (not a dry run) needs a positive `age` (BUG-213, SAF-011): without
-    one it raises `ValueError` before any cloud call, unless `custom_age_tag_key` is set, in which
-    case an instance without that tag is kept."""
+    one it raises `ValueError` before any cloud call; a custom age tag still replaces `age` per
+    instance."""
     options = context.options
     real = not context.dry_run
-    if real and not (options.get("age") is None and options.get("custom_age_tag_key")):
+    if real:
         core_age.require_positive_age(options.get("age"), "--age (AWS VM)")
     return VmCleaner(boto3_client, all_regions, settings_from_options(options, require_age=real))

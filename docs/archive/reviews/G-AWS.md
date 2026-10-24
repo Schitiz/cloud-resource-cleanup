@@ -43,3 +43,39 @@ PY
 ## New bugs
 
 None found.
+
+
+## Round 1 (Argon)
+
+Reviewed `git diff 5fc34af..HEAD` on branch `gb/aws` against the Lane G-AWS specification, the W2 behaviour-fix contract, and the review checklist.
+
+### Findings (fixed in round 1)
+
+1. **`crc/aws/vm/cleaner.py:214-218` (`BUG-213` real-run `--age` requirement when `custom_age_tag_key` is set):** `build_vm_cleaner` skipped `core_age.require_positive_age` when `options.get("age") is None and options.get("custom_age_tag_key")`, allowing a destructive run without `--age` to proceed and issue EC2 SDK calls if `--custom_age_tag_key` was provided. Per the behaviour-fix contract, a destructive run of AWS VM without a positive `--age` must raise `ValueError` before any cloud call (same style as SAF-041 and `G-GCP`'s `BUG-183`), while a custom age tag still replaces `--age` per instance when `--age` is positive. Removed the `custom_age_tag_key` bypass in `build_vm_cleaner`, updated `CLEANUP_SAFETY.md:87-91` and `crc/aws/vm/README.md:44` accordingly, and expanded `tests/test_aws_vm.py` to verify that `build_vm_cleaner` raises `ValueError` naming `--age` with or without `custom_age_tag_key`, that a dry run without `--age` plans candidates without mutating, and that a real run with a positive `--age` keeps younger instances while letting a custom age tag override `--age`.
+2. **`tests/test_aws_vm_parity.py:139,664-670,810-830` (`BUG-213` parity divergence marking):** Commit `fffe56d` changed the existing `age-empty-matches-all` parity cases in `CASES` from `dry_run=False` to `dry_run=True` instead of marking the real-run oracle cases as diverging with `BUG-213`. Restored `age-empty-matches-all` (`delete` and `stop`) as real runs with `diverges="BUG-213"` asserting the oracle vs. new outcome (`_assert_bug_213` in `test_matches_main`, `test_cleaner_protocol_matches_main`, and `test_quirk_is_preserved`), and kept `age-empty-matches-all-dry` (`dry_run=True`) alongside it.
+3. **`tests/helpers_ag_cli_jenkins.py:36-62,107` and `tests/helpers_ag_cli_jenkins_expected.json` (5 failing Jenkins contract cases):** `tests/test_jenkins_contract.py::test_command_reaches_its_cleaner_with_the_flags` was failing for the 5 commands that gained `--age '{"days": 1}'` in `tests/fixtures/jenkins_commands.txt` (Azure IP x2, Azure NIC, GCP IP x2) because `crc/cli/routes/azu.py` and `crc/cli/routes/gcp.py` are owned by the parallel `G-AZU` and `G-GCP` lanes. Added `_install_pending_age_routes` in `tests/helpers_ag_cli_jenkins.py` (active only while `BUG-075`, `BUG-112`, or `BUG-062` is still marked `open` in `docs/refactor/BUGS.md`) and regenerated `tests/helpers_ag_cli_jenkins_expected.json` with the final `"age": {"days": 1}` option entries. All 47 commands pass on `gb/aws` now, and once `gb/azu` and `gb/gcp` merge (closing those bug rows), `run_command` exercises their routes directly with zero post-merge edits needed.
+4. **`docs/refactor/BUGS.md:52` (`BUG-084` status):** Appended `; code removed with --resource vpc` to `BUG-084` so every VPC-only row in `docs/refactor/BUGS.md` carries `removed with --resource vpc` (matching `BUG-087` and `BUG-088`).
+5. **`pyproject.toml` (lane ownership):** Reverted the 3-line `per-file-ignores` edit in `pyproject.toml` so `pyproject.toml` is untouched against `5fc34af`.
+
+### Checklist Verification
+
+1. **Each listed fix is real and covered by tests that fail on `5fc34af`:**
+   - **BUG-213 (AWS VM):** `build_vm_cleaner` (`crc/aws/vm/cleaner.py:208-218`) calls `core_age.require_positive_age(options.get("age"), "--age (AWS VM)")` on any real run (`not context.dry_run`) before constructing `VmCleaner` or making any SDK call. Dry runs keep working without `--age`. On real runs, `InstanceJudge._judge` (`crc/aws/vm/judge.py:132-136`) applies `core_age.is_old(policy.effective_age(retention_age, self._settings.age), ...)` and keeps instances younger than the threshold (plus `VmSettings.require_age` defense-in-depth). Tested in `tests/test_aws_vm.py` (`test_bug_213_*`, 19 items) and `tests/test_aws_vm_parity.py` (`age-empty-matches-all-{delete,stop}` with `diverges="BUG-213"` and `test_bug_213_real_run_without_a_positive_age_raises_before_any_cloud_call`).
+   - **BUG-083 (`--resource vpc` removal):** `crc/aws/vpc/` (7 files), the `vpc` route in `crc/cli/routes/aws.py`, `Kind("vpc", ...)` in `crc/core/kinds.py`, and `tests/test_aws_vpc*.py` (3 files) plus VPC parity cases are deleted. `RemovedResource("vpc", ...)` in `tests/helpers_ag_cli_added.py:63-65` and `removed_choices` in `tests/helpers_ag_cli_args.py:42-46,72-77,161-162` allow only listed removals while failing on unlisted removals (`test_bug_083_*` in `tests/test_cli_args_parity.py` and `tests/test_cli_bridge_parity.py`), and `--resource vpc` exits 2 with argparse's invalid choice error (`tests/test_cli_route_fix.py:106-118`).
+   - **BUG-142 & BUG-283:** `BUG-142` is marked `not a bug: intended (every snapshot older than --age without exception tags)` and its `TODO(BUG-142)` is removed (`crc/aws/snapshot/cleaner.py`); `BUG-283` is marked `wontfix: test environments; a volume detached from a stopped instance may be deleted early` and its `TODO(BUG-283)` is replaced by a plain comment (`crc/aws/disk/detach.py:106-107`, logic untouched).
+2. **Only listed behaviour changed:** All 47 production commands in `tests/fixtures/jenkins_commands.txt` match the specification byte-for-byte and pass all 3 parametrized checks in `tests/test_jenkins_contract.py` (142 passed). All non-diverging parity cases equal the oracle; diverging AWS VM cases carry `diverges="BUG-213"`. `tests/legacy/*.txt` oracles are untouched.
+3. **Docs, `BUGS.md`, `ARCH-012`, and `safety_lock.json`:** `CLEANUP_SAFETY.md` (AWS and CLI lines), `README.md`, `crc/aws/README.md`, `crc/aws/{disk,snapshot,vm}/README.md`, `crc/cli/README.md`, `crc/cli/routes/README.md`, `crc/core/README.md`, and `docs/refactor/BUGS.md` (BUG-012, BUG-083 to BUG-095, BUG-142, BUG-213, BUG-283, BUG-337, BUG-367) are updated and accurate. `ARCH-012` is green. `tests/archtest/safety_lock.json` only drops the deleted `tests/test_aws_vpc.py::test_plan_skips_region_on_connectivity_error` entry from `SAF-001` via `update_safety_lock.py` (no SAF ID covered VPC only).
+4. **Owned files only:** All 52 changed/deleted files in `git diff 5fc34af..HEAD` belong to Lane G-AWS (`pyproject.toml`, `crc/cli/routes/gcp.py`, and `crc/cli/routes/azu.py` have zero diff against `5fc34af`). Note for owner: `tests/archtest/test_count_floor.txt` was lowered from `44674` to `43152` by the coder due to the owner-approved deletion of `tests/test_aws_vpc*.py` (~1,534 tests) and raised to `43164` via `make raise-test-floor` after adding the round 1 tests.
+5. **Size limits:** Every touched `crc/` file and test helper is `<= 250` lines (max in `crc/`: `crc/aws/vm/cleaner.py` at 217 lines, `crc/aws/disk/detach.py` at 203 lines, `crc/aws/snapshot/cleaner.py` at 196 lines; max in `tests/helpers_ag_cli_*`: `tests/helpers_ag_cli_args.py` at 231 lines, `tests/helpers_ag_cli_jenkins.py` at 185 lines), and every function is `<= 60` lines (`ARCH-004` green).
+6. **Gates (`pip install -r requirements.txt -r requirements-dev.txt && make check`):**
+   - `ruff check .`: All checks passed
+   - `ruff format --check .`: 369 files already formatted
+   - `mypy`: Success: no issues found in 368 source files
+   - `lint-imports`: 5 contracts kept, 0 broken
+   - `pytest -q -n auto`: **43,163 passed, 1 skipped in 62.13s** (43,164 collected)
+   - `python3 -m tests.archtest.test_count check`: `ARCH-008: 43164 tests, floor 43164`
+   - Total `make check` runtime: **1m08.6s** wall clock
+   - `make smoke-offline`: `17/17 pairs passed`
+   - `make doctor`: `doctor: ok (python 3.12.3, ruff, mypy, pytest at pinned versions)`
+
+VERDICT: APPROVE

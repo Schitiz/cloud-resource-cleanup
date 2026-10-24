@@ -87,8 +87,8 @@ reused. `tests/archtest/safety_lock.json` maps IDs to the tests that lock them.
 - [SAF-011] Require a real age (or equivalent) gate in `__init__`. Met by the AWS VM cleaner
   since G-AWS (BUG-213): a destructive run (not `--dry_run`) without a positive `--age`
   raises `ValueError` naming `--age` before any cloud call (`build_vm_cleaner`); a custom age
-  tag key can stand in for the age, and then an instance without that tag is kept. Dry runs
-  keep working without an age.
+  tag still replaces `--age` per instance (it never replaces the requirement for `--age`). Dry
+  runs keep working without an age.
 - [SAF-012] Reject or skip unknown keys, zero durations, and bad custom age tags.
 - [SAF-013] Avoid having `--max_age` / `MAX_AGE` silently shorten a floor another flag
   (for example AWS `--detach_age`) just established, unless that change is

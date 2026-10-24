@@ -45,10 +45,14 @@ class FakeClient:
         return {}
 
 
-def instance(iid: str, name: str = "n") -> dict[str, Any]:
+def instance(
+    iid: str,
+    name: str = "n",
+    extra_tags: Sequence[Mapping[str, str]] = (),
+) -> dict[str, Any]:
     return {
         "InstanceId": iid,
-        "Tags": [{"Key": "Name", "Value": f"{name}-{iid}"}],
+        "Tags": [{"Key": "Name", "Value": f"{name}-{iid}"}, *extra_tags],
         "NetworkInterfaces": [{"NetworkInterfaceId": f"eni-{iid}"}],
     }
 
@@ -141,24 +145,45 @@ def _factory_ctx(options: dict[str, Any], *, dry_run: bool) -> RunContext:
 
 
 @pytest.mark.parametrize("age", [None, {}, {"days": 0}, {"hours": 0}])
+@pytest.mark.parametrize("custom_age_tag_key", [None, "max_retention_age"])
 @pytest.mark.parametrize("operation", [Operation.DELETE, Operation.STOP])
 def test_bug_213_real_run_without_positive_age_raises_before_any_call(
-    age: Any, operation: Operation
+    age: Any, custom_age_tag_key: str | None, operation: Operation
 ) -> None:
     context = RunContext(
-        dry_run=False, operation=operation, options={"filter_tags": {}, "age": age}, now=NOW
+        dry_run=False,
+        operation=operation,
+        options={"filter_tags": {}, "age": age, "custom_age_tag_key": custom_age_tag_key},
+        now=NOW,
     )
     with pytest.raises(ValueError, match="--age"):
         build_vm_cleaner(context)
 
 
 @pytest.mark.parametrize("age", [None, {}, {"days": 0}])
-def test_bug_213_dry_run_without_age_still_builds(age: Any) -> None:
+def test_bug_213_dry_run_without_age_still_plans_without_mutating(age: Any) -> None:
     assert build_vm_cleaner(_factory_ctx({"age": age}, dry_run=True)) is not None
+    client = FakeClient([instance("a")])
+    settings = VmSettings({}, {}, {}, age or {}, None, ["running"], require_age=False)
+    cleaner = VmCleaner(lambda region: client, lambda: ["us-west-2"], settings)
+    plan = cleaner.plan(ctx(dry_run=True))
+    assert [c.id for c in plan.candidates] == ["n-a"]
+    assert not [c for c in client.calls if c[0] in MUTATING]
 
 
-def test_bug_213_real_run_with_positive_age_builds() -> None:
+def test_bug_213_real_run_with_positive_age_keeps_young_and_custom_tag_overrides() -> None:
     assert build_vm_cleaner(_factory_ctx({"age": {"hours": 6}}, dry_run=False)) is not None
+    client = FakeClient(
+        [
+            instance("young"),
+            instance("tagged", extra_tags=[{"Key": "ttl", "Value": "{'days': 1}"}]),
+        ]
+    )
+    settings = VmSettings({}, {}, {}, {"days": 5}, "ttl", ["running"], require_age=True)
+    cleaner = VmCleaner(lambda region: client, lambda: ["us-west-2"], settings)
+    plan = cleaner.plan(ctx())
+    assert [c.id for c in plan.candidates] == ["tagged"]
+    assert [(s.id, s.reason) for s in plan.skipped] == [("young", "younger than age")]
 
 
 def test_bug_213_custom_age_tag_without_age_keeps_untagged_instances() -> None:

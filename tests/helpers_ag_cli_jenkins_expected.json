@@ -1013,6 +1013,9 @@
   ],
   "options": [
    {
+    "age": {
+     "days": 1
+    },
     "exception_tags": null,
     "filter_tags": {
      "crc": [
@@ -1333,6 +1336,9 @@
   ],
   "options": [
    {
+    "age": {
+     "days": 1
+    },
     "exception_regex": null,
     "name_regex": [
      "yb-itest",
@@ -1424,6 +1430,9 @@
   ],
   "options": [
    {
+    "age": {
+     "days": 1
+    },
     "exception_regex": null,
     "name_regex": [
      "itest",
@@ -2336,6 +2345,9 @@
   ],
   "options": [
    {
+    "age": {
+     "days": 1
+    },
     "exception_tags": null,
     "filter_tags": {
      "yb_task": [
@@ -2450,6 +2462,9 @@
   ],
   "options": [
    {
+    "age": {
+     "days": 1
+    },
     "exception_regex": null,
     "name_regex": [
      "yb-stress-auto"
