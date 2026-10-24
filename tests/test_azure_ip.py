@@ -4,9 +4,10 @@ from typing import Any
 
 import pytest
 
-from crc.azu.ip import IP, AzureIpCleaner
+from crc.azu.ip import AzureIpCleaner
 from crc.core.cleaner import Operation, Plan, RunContext
 from tests.helpers_azure_ip import NOW, FakeAzure, ip
+from tests.helpers_wc_azu_engine import candidate_ids, engine_run
 
 ENV = {"env": "test"}
 
@@ -124,11 +125,16 @@ def test_supports_only_delete() -> None:
     assert not cleaner.supports(Operation.STOP)
 
 
-def test_adapter_delete_with_injected_client(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_engine_run_with_injected_client(monkeypatch: pytest.MonkeyPatch) -> None:
     azure = FakeAzure([ip("a", ENV), ip("b", {"x": "y"})])
     azure.install(monkeypatch)
-    adapter = IP("rg", False, {"env": []}, {}, {})
-    adapter.delete()
-    assert adapter.get_deleted == ["a"]
-    assert adapter.count == 1
+    options = {
+        "resource_group": "rg",
+        "filter_tags": {"env": []},
+        "exception_tags": {},
+        "notags": {},
+    }
+    outcome = engine_run("ip", options, dry_run=False, now=NOW)
+    assert candidate_ids(outcome) == ["a"]
+    assert [section.ids for section in outcome.report.sections] == [("a",)]
     assert _names(azure.calls, "begin_delete") == [("begin_delete", "rg", "a")]

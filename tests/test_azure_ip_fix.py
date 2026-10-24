@@ -6,9 +6,10 @@ from typing import Any
 
 import pytest
 
-from crc.azu.ip import IP, AzureIpCleaner
+from crc.azu.ip import AzureIpCleaner
 from crc.core.cleaner import Operation, RunContext
 from tests.helpers_azure_ip import NOW, FakeAzure, ip
+from tests.helpers_wc_azu_engine import candidate_ids, engine_run
 
 ENV = {"env": "test"}
 
@@ -25,6 +26,23 @@ def _cleaner(azure: FakeAzure, group: str = "rg", **specs: Any) -> AzureIpCleane
         specs.get("exception_tags"),
         specs.get("notags"),
     )
+
+
+def _engine(
+    group: str,
+    *,
+    dry_run: bool,
+    filter_tags: Any = None,
+    exception_tags: Any = None,
+    notags: Any = None,
+) -> Any:
+    options = {
+        "resource_group": group,
+        "filter_tags": filter_tags,
+        "exception_tags": exception_tags,
+        "notags": notags,
+    }
+    return engine_run("ip", options, dry_run=dry_run, now=NOW)
 
 
 def _in_use_ip(name: str, **fields: Any) -> types.SimpleNamespace:
@@ -87,10 +105,10 @@ def test_same_name_in_other_group_is_not_deleted_in_configured_group() -> None:
     assert [c for c in calls if c[0] == "begin_delete"] == []
 
 
-def test_adapter_lists_configured_group(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_engine_lists_configured_group(monkeypatch: pytest.MonkeyPatch) -> None:
     azure = FakeAzure([ip("a", ENV)])
     azure.install(monkeypatch)
-    IP("rg-x", True, None, None, None).delete()
+    _engine("rg-x", dry_run=True)
     assert ("list", "rg-x") in azure.calls
     assert ("list_all",) not in azure.calls
 
@@ -98,7 +116,7 @@ def test_adapter_lists_configured_group(monkeypatch: pytest.MonkeyPatch) -> None
 def test_group_from_environment_is_listed(monkeypatch: pytest.MonkeyPatch) -> None:
     azure = FakeAzure([ip("a", ENV)])
     azure.install(monkeypatch)
-    IP("", True, None, None, None).delete()
+    _engine("", dry_run=True)
     assert ("list", "env-rg") in azure.calls
 
 
@@ -178,12 +196,10 @@ def test_model_without_ip_configuration_still_raises_before_any_delete() -> None
     assert [c for c in azure.calls if c[0] == "begin_delete"] == []
 
 
-def test_in_use_ip_is_never_deleted_by_the_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_in_use_ip_is_never_deleted_by_the_engine(monkeypatch: pytest.MonkeyPatch) -> None:
     azure = FakeAzure([_in_use_ip("nat", nat_gateway={"id": "g"}), _in_use_ip("free")])
     azure.install(monkeypatch)
-    adapter = IP("rg", False, None, None, None)
-    adapter.delete()
-    assert adapter.get_deleted == ["free"]
+    assert candidate_ids(_engine("rg", dry_run=False)) == ["free"]
     assert [c for c in azure.calls if c[0] == "begin_delete"] == [("begin_delete", "rg", "free")]
 
 
@@ -250,9 +266,10 @@ def test_production_jenkins_filter_tags_selection(
         ]
     )
     azure.install(monkeypatch)
-    adapter = IP("rg-prod", False, filter_tags, {}, {})
-    adapter.delete()
-    assert adapter.get_deleted == ["match-unused"]
+    outcome = _engine(
+        "rg-prod", dry_run=False, filter_tags=filter_tags, exception_tags={}, notags={}
+    )
+    assert candidate_ids(outcome) == ["match-unused"]
     assert ("list", "rg-prod") in azure.calls
     assert ("list_all",) not in azure.calls
     assert [c for c in azure.calls if c[0] == "begin_delete"] == [

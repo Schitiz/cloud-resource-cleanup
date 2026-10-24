@@ -1,8 +1,7 @@
 # Copyright (c) Yugabyte, Inc.
 
-"""Azure managed disk cleaner package; `crc.azu.disk.Disk` stays the import path `crc.py` uses."""
+"""Azure managed disk cleaner package."""
 
-from crc.azu.disk.adapter import Disk
 from crc.azu.disk.cleaner import (
     DEFAULT_DISK_STATES,
     AzureDiskCleaner,
@@ -20,7 +19,6 @@ __all__ = [
     "DEFAULT_DISK_STATES",
     "AzureDiskCleaner",
     "DeletePoller",
-    "Disk",
     "DiskComputeClient",
     "DiskOperations",
     "DiskSettings",

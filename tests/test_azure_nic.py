@@ -4,9 +4,10 @@ from typing import Any
 
 import pytest
 
-from crc.azu.nic import NIC, AzureNicCleaner
+from crc.azu.nic import AzureNicCleaner
 from crc.core.cleaner import Operation, Plan, RunContext
 from tests.helpers_azure_nic import NOW, FakeAzure, nic
+from tests.helpers_wc_azu_engine import candidate_ids, engine_run
 
 VM = {"id": "vm-1"}
 
@@ -163,11 +164,11 @@ def test_supports_only_delete() -> None:
     assert not cleaner.supports(Operation.STOP)
 
 
-def test_adapter_delete_with_injected_client(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_engine_run_with_injected_client(monkeypatch: pytest.MonkeyPatch) -> None:
     azure = FakeAzure([nic("nic-a"), nic("other")])
     azure.install(monkeypatch)
-    adapter = NIC("rg", False, ["nic"], [])
-    adapter.delete()
-    assert adapter.get_deleted == ["nic-a"]
-    assert adapter.delete_count == 1
+    options = {"resource_group": "rg", "name_regex": ["nic"], "exception_regex": []}
+    outcome = engine_run("nic", options, dry_run=False, now=NOW)
+    assert candidate_ids(outcome) == ["nic-a"]
+    assert [section.ids for section in outcome.report.sections] == [("nic-a",)]
     assert _names(azure.calls, "begin_delete") == [("begin_delete", "rg", "nic-a")]

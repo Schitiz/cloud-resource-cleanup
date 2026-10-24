@@ -1,12 +1,14 @@
-"""Parity: `crc.azu.disk.Disk` against main (`tests/legacy/azu_disk.txt`).
+"""Parity: the Azure disk Cleaner, run through `crc.core.engine.run`, against main.
 
-Both run against the same fake Azure compute client (the SDK classes `crc.azu._base` builds are
-replaced, so the real `Base` runs in both) and the same frozen clock. SDK calls (in order,
+The oracle is `tests/legacy/azu_disk.txt`. Both run against the same fake Azure compute client
+(the SDK classes `crc.azu._base` builds are replaced, so the real `Base` runs in both) and the
+same frozen clock. SDK calls (in order,
 including the lazy paging of `disks.list`), results, log records, stdout and raised errors must be
-identical for every case through the legacy adapter. The registered `Cleaner` path (factory with
-a `RunContext`, `plan()` then `apply()` unless dry run) is compared on results, errors, stdout,
+identical for every case, except that `plan()` decides every disk before `apply()` deletes (so a
+listing or selection error stops the run before any delete). The engine path and the registered
+`Cleaner` protocol (factory, `plan()`, `apply()`) are compared on results, errors, stdout,
 list/delete calls and log records (decision logs, "Deleted disk" logs and summary lines are
-compared as three ordered groups, because `plan()` decides every disk before `apply()` deletes).
+compared as three ordered groups).
 The module lists no regions, so there is no region fallback or region auth error to cover.
 
 Two bugs are fixed on purpose (FIX-AZU-DISK), so the oracle differs from the new code:
@@ -29,11 +31,12 @@ from typing import Any
 
 import pytest
 
-from crc.azu.disk import AzureDiskCleaner, Disk, build_disk_cleaner
+from crc.azu.disk import AzureDiskCleaner, build_disk_cleaner
 from crc.core.cleaner import Cleaner, Operation, RunContext
 from crc.core.registry import get
 from tests.helpers_azure_disk import NOW, FakeAzure, ago, disk
 from tests.helpers_log_fix import expected_logs
+from tests.helpers_wc_azu_engine import candidate_ids, engine_run
 from tests.log_fix_azure import RULES
 
 _ADDRESS = re.compile(r"0x[0-9a-f]+")
@@ -331,12 +334,6 @@ def _legacy(case: Case) -> Any:
     return _load_oracle().Disk(*_args(case))
 
 
-def _new(case: Case) -> Any:
-    adapter = Disk(*_args(case))
-    adapter.clock = lambda: NOW
-    return adapter
-
-
 def _args(case: Case) -> tuple[Any, ...]:
     return (
         case.resource_group,
@@ -395,6 +392,43 @@ def debug_logs(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG)
 
 
+def _options(case: Case) -> dict[str, Any]:
+    return {
+        "resource_group": case.resource_group,
+        "filter_tags": case.filter_tags,
+        "exception_tags": case.exception_tags,
+        "notags": case.notags,
+        "age": case.age,
+        "custom_age_tag_key": case.custom_key,
+    }
+
+
+def _run_engine(
+    case: Case,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> Outcome:
+    azure = _setup(case, monkeypatch, caplog, capsys)
+    error: tuple[str, str] | None = None
+    deleted: list[str] = []
+    try:
+        outcome = engine_run("disk", _options(case), dry_run=case.dry_run, now=NOW)
+        deleted = candidate_ids(outcome)
+    except Exception as e:
+        error = (type(e).__name__, str(e))
+    return Outcome(
+        azure.calls,
+        deleted,
+        len(deleted),
+        _records(caplog),
+        [],
+        capsys.readouterr().out,
+        error,
+        azure.waited,
+    )
+
+
 @pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
 def test_matches_main(
     case: Case,
@@ -404,18 +438,8 @@ def test_matches_main(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
-    if case.diverges:
-        _assert_diverges(case, old, new)
-        return
-    assert new.calls == _fix_172(case, old.calls)
-    assert new.error == old.error
-    assert new.deleted == old.deleted
-    assert new.count == old.count
-    assert new.logs == expected_logs(old.logs, BUGS, RULES)
-    assert new.count_logs == old.count_logs
-    assert new.stdout == old.stdout
-    assert (new.error is not None) == (case.error_phase is not None)
+    new = _run_engine(case, monkeypatch, caplog, capsys)
+    _assert_matches(case, old, new)
 
 
 def _run_cleaner(
@@ -474,6 +498,43 @@ def _groups(
     return rest, deleted, summary
 
 
+def _assert_matches(case: Case, old: Outcome, new: Outcome) -> None:
+    assert old.count_logs == [
+        ("root", logging.INFO, f"count of items in disks_names_to_delete: {old.count}")
+    ]
+    if case.diverges:
+        _assert_diverges(case, old, new)
+        return
+    assert new.error == old.error
+    assert (new.error is not None) == (case.error_phase is not None)
+    assert new.stdout == old.stdout
+    assert _only(new.calls, "client")[:1] == _only(old.calls, "client")[:1]
+    assert _only(new.calls, "list_by_resource_group") == _only(
+        _fix_172(case, old.calls), "list_by_resource_group"
+    )
+    assert _only(new.calls, "list") == []
+    old_yields = _only(old.calls, "yield")
+    assert _only(new.calls, "yield")[: len(old_yields)] == old_yields
+    if old.error is None:
+        assert _only(new.calls, "yield") == old_yields
+    if case.error_phase == "plan":
+        assert _only(new.calls, "begin_delete") == []
+        assert new.waited == []
+        assert _groups(new.logs)[1:] == ([], [])
+        return
+    assert _only(new.calls, "begin_delete") == _only(old.calls, "begin_delete")
+    assert old.waited == []
+    assert new.waited == ([] if case.dry_run else new.deleted)
+    if case.error_phase == "apply":
+        assert _groups(new.logs)[1:] == _groups(expected_logs(old.logs, BUGS, RULES))[1:]
+        return
+    assert new.deleted == old.deleted
+    assert new.count == old.count
+    listing = [c for c in _fix_172(case, old.calls) if c[0] != "begin_delete"]
+    assert new.calls == listing + _only(old.calls, "begin_delete")
+    assert _groups(new.logs) == _groups(expected_logs(old.logs, BUGS, RULES))
+
+
 @pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
 def test_cleaner_protocol_matches_main(
     case: Case,
@@ -484,27 +545,7 @@ def test_cleaner_protocol_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run_cleaner(case, monkeypatch, caplog, capsys)
-    if case.diverges:
-        _assert_cleaner_diverges(case, old, new)
-        return
-    assert new.error == old.error
-    assert new.stdout == old.stdout
-    assert _only(new.calls, "client")[:1] == _only(old.calls, "client")[:1]
-    assert _only(new.calls, "list_by_resource_group") == _only(
-        _fix_172(case, old.calls), "list_by_resource_group"
-    )
-    assert _only(new.calls, "list") == []
-    if case.error_phase == "plan":
-        assert _only(new.calls, "begin_delete") == []
-        assert _groups(new.logs)[1:] == ([], [])
-        return
-    assert _only(new.calls, "begin_delete") == _only(old.calls, "begin_delete")
-    if case.error_phase == "apply":
-        assert _groups(new.logs)[1:] == _groups(expected_logs(old.logs, BUGS, RULES))[1:]
-        return
-    assert new.deleted == old.deleted
-    assert new.count == old.count
-    assert _groups(new.logs) == _groups(expected_logs(old.logs, BUGS, RULES))
+    _assert_matches(case, old, new)
 
 
 def _find(case_id: str) -> Case:
@@ -597,21 +638,6 @@ def _assert_diverges(case: Case, old: Outcome, new: Outcome) -> None:
     assert new.stdout == old.stdout
 
 
-def _assert_cleaner_diverges(case: Case, old: Outcome, new: Outcome) -> None:
-    fixed = DIVERGING[case.id]
-    assert (old.error, old.deleted) != (new.error, new.deleted)
-    assert new.error is None
-    assert new.deleted == fixed.deleted
-    assert new.waited == fixed.waited
-    assert _errors(new.logs) == fixed.errors
-    assert [r[2] for r in new.logs if "Azure Disks" in r[2]] == [
-        f"number of Azure Disks deleted: {len(fixed.deleted)}",
-        f"List of Azure Disks deleted: {fixed.deleted}",
-    ]
-    assert _only(new.calls, "list") == []
-    assert _only(new.calls, "list_by_resource_group") == [("list_by_resource_group", _group(case))]
-
-
 QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
     ("state-attached-lower-passes", lambda o: o.deleted == ["a"]),
     ("state-empty-passes", lambda o: o.deleted == ["a"]),
@@ -654,6 +680,19 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
 ]
 
 
+ENGINE_QUIRKS: dict[str, Callable[[Outcome], bool]] = {
+    # Allowed change: the cleaner plans (lists and selects every disk) before it deletes, so an
+    # error raised mid-listing or at a later disk stops the run before any delete.
+    "iteration-error-mid-listing": lambda o: (
+        o.error == ("RuntimeError", "page failed")
+        and o.deleted == []
+        and _only(o.calls, "begin_delete") == []
+    ),
+    "created-none-error": lambda o: (
+        o.error is not None and o.deleted == [] and _only(o.calls, "begin_delete") == []
+    ),
+}
+
 BUG_004_FIXED = frozenset(
     ["custom-age-tag-empty-falls-back", "custom-age-tag-unparseable-falls-back"]
 )
@@ -670,22 +709,24 @@ def test_quirk_is_preserved(
 ) -> None:
     case = _find(case_id)
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
+    new = _run_engine(case, monkeypatch, caplog, capsys)
     # BUG-004/BUG-016: the oracle class inherits the live crc.service.Service, so it cannot
     # show the old custom-age-tag behaviour here; tests/test_crc_service_parity.py pins it
     # against the frozen crc_service oracle. Fixed cases assert the new outcome only.
     if case_id not in BUG_004_FIXED:
         assert check(old), "oracle no longer shows the quirk"
-    assert check(new)
+    assert ENGINE_QUIRKS.get(case_id, check)(new)
 
 
-def test_delete_is_interleaved_with_paging_like_main(
+def test_engine_plans_every_disk_before_it_deletes_unlike_main(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     case = _find("delete")
-    expected = [
+    azure = _setup(case, monkeypatch, caplog, capsys)
+    _legacy(case).delete()
+    assert _fix_172(case, azure.calls) == [
         ("client", "sub-1"),
         ("list_by_resource_group", "rg-test"),
         ("yield", "a"),
@@ -694,38 +735,44 @@ def test_delete_is_interleaved_with_paging_like_main(
         ("yield", "c"),
         ("begin_delete", "rg-test", "c"),
     ]
-    for build in (_legacy, _new):
-        azure = _setup(case, monkeypatch, caplog, capsys)
-        build(case).delete()
-        assert _fix_172(case, azure.calls) == expected
+    azure = _setup(case, monkeypatch, caplog, capsys)
+    candidate_ids(engine_run("disk", _options(case), dry_run=False, now=NOW))
+    assert azure.calls == [
+        ("client", "sub-1"),
+        ("list_by_resource_group", "rg-test"),
+        ("yield", "a"),
+        ("yield", "b"),
+        ("yield", "c"),
+        ("begin_delete", "rg-test", "a"),
+        ("begin_delete", "rg-test", "c"),
+    ]
 
 
-def test_repeated_delete_accumulates_like_main(
+def test_repeated_run_repeats_the_calls_like_main(
     debug_logs: None,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """The oracle accumulates names over two `delete()` calls; each engine run starts afresh."""
     case = _find("delete")
-    results = []
-    for build in (_legacy, _new):
-        azure = _setup(case, monkeypatch, caplog, capsys)
-        cleaner = build(case)
-        cleaner.delete()
-        cleaner.delete()
-        results.append(
-            (
-                azure.calls,
-                cleaner.get_deleted,
-                [(r.levelno, r.getMessage()) for r in caplog.records],
-            )
-        )
-    old, new = results
-    assert new[0] == _fix_172(case, old[0])
-    assert new[1] == old[1]
-    assert new[2] == expected_logs(old[2], BUGS, RULES)
-    assert new[2] != old[2]
-    assert new[1] == ["a", "c", "a", "c"]
+    azure = _setup(case, monkeypatch, caplog, capsys)
+    legacy = _legacy(case)
+    legacy.delete()
+    legacy.delete()
+    old_calls = _fix_172(case, azure.calls)
+    old_deleted = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Deleted")]
+    azure = _setup(case, monkeypatch, caplog, capsys)
+    runs = [
+        candidate_ids(engine_run("disk", _options(case), dry_run=False, now=NOW)) for _ in range(2)
+    ]
+    new_deleted = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Deleted")]
+    assert _only(azure.calls, "list_by_resource_group", "begin_delete") == _only(
+        old_calls, "list_by_resource_group", "begin_delete"
+    )
+    assert new_deleted == old_deleted
+    assert legacy.get_deleted == ["a", "c", "a", "c"]
+    assert runs == [["a", "c"], ["a", "c"]]
 
 
 def test_registered_factory_builds_cleaner(monkeypatch: pytest.MonkeyPatch) -> None:
