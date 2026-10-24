@@ -63,3 +63,48 @@ Reviewed `git diff f8ed6dd..HEAD` on branch `fw/gate` against the Lane F-GATE sp
 
 VERDICT: APPROVE
 
+
+## Round 2 (Opus)
+
+Re-checked round 1's three fixes, then did every check again myself on `git diff f8ed6dd..HEAD`. I read both third-round audits (`AGENT-NATIVE-AUDIT-3.md` items 7, 8, 10 and the ARCH-001/ARCH-003 rows; `AGENT-NATIVE-AUDIT-3-GPT.md` items 4, 5 and 8). Every F-GATE gap they name is closed: the four cloud `clock_ref` hits, the dead `paramiko`/`beautifulsoup4` pins, the 21 stale baseline names, the `^crc\.py$` mypy exclude, the suite-wide network deny and the dependency audit. `print` in `crc/notify` and the doc drift belong to other lanes.
+
+### Round 1 fixes
+
+All three hold. The `test_arch003_bans.py` boundary/notify self-tests are restored and pass. `test_crc_entry_types.py` uses separate target names for the valid and the broken copy. `_REMEDIATION` names `constraints.txt`.
+
+### Findings
+
+No blocking findings, and I made no code change. Three non-blocking notes:
+
+1. `_deny_network` (`tests/conftest.py`) is a function-scoped autouse fixture. It covers every test body and every function-scoped fixture, but not import or collection time, and not session-scoped or module-scoped fixtures. No such fixture opens a socket today. If one ever needs the guard, a session-level patch in `pytest_configure` would close the gap.
+2. `crc/aws/spot_instance_requests/cleaner.py` and its `README.md` are not on the lane's file list. They only drop the `Clock` re-export and the `clock` field mention that `runtime.py` no longer has, so they are a direct consequence of the owned change. Neither file is touched by `fw/docs` or `fw/kind`, so I accept them.
+3. `tests/test_doctor.py::test_main_is_ok_on_this_environment` makes the suite fail when the dev tools are not at the pinned versions. This is consistent with `make doctor` and CI installs with `-c constraints.txt`, so I keep it.
+
+### Item-by-item (code opened for each)
+
+1. **constraints.txt.** I created a fresh venv (Python 3.12.3) and ran `pip install -r requirements.txt -r requirements-dev.txt -c constraints.txt`. `pip check` reports "No broken requirements found". `pip freeze` lists the same packages at the same versions as `constraints.txt`; the only differences are name normalisation (`_`/`-`, case). `requests` is still needed (`msrest`, `azure-core`, `oci`, `google-api-core`, `pip-audit`). Nothing in `crc/`, `crc.py` or `scripts/` imports `paramiko`, `bs4` or `requests`. `constraints.txt` is in `frozen_paths`, the manifest and the ARCH-007 self-test.
+2. **Ratchet.** `legacy_baseline.txt` holds only a comment. The ARCH-001 real-repo test asserts an empty baseline and an empty `extend-exclude`, and two self-tests show an empty baseline admits no file. The `crc.py` mypy check is done by a strict-mypy wrapper test, because the name clashes with the `crc/` package; the reason is in `pyproject.toml`.
+3. **ARCH-003 clocks.** The behaviour is identical. At `f8ed6dd`, `SpotVMCleaner.plan`/`apply` already passed `lambda: context.now` to `preview_instance`/`apply_instance`, and `cleaner.py` is the only caller of `disk_ok_to_delete` in `crc/`. The new `clock=None` fail-closed branch is reachable only from the hash-locked test call, which never reaches the age check. AWS `SpotRuntime.clock` was never read at base (searched for `runtime.clock` and `.clock()`). `clock_ref` is now in `_ALL_KINDS`, with self-tests for all four cloud packages.
+4. **Network deny.** The autouse fixture patches `connect`, `connect_ex`, `sendto` and `getaddrinfo`, and lets `AF_UNIX` and loopback through. No test needed changing.
+5. **CI and doctor.** CI runs `make doctor`, `make check` and `make smoke-offline`. `make doctor` checks the Python version against `requires-python` and ruff/mypy/pytest against `constraints.txt`. Neither command is mentioned in docs; the lines for F-DOCS are listed above.
+6. **pip-audit.** `pip-audit==2.10.1` is pinned in `requirements-dev.txt`. The `audit` job has `continue-on-error: true`, so it reports and never fails the build.
+
+### Behaviour and guardrails
+
+- **CLI help.** I ran `python crc.py --help` on a `f8ed6dd` worktree and on HEAD: the output is byte-identical.
+- **Untouched files.** These have no diff against base: `tests/test_jenkins_contract.py`, `tests/legacy/`, `safety_lock.json`, `docs/refactor/BUGS.md`, `requirements.txt`, `crc.py`, `crc/cli`, `crc/core`, `crc/notify`, and the F-DOCS archtest files.
+- **Parity tests.** The only change is in `tests/test_aws_spot_instance_requests_parity.py`: two calls no longer pass the unused `clock=` argument. The assertions are unchanged.
+- **Sabotage.** I broke each check below locally, saw it fire, and restored the file without committing:
+  - Setting the network fixture to `autouse=False` made 5 tests in `test_network_deny.py` fail. They really tried the network and failed after a 4.5-minute connect timeout.
+  - Adding `crc/old.py` to `legacy_baseline.txt` failed `test_arch001_baseline_is_empty_and_pyproject_has_no_exclusions`.
+  - Appending `BROKEN: int = "x"` to `crc.py` failed `test_crc_py_passes_strict_mypy` with mypy `[assignment]`.
+  - Pinning `ruff==0.0.1` in `constraints.txt` made `scripts/doctor.py` exit 1 and print the exact install command.
+- **Sizes.** Every touched file is at most 250 lines; the largest is `crc/gcp/spot_vm/cleaner.py` at 244. ARCH-004 (functions at most 60 lines) and ARCH-002 (README Public API) are green.
+
+### Gates (fresh venv, `pip install -r requirements.txt -r requirements-dev.txt -c constraints.txt`)
+
+- `make check`: ruff, format, mypy and lint-imports are green. pytest: **44,651 passed, 1 skipped in 57.57 s** (44,652 collected, ARCH-008 floor 44,652). `make check` took **1m15s** wall time in total.
+- `make doctor`: `doctor: ok (python 3.12.3, ruff, mypy, pytest at pinned versions)`.
+- `make smoke-offline`: `17/17 pairs passed`.
+
+ROUND 2 VERDICT: APPROVE
