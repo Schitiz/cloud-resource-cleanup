@@ -133,3 +133,91 @@ BUG-174, already open.)
    - `make check`: **44,571 passed, 1 skipped in 54.52s** (ARCH-008: 44,572 tests, floor 44,572)
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+### Round 1 fixes checked
+
+- `test_azure_nic_fix.py` / `test_azure_nic_parity.py` `_bug_nnn` renames: pure renames (AST
+  otherwise identical), both files out of the per-file ignores, ruff green.
+- `test_aws_base_parity.py:218` now compares `(r.name, r.levelno, r.getMessage())`. Dropping
+  `r.msg`/`r.args` is unavoidable (the frozen oracle logs f-strings, the new code `%s` args); the
+  rendered text, level and logger name are still asserted, so the test is not weakened.
+- `AGENTS.md`: one line naming the rule set. Agreed.
+
+### Findings (fixed in round 2)
+
+1. `pyproject.toml:42-72`: 31 of the 33 test entries in `[tool.ruff.lint.per-file-ignores]`
+   ignored both `N802` and `N803` while only one of them ever fires in that file (for example
+   `N803` in `tests/helpers_cl2_*.py`, `N802` in `tests/test_aws_*`). Ruff does not report unused
+   per-file ignores, so a future non-SDK name would have been hidden. Each entry now lists only the
+   code it needs (checked by removing every entry and mapping the 136 hits back to files);
+   `crc/aws/*/client.py` and `tests/test_aws_vpc_parity.py` keep both. All 136 hidden names are SDK
+   / oracle names: boto3 keywords (`Filters`, `KeyId`, `InstanceIds`, `VolumeId`, `PolicyName`,
+   `VpcId`, `DhcpOptions`, ...), Slack (`chat_postMessage`, `users_lookupByEmail`), GCP
+   (`zoneOperations`, `regionOperations`, `regionDisks`, `RegionsClient`).
+
+### Independent checks
+
+1. **Rules and format**: `DTZ BLE G LOG C4 RET N` are selected, and the global `ignore` is only
+   `LOG015`. `ruff check .` is green, `ruff format --check .` reports 369 files already formatted,
+   and both run in `make lint` (`Makefile:16`) and CI (`ci.yml:21`, and again via `make check`).
+   `26470a1` is formatting only. It also joins one signature line in the unlocked
+   `tests/archtest/test_arch003_bans.py`, which is in scope because the task formats the whole
+   repo except `tests/legacy/`.
+2. **No behaviour change** (AST comparison of every changed `.py` file against `154dc27`):
+   - In `crc/` and `crc.py`, only logging calls differ; everything else, every `except` type and
+     every datetime call included, is AST-identical. So all DTZ and BLE sites in production are
+     comment-only (noqa), with nothing narrowed or rewritten.
+   - G004: each of the 117 old f-string calls was rebuilt mechanically (literal text, `{x}` to
+     `%s`, `{x!r}` to `%r`) and matched the new format string and argument list exactly. No literal
+     `%` appears in a converted message, and no format spec or extra argument is involved. The one
+     mixed call (`crc/azu/spot_vm/disks.py:93`, an f-string already holding `%s`) keeps the
+     argument order. The only enum in `crc` that could be an argument is `Operation(StrEnum)`, for
+     which `str()` and `format()` agree; the others are plain `Enum`s, where they also agree.
+     Logger names are unchanged (every call target is AST-identical).
+   - G003 `crc/azu/disk/cleaner.py:118` is kept with `noqa` (BUG-174 `TypeError` preserved).
+   - DTZ007 ×3: `TIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%f%z"` (`crc/gcp/_common.py:13`,
+     `crc/gcp/spot_vm/settings.py:11`), so the reason is correct.
+   - Tests: the only non-comment edits are the renames (`NEW_CRC`, `_BuiltError`, `routed_check`,
+     `_bug_nnn`), two `dict.fromkeys` swaps (same dict), and the `test_aws_base_parity` tuple
+     described above.
+3. **noqa**: every `# noqa` added in `154dc27..HEAD` has the form `<CODE> - <reason>`. The
+   breakdown is 151 BLE001 (83 parity harness, 68 in `crc/`, each naming the isolation unit and
+   the SAF or BUG number where one exists), 44 DTZ001 and 1 DTZ005 (tests, naive fixture times
+   kept), 3 DTZ007, and 1 G003. No BLE001 was narrowed, which is acceptable.
+4. **Tests**: `tests/legacy/*.txt` and `tests/archtest/safety_lock.json` are untouched, SAF-LOCK is
+   green, and the count is 44,572, equal to the floor.
+5. **Sizes**: ARCH-004 green.
+6. **Scope**: every changed file is in `crc/`, `crc.py`, `tests/`, `pyproject.toml`, `Makefile`,
+   `ci.yml`, `AGENTS.md`, or this review. `BUGS.md` and `CLEANUP_SAFETY.md` are untouched.
+
+### Counts per rule (`--ignore-noqa`, HEAD per-file ignores applied)
+
+| Rule | Before crc | Before tests | After (open) | After (noqa) |
+|------|-----------:|-------------:|-------------:|-------------:|
+| G004 / G003 | 117 / 1 | 0 | 0 | 0 / 1 |
+| BLE001 | 68 | 83 | 0 | 151 |
+| DTZ001 / DTZ005 / DTZ007 | 0 / 0 / 3 | 44 / 1 / 0 | 0 | 44 / 1 / 3 |
+| N802 / N811 / N818 / N806 | 0 | 13 / 6 / 2 / 1 | 0 | 0 |
+| C420 | 0 | 2 | 0 | 0 |
+| RET, LOG (without LOG015) | 0 | 0 | 0 | 0 |
+
+### Observation (no change requested)
+
+- `%`-style arguments defer `str()` to the handler. A `__str__` that raises would now print a
+  "--- Logging error ---" instead of propagating. No converted argument does this; the only known
+  case (the `None` concatenation) is the G003 site that was kept.
+
+### Gates
+
+- `make check` (after `pip install -r requirements.txt -r requirements-dev.txt`): ruff check,
+  ruff format --check (369 files), mypy, lint-imports and ARCH-001..011 / SAF-LOCK are green;
+  **44,571 passed, 1 skipped in 50.08 s** (`make check` 56 s wall); ARCH-008: 44,572 tests, floor
+  44,572.
+
+## New bugs
+
+None.
+
+ROUND 2 VERDICT: APPROVE
