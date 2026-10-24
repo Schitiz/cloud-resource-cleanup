@@ -10,7 +10,8 @@ from typing import Any
 import pytest
 
 from crc.core.cleaner import Operation, RunContext, Skipped
-from crc.oci.vm import VM, VmCleaner, VmRuntime, VmSettings
+from crc.oci.vm import VmCleaner, VmSettings
+from tests.helpers_ad_vm_engine import done_ids, run_vm
 
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=datetime.UTC)
 SETTINGS = VmSettings(filter_tags={}, age={"hours": 5})
@@ -95,6 +96,8 @@ def run_cleaner(
     return api, cleaner, plan
 
 
+_ENGINE_SETTINGS = VmSettings(filter_tags={"env": ["ci"]}, age={"hours": 5})
+
 MANAGED = [
     ("freeform-oke", {"env": "ci", "oke-cluster": "c1"}, None, None),
     ("freeform-oke-value", {"env": "ci", "pool": "OKE-nodes"}, None, None),
@@ -156,24 +159,12 @@ def test_bug_158_instances_without_defined_tags_or_metadata_still_match(
     assert api.calls == [("list_instances",), ("terminate_instance", "a")]
 
 
-def test_bug_158_adapter_skips_managed_instances(
-    monkeypatch: pytest.MonkeyPatch, run_log: FakeRunLog
-) -> None:
+def test_bug_158_engine_skips_managed_instances(run_log: FakeRunLog) -> None:
     api = FakeApi([inst("m", metadata={"oke-native-pool-id": "x"}), inst("plain")])
-    monkeypatch.setattr("crc.service.init_logging", lambda *args, **kwargs: None)
-    monkeypatch.setenv("OCI_PRIVATE_KEY_CONTENT", "not-a-key")
-    vm = VM(
-        False,
-        {"env": ["ci"]},
-        {},
-        {"hours": 5},
-        "",
-        {},
-        VmRuntime(api_factory=lambda region: api, list_regions=lambda: ["r1"], clock=lambda: NOW),
-    )
-    vm.delete()
+    cleaner = VmCleaner(lambda region: api, lambda: ["r1"], _ENGINE_SETTINGS)
+    outcome = run_vm("oci", cleaner)
     assert api.calls == [("list_instances",), ("terminate_instance", "plain")]
-    assert vm.get_deleted == ["name-plain"]
+    assert done_ids(outcome) == ["name-plain"]
 
 
 BROKEN = [
@@ -230,21 +221,11 @@ def test_bug_162_failure_in_one_region_does_not_stop_the_next(run_log: FakeRunLo
     assert apis["r2"].calls == [("list_instances",), ("terminate_instance", "ok")]
 
 
-def test_bug_162_adapter_carries_on_and_names_only_healthy_instances(
-    monkeypatch: pytest.MonkeyPatch, run_log: FakeRunLog
+def test_bug_162_engine_carries_on_and_names_only_healthy_instances(
+    run_log: FakeRunLog,
 ) -> None:
     api = FakeApi([inst("a"), inst("bad", created=None), inst("c")])
-    monkeypatch.setattr("crc.service.init_logging", lambda *args, **kwargs: None)
-    monkeypatch.setenv("OCI_PRIVATE_KEY_CONTENT", "not-a-key")
-    vm = VM(
-        False,
-        {"env": ["ci"]},
-        {},
-        {"hours": 5},
-        "",
-        {},
-        VmRuntime(api_factory=lambda region: api, list_regions=lambda: ["r1"], clock=lambda: NOW),
-    )
-    vm.delete()
-    assert vm.get_deleted == ["name-a", "name-c"]
+    cleaner = VmCleaner(lambda region: api, lambda: ["r1"], _ENGINE_SETTINGS)
+    outcome = run_vm("oci", cleaner)
+    assert done_ids(outcome) == ["name-a", "name-c"]
     assert [f[1] for f in run_log.failures] == ["bad"]

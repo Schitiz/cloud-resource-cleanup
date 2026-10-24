@@ -16,7 +16,8 @@ from crc.oci.disk import DiskCleaner, DiskSettings
 from crc.oci.spot_vm import SpotVM, SpotVmCleaner, SpotVmRuntime
 from crc.oci.spot_vm.client import RegionClients
 from crc.oci.spot_vm.decide import SpotVmSettings
-from crc.oci.vm import VM, VmCleaner, VmRuntime, VmSettings
+from crc.oci.vm import VmCleaner, VmSettings
+from tests.helpers_ad_vm_engine import run_vm
 from tests.helpers_wc_oci_disk import run_disk
 
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=datetime.UTC)
@@ -83,18 +84,19 @@ class VmApi:
             raise self.failing[instance_id]
 
 
-def _vm_runtime(apis: Mapping[str, Any]) -> VmRuntime:
+def _vm_cleaner(apis: Mapping[str, Any]) -> VmCleaner:
     def factory(region: str) -> Any:
         api = apis[region]
         if isinstance(api, Exception):
             raise api
         return api
 
-    return VmRuntime(factory, lambda: list(apis), lambda: NOW)
+    settings = VmSettings(filter_tags=FILTER, age=AGE)
+    return VmCleaner(factory, lambda: list(apis), settings)
 
 
-def _vm(runtime: VmRuntime, *, dry_run: bool) -> Any:
-    return VM(dry_run, FILTER, {}, AGE, "", {}, runtime)
+def _vm(cleaner: VmCleaner, *, dry_run: bool, operation: str = "delete") -> Any:
+    return run_vm("oci", cleaner, dry_run=dry_run, operation=Operation(operation))
 
 
 VM_INSTANCES = [inst("a"), inst("b", hours=1), inst("c", state="STOPPED"), inst("d", tags={})]
@@ -109,37 +111,46 @@ VM_INSTANCES = [inst("a"), inst("b", hours=1), inst("c", state="STOPPED"), inst(
         (True, "stop", "would_stop", 0),
     ],
 )
-def test_vm_adapter_reports_regions_actions_skips_and_result(
+def test_vm_engine_reports_regions_actions_skips_and_result(
     caplog: pytest.LogCaptureFixture, dry_run: bool, operation: str, kind: str, done: int
 ) -> None:
     caplog.set_level(logging.DEBUG)
     _begin("vm", dry_run=dry_run, operation=operation)
-    vm = _vm(_vm_runtime({"r1": VmApi(VM_INSTANCES), "r2": VmApi([])}), dry_run=dry_run)
-    getattr(vm, operation)()
+    _vm(
+        _vm_cleaner({"r1": VmApi(VM_INSTANCES), "r2": VmApi([])}),
+        dry_run=dry_run,
+        operation=operation,
+    )
     logger.finish()
+    actions = (
+        []
+        if dry_run
+        else [(logging.INFO, f"ACTION {kind} cloud=oci resource=vm region=r1 id=a name=name-a")]
+    )
     assert _lines(caplog, "REGION", "ACTION", "SKIPPED", "ERRORS", "FAILED", "RESULT") == [
-        (logging.INFO, f"ACTION {kind} cloud=oci resource=vm region=r1 id=a name=name-a"),
         (logging.INFO, "REGION cloud=oci resource=vm region=r1 scanned=4 selected=1 seconds=0"),
         (logging.DEBUG, "REGION cloud=oci resource=vm region=r2 scanned=0 selected=0 seconds=0"),
+        *actions,
         (logging.INFO, "SKIPPED cloud=oci resource=vm reason=filter_mismatch count=1"),
         (logging.INFO, "SKIPPED cloud=oci resource=vm reason=state count=1"),
         (logging.INFO, "SKIPPED cloud=oci resource=vm reason=too_young count=1"),
         (
             logging.INFO,
             f"RESULT cloud=oci resource=vm operation={operation} "
-            f"dry_run={'true' if dry_run else 'false'} selected=1 done={done} failed=0 "
+            f"dry_run={'true' if dry_run else 'false'} selected={0 if dry_run else 1} "
+            f"done={done} failed=0 "
             "skipped=3 regions=2 regions_skipped=0 duration_s=7",
         ),
     ]
 
 
-def test_vm_adapter_counts_a_skipped_region_and_a_failed_terminate(
+def test_vm_engine_counts_a_skipped_region_and_a_failed_terminate(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     caplog.set_level(logging.DEBUG)
     _begin("vm", dry_run=False)
     apis = {"r1": _timeout(), "r2": VmApi([inst("a"), inst("b")], {"a": RuntimeError("denied")})}
-    _vm(_vm_runtime(apis), dry_run=False).delete()
+    _vm(_vm_cleaner(apis), dry_run=False)
     logger.finish()
     assert _lines(caplog, "Region ", "Error occurred") == [
         (
@@ -150,8 +161,8 @@ def test_vm_adapter_counts_a_skipped_region_and_a_failed_terminate(
         (logging.ERROR, "Error occurred while delete instance name-a: denied"),
     ]
     assert _lines(caplog, "ACTION", "REGION", "ERRORS", "FAILED", "RESULT") == [
-        (logging.INFO, "ACTION deleted cloud=oci resource=vm region=r2 id=b name=name-b"),
         (logging.INFO, "REGION cloud=oci resource=vm region=r2 scanned=2 selected=2 seconds=0"),
+        (logging.INFO, "ACTION deleted cloud=oci resource=vm region=r2 id=b name=name-b"),
         (logging.ERROR, "ERRORS count=1"),
         (logging.ERROR, "FAILED cloud=oci resource=vm region=r2 id=a error=RuntimeError: denied"),
         (
@@ -166,7 +177,7 @@ def test_vm_tag_dict_is_debug_and_no_run_means_no_new_lines(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     caplog.set_level(logging.DEBUG)
-    _vm(_vm_runtime({"r1": VmApi([inst("a")])}), dry_run=True).delete()
+    _vm(_vm_cleaner({"r1": VmApi([inst("a")])}), dry_run=True)
     records = [(r.levelno, r.getMessage()) for r in caplog.records]
     assert (logging.DEBUG, "{'env': 'ci'}") in records
     assert (logging.INFO, "{'env': 'ci'}") not in records

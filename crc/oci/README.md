@@ -14,7 +14,7 @@ Modules:
 - `connectivity.py`: `CONNECTIVITY_ERRORS` and `log_skipped_region`
 - `disk/`: the disk cleaner subpackage (`DiskCleaner` registered as `oci` / `disk` and the SDK Protocols); deletes available block and boot volumes not attached; freeform tag any-key filter
 - `spot_vm/`: the Spot VM cleaner subpackage (`SpotVmCleaner` registered as `oci` / `spot_instances`, the `SpotVM` class, the SDK Protocols and the leftover volume handling); terminates preemptible instances and deletes leftover volumes; skips OKE and instance pool members
-- `vm/`: the VM cleaner subpackage (`VmCleaner` registered as `oci` / `vm`, the `VM` class, the SDK Protocols); terminates or stops `RUNNING` instances; freeform tag all-keys filter
+- `vm/`: the VM cleaner subpackage (`VmCleaner` registered as `oci` / `vm`, the SDK Protocols); terminates or stops `RUNNING` instances; freeform tag all-keys filter
 
 `crc/cli/routes/oci.py` routes `disk`, `vm` (delete and stop) and `spot_instances` through `crc.core.engine`; `spot_instances` is skipped under `--cloud all` (SAF-037).
 
