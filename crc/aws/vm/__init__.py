@@ -1,8 +1,7 @@
 # Copyright (c) Yugabyte, Inc.
 
-"""AWS EC2 VM cleaner package; `crc.aws.vm.VM` stays the import path `crc.py` uses."""
+"""AWS EC2 VM cleaner package: `VmCleaner`, settings, tag scan and typed EC2 Protocols."""
 
-from crc.aws.vm.adapter import VM, VmRuntime
 from crc.aws.vm.cleaner import (
     DEFAULT_REGION,
     DEFAULT_STATE,
@@ -34,7 +33,6 @@ __all__ = [
     "DEFAULT_REGION",
     "DEFAULT_STATE",
     "SERVICE_NAME",
-    "VM",
     "ClientFactory",
     "Filters",
     "RegionLister",
@@ -43,7 +41,6 @@ __all__ = [
     "VmCleaner",
     "VmClient",
     "VmPaginator",
-    "VmRuntime",
     "VmScanClient",
     "VmSession",
     "VmSettings",

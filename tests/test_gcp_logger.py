@@ -19,11 +19,11 @@ from crc.core.cleaner import Operation
 from crc.gcp import _scan
 from crc.gcp.ip import IpCleaner
 from crc.gcp.spot_vm import SpotVMCleaner
-from crc.gcp.vm import VM
 from tests import test_gcp_disk as disks
 from tests import test_gcp_ip as ips
 from tests import test_gcp_spot_instances as spots
 from tests import test_gcp_vm as vms
+from tests.helpers_ad_vm_engine import run_vm
 from tests.helpers_wc_gcp_engine import run_engine
 
 SCAN_SECONDS = 7
@@ -117,14 +117,14 @@ def test_vm_stop_dry_run_logs_would_stop_from_plan(caplog: pytest.LogCaptureFixt
     ]
 
 
-def test_vm_adapter_stop_and_dry_run_delete(caplog: pytest.LogCaptureFixture) -> None:
+def test_vm_engine_stop_and_dry_run_delete(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.INFO)
     client = vms.FakeClient({"z": [vms.inst("a")]})
     begin("vm", "stop")
-    VM(False, vms.PROJECT, {}, {}, 1, "", {}, client=client, clock=lambda: vms.NOW).stop()
+    run_vm("gcp", vms.cleaner(client, age=1), operation=Operation.STOP)
     logger.finish()
     begin("vm", dry_run=True)
-    VM(True, vms.PROJECT, {}, {}, 1, "", {}, client=client, clock=lambda: vms.NOW).delete()
+    run_vm("gcp", vms.cleaner(client, age=1), dry_run=True)
     logger.finish()
     lines = run_lines(caplog)
     assert action("stopped", "vm", "z", "a") in lines

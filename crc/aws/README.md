@@ -4,9 +4,9 @@
 
 AWS cleaners (boto3). They delete or stop leftover EC2, EBS, network, key and KMS resources across regions.
 
-`keypairs/`, `elastic_ips/`, `kms/`, `snapshot/`, `vpc/`, `vm/`, `disk/` and `spot_instance_requests/` are `Cleaner`s registered under `aws`; `crc/cli` runs them through `crc.core.engine` (routes in `crc/cli/routes/aws.py`). `_base.py`, `_common.py`, `_regionlog.py` and `connectivity.py` are shared plumbing and register nothing. `vm/` serves `--scan_tag` through `scan_tag()` (the `VM` adapter class stays for its tests). Any change must follow `ARCHITECTURE.md`, with `make check` green.
+`keypairs/`, `elastic_ips/`, `kms/`, `snapshot/`, `vpc/`, `vm/`, `disk/` and `spot_instance_requests/` are `Cleaner`s registered under `aws`; `crc/cli` runs them through `crc.core.engine` (routes in `crc/cli/routes/aws.py`). `_base.py`, `_common.py`, `_regionlog.py` and `connectivity.py` are shared plumbing and register nothing. `vm/` serves `--scan_tag` through `scan_tag()`. Any change must follow `ARCHITECTURE.md`, with `make check` green.
 
-Modules (operations and filters as catalogued in `docs/archive/FILTER_VARIANTS.md`):
+Modules:
 
 - `_base.py`: `get_all_regions` (region list via `describe_regions`, static botocore list on connectivity errors)
 - `_regionlog.py`: `start`, `region_done` and `region_skipped`, thin wrappers over `crc.core.logger.current()` with an injectable clock for the `REGION` line (log text only)
@@ -35,7 +35,6 @@ __init__.py holds only a copyright comment and declares no __all__ (no export li
 ## Safety Invariants
 
 - Authoritative text: `CLEANUP_SAFETY.md`. Applicable IDs: SAF-006 to SAF-013 (age gates, shared by all clouds), SAF-001, SAF-003, SAF-004, SAF-014, SAF-015, SAF-016, SAF-017 to SAF-020, SAF-025, SAF-026 to SAF-037.
-- Filtering per module: `docs/archive/FILTER_VARIANTS.md` sections 2 (AWS), 6 and 7.
 - Known bugs and quirks: `docs/refactor/BUGS.md` rows `BUG-004`, `BUG-007`, `BUG-008`, `BUG-011`, `BUG-012`, `BUG-014`, `BUG-015`, `BUG-020`, `BUG-021`, `BUG-022`, `BUG-045` to `BUG-061`, and for snapshots `BUG-009`, `BUG-040` and `BUG-142` to `BUG-157`.
 - The AWS EBS cleanup needs `--cloud aws --resource disk` (SAF-014); spot requests cancel before terminate (SAF-028).
 - Every cleaner runs through `crc.core.engine`: `plan()` lists every region and only reads, then `apply()` mutates, so a listing error in a later region leaves nothing deleted. In a dry run `apply()` is not called.

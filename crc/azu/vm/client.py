@@ -2,7 +2,7 @@
 
 """The Azure SDK calls the VM cleaner uses, behind small typed Protocols.
 
-The real clients come from the legacy `crc.azu._base.Base`; tests pass fakes that satisfy these
+The real clients come from `crc.azu._base.Base`; tests pass fakes that satisfy these
 Protocols instead of the SDK.
 """
 

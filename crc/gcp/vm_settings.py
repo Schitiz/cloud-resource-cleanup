@@ -1,6 +1,6 @@
 # Copyright (c) Yugabyte, Inc.
 
-"""Settings and closing log lines of the GCP VM cleaner, shared by `VmCleaner` and `VM`."""
+"""Settings and closing log lines of the GCP VM cleaner, used by `VmCleaner`."""
 
 import logging
 from collections.abc import Mapping, Sequence
@@ -16,7 +16,7 @@ _DEFAULT_POLL_SEC = 5.0
 
 @dataclass(frozen=True, slots=True)
 class VmSettings:
-    """Filters and options of one run, as `VM` receives them."""
+    """Filters and options of one run, as the registered factory builds them."""
 
     project_id: str
     filter_labels: Mapping[str, Sequence[str]] | None

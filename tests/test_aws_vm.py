@@ -3,14 +3,13 @@
 import datetime
 import logging
 from collections.abc import Mapping, Sequence
-from dataclasses import replace
 from typing import Any
 
 import pytest
 
-from crc.aws.vm import VM, VmRuntime
 from crc.aws.vm.cleaner import VmCleaner, VmSettings
 from crc.core.cleaner import Candidate, Operation, Plan, RunContext
+from tests.helpers_ad_vm_engine import done_ids, run_vm
 
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=datetime.UTC)
 OLD = NOW - datetime.timedelta(days=3)
@@ -128,16 +127,7 @@ def test_supports_delete_and_stop() -> None:
     assert cleaner.supports(Operation.STOP)
 
 
-def test_adapter_runs_with_injected_runtime() -> None:
+def test_engine_runs_with_injected_cleaner() -> None:
     client = FakeClient([instance("a")])
-    vm = VM(False, {}, {}, {"days": 1}, "", {})
-    vm.runtime = replace(
-        VmRuntime(),
-        client_factory=lambda region: client,
-        list_regions=lambda: ["us-west-2"],
-        clock=lambda: NOW,
-    )
-    vm.delete()
-    assert vm.get_deleted == ["n-a"]
-    assert vm.delete_count == 1
-    assert vm.get_stopped == []
+    outcome = run_vm("aws", make(client), now=NOW)
+    assert done_ids(outcome) == ["n-a"]

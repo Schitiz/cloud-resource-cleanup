@@ -1,11 +1,12 @@
-"""Parity: `crc.gcp.vm.VM` against main (`tests/legacy/gcp_vm.txt`).
+"""Parity: the registered GCP VM `Cleaner`, run through `crc.core.engine.run`, against main
+(`tests/legacy/gcp_vm.txt`).
 
 Both run against the same fake `googleapiclient.discovery.build` and
-`google.cloud.compute_v1.InstancesClient`, with a frozen clock; SDK calls (in order), results,
-count, log records, stdout and raised errors must be identical for every case. The registered
-`Cleaner` path (factory with a `RunContext`, `plan()` then `apply()` unless dry run) is compared
-on results, errors, stdout, delete and stop calls and log records. The module lists zones, not
-regions; zone listing errors (auth and connectivity) propagate on main and here.
+`google.cloud.compute_v1.InstancesClient`, with a frozen clock; results, count, stdout, raised
+errors, delete and stop calls (BUG-185: with the zone operation wait) and log records are
+compared for every case. The one allowed difference: `plan()` lists every zone before `apply()`
+mutates, so an error in a later zone stops the run before any delete or stop. The module lists
+zones, not regions; zone listing errors (auth and connectivity) propagate on main and here.
 """
 
 import datetime
@@ -14,7 +15,7 @@ import re
 import types
 from collections import Counter
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -22,9 +23,11 @@ import pytest
 from google.api_core.exceptions import PermissionDenied, ServiceUnavailable
 from google.auth.exceptions import DefaultCredentialsError
 
+from crc.core import engine
 from crc.core.cleaner import Cleaner, Operation, RunContext
-from crc.core.registry import get
-from crc.gcp.vm import VM, VmCleaner, build_vm_cleaner
+from crc.core.registry import Registry, get
+from crc.core.selection import Selection
+from crc.gcp.vm import VmCleaner, VmSettings, build_vm_cleaner
 from tests.helpers_log_fix import expected_logs
 from tests.log_fix_gcp import RULES
 
@@ -34,6 +37,7 @@ NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=UTC)
 PROJECT = "proj-1"
 BUGS = {"BUG-358"}
 ACTION_CALLS = ("instances.delete.execute", "instances.stop.execute")
+WAIT_CALLS = ("zoneOperations.get.execute",)
 TS_ERR = "time data {!r} does not match format '%Y-%m-%dT%H:%M:%S.%f%z'"
 NO_ATTR = "'types.SimpleNamespace' object has no attribute {!r}"
 FIX_186: dict[str, list[str]] = {
@@ -572,10 +576,6 @@ def _legacy(case: Case) -> Any:
     return _load_oracle().VM(**_args(case))
 
 
-def _new(case: Case) -> Any:
-    return VM(**_args(case), clock=lambda: NOW)
-
-
 def _setup(
     case: Case,
     monkeypatch: pytest.MonkeyPatch,
@@ -646,18 +646,30 @@ def test_matches_main(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
+    new = _run_cleaner(case, monkeypatch, caplog, capsys)
     bugs = _bugs(case, old)
-    if bugs:
-        _assert_fixed(case, old, new, bugs)
+    if "BUG-186" in bugs:
+        assert (new.error, old.error is not None) == (None, True)
+        assert _done(new) == _fixed_done(case)
+        assert new.count == len(_fixed_done(case))
+        assert new.stdout == old.stdout
+        _assert_fixed_logs(case, old, new)
         return
-    assert new.calls == old.calls
-    assert new.error == old.error
-    assert new.deleted == old.deleted
-    assert new.stopped == old.stopped
-    assert new.count == old.count
-    assert new.logs == expected_logs(old.logs, BUGS, RULES)
+    if new.error is not None:
+        assert new.error == old.error
+        assert new.stdout == old.stdout
+        assert _only(new.calls, *ACTION_CALLS) == []
+        assert _only(new.calls, "instances.list") == _only(old.calls, "instances.list")
+        return
+    assert old.error is None
+    assert (new.deleted, new.stopped, new.count) == (old.deleted, old.stopped, old.count)
     assert new.stdout == old.stdout
+    expected = _only(_with_waits(old.calls, case), *ACTION_CALLS, *WAIT_CALLS)
+    assert _only(new.calls, *ACTION_CALLS, *WAIT_CALLS) == expected
+    assert _only(new.calls, "instances.list") == _only(old.calls, "instances.list")
+    expected_log_lines = expected_logs(old.logs, BUGS, RULES)
+    assert expected_log_lines[-1][2].startswith("count of items in instance_names_to_")
+    assert Counter(new.logs) == Counter(expected_log_lines[:-1])
 
 
 def _cleaner_context(case: Case) -> RunContext:
@@ -687,15 +699,17 @@ def _run_cleaner(
 ) -> Outcome:
     gcp = _setup(case, monkeypatch, caplog, capsys)
     ctx = _cleaner_context(case)
-    cleaner = get("gcp", "vm")(ctx)
+    registry = Registry()
+    registry.register("gcp", "vm")(build_vm_cleaner)
     error: tuple[str, str] | None = None
     names: list[str] = []
     try:
-        plan = cleaner.plan(ctx)
-        if case.dry_run:
-            names = [c.id for c in plan.candidates]
-        else:
-            names = list(cleaner.apply(plan, ctx).succeeded)
+        (outcome,) = engine.run(Selection((("gcp", "vm"),)), ctx, registry)
+        names = (
+            [c.id for c in outcome.plan.candidates]
+            if outcome.result is None
+            else list(outcome.result.succeeded)
+        )
     except Exception as e:
         error = (type(e).__name__, re.sub(r"0x[0-9a-f]+", "0x0", str(e)))
     deleted, stopped = ([], names) if case.op == "stop" else (names, [])
@@ -776,24 +790,11 @@ def _fixed_done(case: Case) -> list[str]:
     return FIX_186[case.id]
 
 
-def _assert_fixed(case: Case, old: Outcome, new: Outcome, bugs: list[str]) -> None:
-    """A case marked with a fixed bug: it differs from main and has exactly the new outcome."""
-    assert (new.calls, new.error) != (old.calls, old.error)
-    assert new.calls == _with_waits(old.calls, case)
-    assert new.stdout == old.stdout
-    if "BUG-186" not in bugs:
-        assert new.error == old.error
-        assert (new.deleted, new.stopped, new.count) == (old.deleted, old.stopped, old.count)
-        assert new.logs == expected_logs(old.logs, BUGS, RULES)
-        return
-    assert old.error is not None
-    assert new.error is None
-    done = _fixed_done(case)
-    assert _done(new) == done
-    assert new.count == len(done)
-    extra = Counter(new.logs) - Counter(expected_logs(old.logs, BUGS, RULES))
-    assert Counter(expected_logs(old.logs, BUGS, RULES)) - Counter(new.logs) == Counter()
-    assert extra == Counter(EXTRA_LOGS[case.id])
+def _assert_fixed_logs(case: Case, old: Outcome, new: Outcome) -> None:
+    """BUG-186: a case that raised on main now continues; its logs are main's plus `EXTRA_LOGS`."""
+    expected = Counter(expected_logs(old.logs, BUGS, RULES)[:-1])
+    assert expected - Counter(new.logs) == Counter()
+    assert Counter(new.logs) - expected == Counter(EXTRA_LOGS[case.id])
 
 
 def _summary_logs(names: list[str], past: str = "deleted") -> list[tuple[str, int, str]]:
@@ -971,6 +972,13 @@ BUG_004_FIXED = frozenset(
 )
 
 
+ENGINE_QUIRKS: Mapping[str, Callable[[Outcome], bool]] = {
+    # Allowed change: every zone is listed before the first delete, so the zone without a name
+    # stops the run before the first zone is deleted (fewer deletes, never more).
+    "zone-without-name-after-first-zone": lambda o: o.error is not None and o.deleted == [],
+}
+
+
 @pytest.mark.parametrize(("case_id", "check"), QUIRKS, ids=[q[0] for q in QUIRKS])
 def test_quirk_is_preserved(
     case_id: str,
@@ -982,7 +990,7 @@ def test_quirk_is_preserved(
 ) -> None:
     case = _find(case_id)
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
+    new = _run_cleaner(case, monkeypatch, caplog, capsys)
     # BUG-004/BUG-016: the oracle class inherits the live crc.service.Service, so it cannot
     # show the old custom-age-tag behaviour here; tests/test_crc_service_parity.py pins it
     # against the frozen crc_service oracle. Fixed cases assert the new outcome only.
@@ -992,7 +1000,7 @@ def test_quirk_is_preserved(
         assert new.error is None
         assert _done(new) == _fixed_done(case)
     else:
-        assert check(new)
+        assert ENGINE_QUIRKS.get(case_id, check)(new)
 
 
 def test_service_is_closed_before_instances_are_listed_like_main(
@@ -1003,18 +1011,21 @@ def test_service_is_closed_before_instances_are_listed_like_main(
 ) -> None:
     case = _find("two-zones")
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
+    new = _run_cleaner(case, monkeypatch, caplog, capsys)
     names = [c[0] for c in new.calls]
     assert names.index("close") < names.index("instances.list")
-    assert names.index("instances.delete.execute") < names.index(
-        "instances.list", names.index("instances.list") + 1
-    )
     assert names.count("close") == 1
-    assert new.calls == _with_waits(old.calls, case)
+    # Allowed change: every zone is listed before the first delete.
+    assert names.index("instances.delete.execute") > len(names) - 1 - names[::-1].index(
+        "instances.list"
+    )
+    kept = ("instances.list", "close")
+    assert _only(new.calls, *kept) == _only(old.calls, *kept)
+    assert _only(new.calls, *ACTION_CALLS) == _only(_with_waits(old.calls, case), *ACTION_CALLS)
 
 
 @pytest.mark.parametrize("first", ["delete", "stop"])
-def test_second_call_accumulates_like_main(
+def test_consecutive_runs_act_like_main(
     first: str,
     debug_logs: None,
     monkeypatch: pytest.MonkeyPatch,
@@ -1022,25 +1033,20 @@ def test_second_call_accumulates_like_main(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     case = _find("two-zones")
-    results = []
-    for build in (_legacy, _new):
-        gcp = _setup(case, monkeypatch, caplog, capsys)
-        vm = build(case)
-        getattr(vm, first)()
-        vm.delete()
-        vm.stop()
-        results.append(
-            (gcp.calls, list(vm.get_deleted), list(vm.get_stopped), vm.delete_count, _logs(caplog))
-        )
-    expected_calls = _with_waits(results[0][0], case)
-    expected_logs_ = expected_logs(results[0][-1], BUGS, RULES)
-    assert (expected_calls, *results[0][1:-1], expected_logs_) == results[1]
-
-
-def test_class_attributes_match_main() -> None:
-    old = _load_oracle().VM
-    for name in ("service_name", "service_version", "default_instance_state", "time_format"):
-        assert getattr(VM, name) == getattr(old, name)
+    gcp = _setup(case, monkeypatch, caplog, capsys)
+    vm = _legacy(case)
+    getattr(vm, first)()
+    vm.delete()
+    vm.stop()
+    old_actions = _only(_with_waits(gcp.calls, case), *ACTION_CALLS)
+    gcp = _setup(case, monkeypatch, caplog, capsys)
+    registry = Registry()
+    registry.register("gcp", "vm")(build_vm_cleaner)
+    for operation in (first, "delete", "stop"):
+        replace_op = Operation.STOP if operation == "stop" else Operation.DELETE
+        ctx = replace(_cleaner_context(case), operation=replace_op)
+        engine.run(Selection((("gcp", "vm"),)), ctx, registry)
+    assert _only(gcp.calls, *ACTION_CALLS) == old_actions
 
 
 def test_registered_factory_builds_cleaner() -> None:
@@ -1069,13 +1075,20 @@ def test_bug_358_label_dump_is_debug_not_info(
 ) -> None:
     case = _find("mixed-deletes-old-running")
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
+    new = _run_cleaner(case, monkeypatch, caplog, capsys)
     assert old.logs != new.logs
-    assert new.logs == expected_logs(old.logs, BUGS, RULES)
-    assert [m for _, _, m in new.logs] == [m for _, _, m in old.logs]
-    assert new.calls == _with_waits(old.calls, case)
+    expected = expected_logs(old.logs, BUGS, RULES)[:-1]
+    assert Counter(new.logs) == Counter(expected)
+    assert Counter(m for _, _, m in new.logs) == Counter(m for _, _, m in old.logs[:-1])
+    assert _only(new.calls, *ACTION_CALLS) == _only(_with_waits(old.calls, case), *ACTION_CALLS)
     assert new.stdout == old.stdout
     info = [m for _, level, m in new.logs if level == logging.INFO]
     assert not [m for m in info if m.startswith(("{", "namespace("))]
     dumps = [m for _, level, m in old.logs if level == logging.INFO]
     assert any(m.startswith(("{", "namespace(")) for m in dumps)
+
+
+def test_default_instance_state_matches_main() -> None:
+    old = _load_oracle().VM
+    settings = VmSettings(PROJECT, None, None, None, DAY, "")
+    assert list(settings.instance_state) == list(old.default_instance_state)

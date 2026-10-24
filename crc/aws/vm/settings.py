@@ -31,7 +31,7 @@ def all_regions() -> Sequence[str]:
 
 @dataclass(frozen=True, slots=True)
 class VmSettings:
-    """Filters and thresholds of one run (the constructor arguments of `VM`)."""
+    """Filters and thresholds of one run."""
 
     filter_tags: Any
     exception_tags: Any
