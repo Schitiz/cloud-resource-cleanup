@@ -13,7 +13,8 @@ from google.auth.exceptions import DefaultCredentialsError
 
 from crc.core import logger
 from crc.core.cleaner import Operation, RunContext
-from crc.gcp.ip import IP, AddressView, IpCleaner, OperationView
+from crc.gcp.ip import AddressView, IpCleaner, OperationView
+from tests.helpers_wc_gcp_engine import deleted_ids, run_engine
 
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)
 PROJECT = "proj-1"
@@ -198,10 +199,9 @@ def test_bug_063_deleted_addresses_stay_recorded_when_a_later_one_fails(
         {"r1": [addr("a"), addr("b"), addr("c")], "r2": [addr("d")]},
         start_errors={"c": _make(ServiceUnavailable, "unreachable")},
     )
-    ips = IP(False, PROJECT, [], [], client)
-    ips.delete()
-    assert ips.get_deleted == ["a", "b", "d"]
-    assert ips.count == THREE
+    deleted = deleted_ids(run_engine(IpCleaner(client, PROJECT, [], []), "ip"))
+    assert deleted == ["a", "b", "d"]
+    assert len(deleted) == THREE
 
 
 def test_bug_063_summary_is_logged_after_a_failure(
@@ -211,7 +211,7 @@ def test_bug_063_summary_is_logged_after_a_failure(
     client = Client(
         {"r": [addr("a"), addr("b")]}, start_errors={"a": _make(PermissionDenied, "denied")}
     )
-    IP(False, PROJECT, [], [], client).delete()
+    run_engine(IpCleaner(client, PROJECT, [], []), "ip")
     assert [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING] == [
         "number of GCP IPs deleted: 1",
         "List of GCP IPs deleted: ['b']",
@@ -220,9 +220,8 @@ def test_bug_063_summary_is_logged_after_a_failure(
 
 def test_bug_063_dry_run_never_calls_delete(quiet: None) -> None:
     client = Client({"r": [addr("a")]}, start_errors={"a": _make(PermissionDenied, "denied")})
-    ips = IP(True, PROJECT, [], [], client)
-    ips.delete()
-    assert ips.get_deleted == ["a"]
+    outcome = run_engine(IpCleaner(client, PROJECT, [], []), "ip", dry_run=True)
+    assert deleted_ids(outcome) == ["a"]
     assert client.calls == []
 
 

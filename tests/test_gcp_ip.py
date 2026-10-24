@@ -10,7 +10,8 @@ import pytest
 
 from crc.core.cleaner import Candidate, Operation, Plan, RunContext
 from crc.core.registry import get
-from crc.gcp.ip import IP, AddressView, IpCleaner
+from crc.gcp.ip import AddressView, IpCleaner
+from tests.helpers_wc_gcp_engine import deleted_ids, run_engine
 
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)
 PROJECT = "proj-1"
@@ -204,22 +205,18 @@ def test_factory_reads_options_and_requires_project() -> None:
         get("gcp", "ip")(ctx())
 
 
-def test_adapter_uses_injected_client(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("crc.service.init_logging", lambda *args, **kwargs: None)
+def test_engine_uses_injected_client(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("google.cloud.compute_v1.RegionsClient", lambda: pytest.fail("SDK used"))
     client = FakeClient({"r1": [addr("a")], "r2": [addr("b")]})
-    ips = IP(False, PROJECT, ["a"], [], client)
-    ips.delete()
-    assert ips.get_deleted == ["a"]
-    assert ips.count == 1
+    outcome = run_engine(cleaner(client, ["a"], []), "ip")
+    assert deleted_ids(outcome) == ["a"]
     assert client.names().count("delete_address") == 1
 
 
-def test_adapter_dry_run_lists_without_deleting(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("crc.service.init_logging", lambda *args, **kwargs: None)
+def test_engine_dry_run_lists_without_deleting() -> None:
     client = FakeClient({"r": [addr("a"), addr("b")]})
-    ips = IP(True, PROJECT, [], [], client)
-    ips.delete()
-    assert ips.get_deleted == ["a", "b"]
+    outcome = run_engine(cleaner(client, [], []), "ip", dry_run=True)
+    assert outcome.result is None
+    assert deleted_ids(outcome) == ["a", "b"]
     assert "delete_address" not in client.names()
-    assert len(ips.get_deleted) == TWO
+    assert len(deleted_ids(outcome)) == TWO
