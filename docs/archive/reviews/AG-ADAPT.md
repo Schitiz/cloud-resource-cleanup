@@ -88,3 +88,51 @@ Scope reviewed: `git diff a0b3d09..HEAD` on branch `ag/adapters` (lane `AG-ADAPT
 - `crc/core/policy_text.py:72` (`status_contains_any_allowed`) and `crc/core/policy_managed.py:72` (`aws_disk_has_sensitive_yb_task`): dead policy helpers no longer called by any cleaner in `crc/` after `BUG-010`/`BUG-198` (Azure VM exact power-state check) and `BUG-282` (AWS disk checks all folded `yb_task` tags) were fixed; only `tests/test_core_policy.py` calls them.
 
 VERDICT: CHANGES_REQUESTED
+
+## Round 2 (Opus)
+
+Scope: `git diff a0b3d09..HEAD` on `ag/adapters`, round 1 fixes re-checked by opening the code.
+
+### Findings
+
+1. **Blocking, item (1b) still not done.** `crc/aws/vm/adapter.py` (`VM`, `VmRuntime`), `crc/azu/vm/adapter.py`,
+   `crc/gcp/vm_adapter.py` and `crc/oci/vm/adapter.py` and their exports still exist, and
+   `tests/test_{aws,azure,gcp,oci}_vm_parity.py` still drive the adapters instead of the registered
+   cleaners through `crc.core.engine.run`. Too large for the review time limit; listed under `## Left`.
+2. Item (1a) verified: `crc/cli/scan.py` `scan_instances_with_tag` calls `crc.aws.vm.scan.scan_tag`, which
+   passes the same default boto3 session, scan client and `all_regions` as `VM.runtime` did
+   (`crc/aws/vm/adapter.py:48-70,130-139`). `_prepare_scan` repeats the constructor side effects of each
+   adapter (`Service()`; Azure `Base(resource_group)`; OCI `Base()`; GCP `ComputeVmClient()`), and the
+   NotImplementedError texts name the real former classes (`<class 'crc.azu.vm.adapter.VM'>` etc.).
+3. Item (2) verified: no `build_selection`, `SelectionOptions`, `gcp_ip_exception_excludes` or
+   `nic_name_included` left in `crc/`, `crc.py` or the tests except the `not hasattr` checks. The `crc_cli`
+   fixture of `tests/test_core_selection.py` loads the production `crc.py`, so the retargeted cases
+   test the real CLI. Round 1's covering-test list is accurate.
+4. **Fixed: weakened test.** `test_warning_texts_match_crc_py` had gone from exact warning-text equality (against
+   the `build_selection` constants) to a count check. It now asserts the exact texts per case
+   (`_expected_warnings`, same strings as the deleted constants at `a0b3d09:crc/core/selection.py:23-35`).
+5. **Fixed: BUG-004 wording.** `crc/gcp/README.md:54` (GCP disk bullet) still said "the custom age label is fail
+   open"; it now says that a present but bad label keeps the disk (`KEEP_AGE`, skip `bad_age_tag`). No other
+   "fail open" age wording is left in the owned READMEs (`fail_open` in `crc/core/README.md` is the notifier flag).
+
+### Gates
+
+- `python3 crc.py --help`: exit 0, byte-identical to `a0b3d09`.
+- Locked files (`safety_lock.json`, `update_safety_lock.py`, the five safety tests, `tests/legacy/*.txt`,
+  `requirements*.txt`, `frozen_inputs.json`) and the five hash-locked adapters are untouched; only lane files changed.
+- Break checks in a scratch worktree (not committed): removing the Azure `Base(...)` call in `_prepare_scan`
+  fails `test_prepare_scan_keeps_the_setup_of_the_adapters`; renaming the GCP class text fails
+  `test_scan_matches_main[scan-gcp-...]`; changing the `spot_instance_requests` warning text fails 177 tests in
+  `test_cli_main_parity.py` / `test_cli_route_skip.py` and 4 cases of the tightened `test_warning_texts_match_crc_py`
+  (round 1's version passed with the broken text).
+- Size: `crc/cli/scan.py` 191, `crc/aws/vm/scan.py` 114, `crc/core/selection.py` 21, `crc/core/policy_text.py` 70 lines;
+  functions are at most 60 lines; README Public API in sync (ARCH-002 green).
+- `make check` after `pip install -r requirements.txt -r requirements-dev.txt`: ruff, mypy (367 files), import-linter
+  (5/5) green; **44423 passed in 49.50s** (`make check` 67 s wall); ARCH-008 44423, floor 44423 (unchanged).
+
+### New bugs
+
+- Same as round 1: `crc/core/policy_text.py:68` `status_contains_any_allowed` and `crc/core/policy_managed.py:72`
+  `aws_disk_has_sensitive_yb_task` are only called from tests (not part of BUG-370, left in place).
+
+ROUND 2 VERDICT: CHANGES_REQUESTED

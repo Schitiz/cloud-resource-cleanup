@@ -431,8 +431,29 @@ def test_warning_texts_match_crc_py(
         reached = run_crc_main(crc_cli, monkeypatch, cloud, resource, "delete", {})
     logged = tuple(r.getMessage() for r in caplog.records if r.levelno == logging.WARNING)
     selection = Selection(tuple(reached), logged)
-    assert len(selection.warnings) == (3 if cloud == "all" else 1)
+    assert selection.warnings == _expected_warnings(cloud, resource)
     assert list(selection.items) == reached
+
+
+def _expected_warnings(cloud: str, resource: str) -> tuple[str, ...]:
+    clouds = CLOUDS if cloud == "all" else (cloud,)
+    if resource == "spot_instance_requests":
+        return tuple(
+            f"spot_instance_requests is AWS-only; skipped for {c} (use --resource spot_instances)"
+            for c in clouds
+            if c != "aws"
+        )
+    aws = (
+        "For AWS use --resource spot_instance_requests "
+        "(cancel request before terminate). Skipping spot_instances."
+    )
+    others = tuple(
+        f"GCP/OCI spot_instances require explicit --cloud {c} (not --cloud all); skipped. "
+        "Azure spot_instances still runs under --cloud all for backward compatibility."
+        for c in clouds
+        if cloud == "all" and c in ("gcp", "oci")
+    )
+    return (aws, *others)
 
 
 @pytest.mark.parametrize("cloud", [*CLOUDS, "all"])
