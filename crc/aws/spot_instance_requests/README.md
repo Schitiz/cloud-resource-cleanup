@@ -49,6 +49,6 @@ from crc.aws.spot_instance_requests import SpotInstanceRequests keeps working.
    `cleanup.py` (ARCH-005). Decide through `crc.core.policy` and `crc.core.age`.
 3. Changes need `tests/test_aws_spot_instance_requests_parity.py` (oracle
    `tests/legacy/aws_spot_instance_requests.txt`, a frozen copy of `main`, never edit it),
-   `tests/test_aws_spot_instance_requests_cleaner.py` and `tests/test_aws_spot_instance_requests.py`
+   `tests/test_aws_spot_instance_requests_cleaner.py` and `tests/test_aws_spot_instance_requests_engine.py`
    to stay green.
 4. Every file at most 250 lines; update this README and the symbol list above.

@@ -59,5 +59,5 @@ Modules, one per responsibility:
 1. Behaviour changes need a `BUG-NNN` row in `docs/refactor/BUGS.md` and a test that fails without them.
 2. Keep filtering in `crc.core.policy` and age in `crc.core.age`; no `re`, clock reads or environment reads here (ARCH-003): `now` comes from `RunContext` (or the `Disk` clock).
 3. Keep every mutating call in `apply_region()`; `plan()` and what it calls stay read-only (ARCH-005).
-4. Changes need `tests/test_aws_disk_parity.py` (oracle `tests/legacy/aws_disk.txt`, a frozen copy of `main`, never edit it), `tests/test_aws_disk_cleaner.py` and `tests/test_aws_disk.py` to stay green.
+4. Changes need `tests/test_aws_disk_parity.py` (oracle `tests/legacy/aws_disk.txt`, a frozen copy of `main`, never edit it), `tests/test_aws_disk_cleaner.py` and `tests/test_aws_disk_engine.py` to stay green.
 5. Every file stays at most 250 lines; split by responsibility and give a new subpackage its own README.md.
