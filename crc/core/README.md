@@ -127,7 +127,7 @@ Selection (module selection.py). The selection model of the engine and the cloud
 - `RESOURCES`: the --resource all order (spot resources and vpc are not part of it).
 - `EXTRA_RESOURCES`: resources selectable by name only (vpc, spot_instance_requests, spot_instances).
 
-Kinds (module kinds.py). The one table of resource kinds (see Purpose); the parser choices, the selection constants, the pair rules of the CLI and the engine labels are derived from it.
+Kinds (module kinds.py). The one table of resource kinds; the parser choices, the selection constants, the pair rules of the CLI and the engine labels are derived from it.
 
 - `Kind`: frozen entry of the table: name, report label, whether the all expansion includes it, the clouds it is limited to and the unsupported-pair message template.
 - `KINDS`: the table, in the order of the parser choices.
@@ -141,7 +141,7 @@ Engine (module engine.py). Orchestration only; Slack and Influx senders are inje
 - `run()`: for each selected pair build the cleaner from a Registry, check supports, plan(), apply() only when not a dry run, build the Report and call the notifiers in order; cleaner errors propagate.
 - `RunOutcome`: cloud, kind, plan, result (None in a dry run) and report of one cleaner.
 - `Notifier`: protocol with name, fail_open and send(report, context); a fail_open notifier error is logged and swallowed, any other propagates.
-- `KIND_LABELS`: report label of each resource kind (derived from `KINDS`).
+- `KIND_LABELS`: report label of each resource kind.
 
 Run log (module logger.py, imported as "from crc.core import logger"). Pure stdlib collector of the
 per-run lines; the contract is in docs/logging.md. Log text only: it never

@@ -9,8 +9,9 @@ import pytest
 from crc.cli import bridge, constants, pairs
 from crc.cli.args import get_argparser
 from crc.core import engine, selection
-from crc.core.kinds import KINDS, KINDS_BY_NAME, Kind
+from crc.core.kinds import ALL_KINDS, EXPLICIT_KINDS, KIND_NAMES, KINDS, KINDS_BY_NAME, Kind
 from crc.core.report import DISK, IP, KEYPAIR, KMS, NIC, SNAPSHOT, SPOT_INSTANCE_REQUEST, VM
+from tests import helpers_ag_cli_added as added_table
 
 CLOUDS = ("aws", "azure", "gcp", "oci")
 
@@ -37,7 +38,10 @@ def test_names_are_unique() -> None:
 
 
 def test_parser_choices_keep_their_order(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert list(_resource_action(monkeypatch).choices or ()) == [
+    choices = list(_resource_action(monkeypatch).choices or ())
+    assert choices == [*KIND_NAMES, "all"]
+    added = added_table.added_kinds()
+    assert [c for c in choices if c not in added] == [
         "disk",
         "ip",
         "keypair",
@@ -53,13 +57,41 @@ def test_parser_choices_keep_their_order(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_expansion_constants_keep_their_order() -> None:
-    assert constants.RESOURCES == ["disk", "ip", "keypair", "vm", "kms", "nic", "snapshot"]
-    assert selection.RESOURCES == ("disk", "ip", "keypair", "vm", "kms", "nic", "snapshot")
-    assert selection.EXTRA_RESOURCES == ("vpc", "spot_instance_requests", "spot_instances")
+    assert list(ALL_KINDS) == constants.RESOURCES
+    assert selection.RESOURCES == ALL_KINDS
+    assert selection.EXTRA_RESOURCES == EXPLICIT_KINDS
+    added = added_table.added_kinds()
+    assert [r for r in constants.RESOURCES if r not in added] == [
+        "disk",
+        "ip",
+        "keypair",
+        "vm",
+        "kms",
+        "nic",
+        "snapshot",
+    ]
+    assert tuple(r for r in selection.RESOURCES if r not in added) == (
+        "disk",
+        "ip",
+        "keypair",
+        "vm",
+        "kms",
+        "nic",
+        "snapshot",
+    )
+    assert tuple(r for r in selection.EXTRA_RESOURCES if r not in added) == (
+        "vpc",
+        "spot_instance_requests",
+        "spot_instances",
+    )
 
 
 def test_pair_rules_keep_their_content() -> None:
-    assert pairs.SUPPORTED_CLOUDS == {
+    assert {
+        kind.name: kind.clouds for kind in KINDS if kind.clouds is not None
+    } == pairs.SUPPORTED_CLOUDS
+    added = added_table.added_kinds()
+    assert {k: v for k, v in pairs.SUPPORTED_CLOUDS.items() if k not in added} == {
         "keypair": ("aws",),
         "nic": ("azure",),
         "kms": ("aws",),
@@ -67,7 +99,12 @@ def test_pair_rules_keep_their_content() -> None:
         "snapshot": ("aws",),
         "vpc": ("aws",),
     }
-    assert set(pairs.AWS_ONLY_RESOURCES) == {"snapshot", "vpc"}
+    assert {k for k in pairs.AWS_ONLY_RESOURCES if k not in added} == {"snapshot", "vpc"}
+    for resource in added_table.ADDED_RESOURCES:
+        assert resource.kind in KINDS_BY_NAME
+        kind = KINDS_BY_NAME[resource.kind]
+        assert kind.in_all == resource.in_all
+        assert (kind.clouds if kind.clouds is not None else CLOUDS) == resource.clouds
 
 
 @pytest.mark.parametrize(
@@ -91,7 +128,9 @@ def test_unsupported_pair_messages_are_unchanged(cloud: str, resource: str, mess
 
 
 def test_report_labels_are_unchanged() -> None:
-    assert engine.KIND_LABELS == {
+    assert {kind.name: kind.label for kind in KINDS} == engine.KIND_LABELS
+    added = added_table.added_kinds()
+    assert {k: v for k, v in engine.KIND_LABELS.items() if k not in added} == {
         "disk": DISK,
         "ip": IP,
         "keypair": KEYPAIR,

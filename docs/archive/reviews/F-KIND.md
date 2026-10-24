@@ -52,8 +52,58 @@ contract assertion was edited; all pass as before.
   `crc/cli/routes/<cloud>.py` (the completeness test fails without it), the cleaner, and the
   `tests/helpers_ag_cli_added.py` entry (`ADDED_RESOURCES`, `RESOURCE_HELP`).
 - `tests/test_core_selection.py` no longer needs a `SUPPORTED_ON` edit.
-- `AGENTS.md` / `crc/cli/README.md` extension rule 3: mention the single place `crc/core/kinds.py`.
+- `crc/cli/README.md` (`## Purpose` bullets for `constants.py` and `pairs.py`, plus extension rule 3) and `AGENTS.md`: mention the single place `crc/core/kinds.py`.
 
 ## Left over
 
 Nothing unrouted; no partial state.
+
+
+## Round 1 (Argon)
+
+Reviewed `git diff f8ed6dd..HEAD` against the Lane F-KIND specification, the two third-round audits (`AGENT-NATIVE-AUDIT-3.md` and `AGENT-NATIVE-AUDIT-3-GPT.md`), and the final wave contract.
+
+### Findings
+
+1. **Fixed (lane ownership boundary in `crc/cli/README.md` and `crc/core/README.md`):**
+   - `crc/cli/README.md:15-16` was edited inside `## Purpose`, whereas the lane contract excludes `README.md` text outside the `## Public API` lines of newly added symbols (lane `F-DOCS` owns non-API README prose). Reverted `crc/cli/README.md` to `f8ed6dd` and added the `constants.py`/`pairs.py` note to `## Docs to update (lane F-DOCS)` above.
+   - In `crc/core/README.md:130-145`, removed the dangling `(see Purpose)` reference and left the pre-existing `- KIND_LABELS:` line untouched so only the `## Public API` block for the newly added `crc/core/kinds.py` symbols (`Kind`, `KINDS`, `KIND_NAMES`, `ALL_KINDS`, `EXPLICIT_KINDS`, `KINDS_BY_NAME`) is added.
+2. **Fixed (`tests/helpers_ag_cli_added.py` compatibility in `tests/test_core_kinds.py`):**
+   - `test_parser_choices_keep_their_order`, `test_expansion_constants_keep_their_order`, `test_pair_rules_keep_their_content`, and `test_report_labels_are_unchanged` previously compared derived values against hardcoded 10-kind literals without filtering `added_table.added_kinds()`, which would fail if a future kind were added via `tests/helpers_ag_cli_added.py`. Updated those four tests in `tests/test_core_kinds.py` to assert both exact derivation from `KINDS` (`[*KIND_NAMES, "all"]`, `ALL_KINDS`, `EXPLICIT_KINDS`, `SUPPORTED_CLOUDS`, `KIND_LABELS`) and exact match of the non-`added_kinds()` entries to the 10 oracle kinds, plus consistency between `ADDED_RESOURCES` and `KINDS_BY_NAME`.
+
+### Checklist Verification
+
+1. **Every item of the lane task done and true:**
+   - `crc/core/kinds.py` defines `@dataclass(frozen=True, slots=True) class Kind` (`name`, `label`, `in_all`, `clouds`, `unsupported`, `explicit_only` property, `unsupported_message()` method, and `__post_init__` check that `clouds` and `unsupported` are set together) and the frozen `KINDS` tuple (all 10 resource kinds in `--resource` choices order, whose `in_all=True` subsequence is the exact `--resource all` order), plus `KIND_NAMES`, `ALL_KINDS`, `EXPLICIT_KINDS`, and `KINDS_BY_NAME`.
+   - `crc/cli/args.py:28` derives `--resource` choices as `[*KIND_NAMES, "all"]`; `--resource` help text remains hand-written in `crc/cli/args.py:30-35` (stated in the review summary: prose with a different order and per-kind annotations, checked byte-for-byte by parity tests).
+   - `crc/core/selection.py:15-16` derives `RESOURCES = ALL_KINDS` and `EXTRA_RESOURCES = EXPLICIT_KINDS`; `crc/cli/constants.py:6` derives `RESOURCES = list(_RESOURCES)`.
+   - `crc/cli/pairs.py:8-29` derives `SUPPORTED_CLOUDS`, `AWS_ONLY_RESOURCES`, and `_unsupported_message()` from `KINDS` and `KINDS_BY_NAME`.
+   - `crc/core/engine.py:23` derives `KIND_LABELS = {kind.name: kind.label for kind in KINDS}`.
+   - `tests/test_core_selection.py:145` derives `SUPPORTED_ON = {kind.name: kind.clouds for kind in KINDS if kind.clouds is not None}` instead of hardcoding the dict.
+   - `tests/test_core_kinds.py:161-166` (`test_every_supported_pair_has_a_route_and_every_route_a_supported_pair`) verifies that every supported `(cloud, kind)` pair in `KINDS` has a route in `bridge.TABLES` and every route in `bridge.TABLES` is a supported pair in `KINDS`.
+   - `ARCHITECTURE.md` add-a-cleaner updates are listed under `## Docs to update (lane F-DOCS)`.
+2. **Byte-identical CLI/runtime behaviour & untouched parity/Jenkins contracts:**
+   - Ran `python3 crc.py --help` on `HEAD` and on base `f8ed6dd`: byte-identical (`8,432` bytes).
+   - `tests/test_jenkins_contract.py` (142 passed) and all `tests/test_*_parity.py` suites are completely untouched in `git diff f8ed6dd..HEAD` and pass.
+3. **No check or test weakened; locked files untouched; negative test of new check:**
+   - `tests/legacy/*.txt`, `tests/archtest/safety_lock.json`, `tests/archtest/frozen_inputs.json`, and `docs/refactor/BUGS.md` are untouched.
+   - Locally mutated `Kind("ip", ...)` in `crc/core/kinds.py` first to `clouds=("aws", "azure", "oci")` and then to `clouds=("aws", "azure")`: `test_every_supported_pair_has_a_route_and_every_route_a_supported_pair` failed immediately with `AssertionError: supported pair without a route: [('oci', 'ip')]` and `AssertionError: route of a pair the kind table does not support: [('gcp', 'ip')]`. Reverted both local mutations.
+4. **Only owned files changed:**
+   - Changed files (`git diff --name-only f8ed6dd..HEAD`): `crc/cli/args.py`, `crc/cli/constants.py`, `crc/cli/pairs.py`, `crc/core/README.md` (`## Public API` lines of `kinds.py` only), `crc/core/__init__.py`, `crc/core/engine.py` (`KIND_LABELS` only), `crc/core/kinds.py`, `crc/core/selection.py`, `docs/archive/reviews/F-KIND.md`, `tests/archtest/test_count_floor.txt`, `tests/test_core_kinds.py`, `tests/test_core_selection.py`.
+5. **Size limits & README Public API sync:**
+   - All touched non-test files are `<= 250` lines (max `198` lines in `crc/core/__init__.py`, `195` in `crc/core/README.md`, `128` in `crc/cli/args.py`, `98` in `crc/core/engine.py`, `88` in `crc/core/kinds.py`, `29` in `crc/cli/pairs.py`, `24` in `crc/core/selection.py`, `6` in `crc/cli/constants.py`; `tests/test_core_kinds.py` is `175` lines).
+   - All functions in touched `crc/` modules and `tests/test_core_kinds.py` are `<= 60` lines (max `53` lines in `_add_filter_args`, `28` in `test_expansion_constants_keep_their_order`, `21` in `_run_one`, `5` in `Kind.unsupported_message`).
+   - `ARCH-002` and `ARCH-004` pass (29/29).
+
+### Gates
+
+Ran `pip install -r requirements.txt -r requirements-dev.txt -c constraints.txt && make check`:
+- `ruff check .`: All checks passed!
+- `ruff format --check .`: 372 files already formatted
+- `mypy`: Success: no issues found in 371 source files
+- `lint-imports`: Contracts: 5 kept, 0 broken
+- `pytest -q -n auto`: **44,612 passed, 1 skipped in 58.08s** (`44,613` collected, up from `44,597` at `f8ed6dd`, `+16`)
+- `python3 -m tests.archtest.test_count check`: `ARCH-008: 44613 tests, floor 44613`
+- Total `make check` runtime: **1m06.1s** wall clock
+
+VERDICT: APPROVE
