@@ -1,14 +1,17 @@
 """Age-gate helpers ported verbatim from ``crc.service.Service`` (no behaviour change).
 
-``is_old`` still reads the ``MAX_AGE`` environment variable, as the original did. The age
-spec and its validation live in ``crc.core.age_spec`` and the custom age tag parsing in
-``crc.core.age_tags``; both are re-exported here so ``crc.core.age.<name>`` keeps working.
+``is_old`` applies the ``MAX_AGE`` override, but this module reads no environment variable
+(ARCH-003): ``crc/cli`` installs a source with ``set_max_age_source`` (it reads ``MAX_AGE``
+there), and ``max_age_override`` calls it at each decision, as the original read the
+variable. The age spec and its validation live in ``crc.core.age_spec`` and the custom age
+tag parsing in ``crc.core.age_tags``; both are re-exported here so
+``crc.core.age.<name>`` keeps working.
 """
 
 import ast
 import datetime
 import logging
-import os
+from collections.abc import Callable
 from typing import Any, cast
 
 from crc.core.age_spec import AGE_KEYS, KEEP_AGE, AgeSpec, require_positive_age
@@ -27,12 +30,32 @@ __all__ = [
     "get_retention_age",
     "is_old",
     "lookup_custom_age_tag",
+    "max_age_override",
     "parse_literal",
     "require_positive_age",
+    "set_max_age_source",
     "validated_retention_age",
 ]
 
 _HOURS_IN_A_DAY = 24
+
+MaxAgeSource = Callable[[], str | None]
+
+_max_age_source: MaxAgeSource | None = None
+
+
+def set_max_age_source(source: MaxAgeSource | None) -> None:
+    """Install (or, with ``None``, remove) the function that returns the raw ``MAX_AGE`` text.
+
+    Only ``crc/cli`` calls this. Without a source ``is_old`` applies no override.
+    """
+    global _max_age_source
+    _max_age_source = source
+
+
+def max_age_override() -> str | None:
+    """The raw ``MAX_AGE`` text the installed source returns, else ``None``."""
+    return None if _max_age_source is None else _max_age_source()
 
 
 def get_min_age(dict1: AgeSpec, dict2: AgeSpec) -> AgeSpec:
@@ -46,7 +69,7 @@ def get_min_age(dict1: AgeSpec, dict2: AgeSpec) -> AgeSpec:
 
 
 def _apply_max_age_override(age: AgeSpec) -> AgeSpec:
-    max_age_raw = os.getenv("MAX_AGE")
+    max_age_raw = max_age_override()
     if max_age_raw:
         max_age: Any = ast.literal_eval(max_age_raw)
         if get_min_age(age, max_age) == max_age:
@@ -96,8 +119,8 @@ def is_old(
     """Return True if the resource is at least ``age`` old.
 
     ``age`` is an int (days) or a dict with ``days`` and/or ``hours``. An empty age
-    returns True (matches every resource). The ``MAX_AGE`` environment variable, a
-    literal dict, replaces ``age`` when it is the shorter duration. ``KEEP_AGE`` (the
+    returns True (matches every resource). The ``MAX_AGE`` text from the installed source (a
+    literal dict) replaces ``age`` when it is the shorter duration. ``KEEP_AGE`` (the
     bad custom age tag marker) is never old and ignores ``MAX_AGE``.
     """
     if not age:

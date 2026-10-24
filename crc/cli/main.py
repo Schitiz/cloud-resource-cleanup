@@ -7,7 +7,7 @@ from crc.cli.clients import (
     reset_max_age,
     set_max_age,
 )
-from crc.cli.context import RunContext
+from crc.cli.context import RunContext, install_max_age_source
 from crc.cli.dispatch import run_dispatch, validate_targets
 from crc.cli.inputs import (
     check_flag_combinations,
@@ -27,6 +27,7 @@ def main() -> None:
 
     :return: None
     """
+    install_max_age_source()
     options = read_options(get_argparser())
     tokens = read_tokens()
 

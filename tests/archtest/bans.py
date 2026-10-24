@@ -9,21 +9,24 @@ from tests.archtest._common import non_legacy_files, parse_module, relpath, viol
 RULE = "ARCH-003"
 CLOUD_PACKAGES = ("crc/aws", "crc/azu", "crc/gcp", "crc/oci")
 _ALL_KINDS = frozenset({"re", "clock", "env", "print", "sys.exit"})
+# `clock_ref`: the wall clock passed as a value (`default_factory=datetime.now`, `now=time.time`,
+# `x = datetime.utcnow`) instead of called. crc/core and crc/cli are checked; the cloud packages
+# are only reported (`cloud_clock_refs`, "## Wave next") until their owners clean them up.
 
-# Banned kinds per package. crc/core is pure: no clock, no console output, no exits (its `re`
-# stays legal, crc/core/policy.py owns the regexes; its `env` ban waits for Wave B because
-# crc/core/age.py reads MAX_AGE at call time). crc/cli is the boundary and may read the
-# environment, print, read the clock and exit; it must not compile regexes. crc/notify gets the
+# Banned kinds per package. crc/core is pure: no clock (calls or value references), no
+# environment reads, no console output, no exits (`re` stays legal: crc/core/policy.py owns the
+# regexes). crc/cli is the boundary and may read the environment, print, call the clock and
+# exit; it must not compile regexes or pass the clock around as a value. crc/notify gets the
 # configuration injected: no env, exit or `re`; console output and timestamps are legitimate.
 PACKAGE_BANS: Mapping[str, frozenset[str]] = {
     **dict.fromkeys(CLOUD_PACKAGES, _ALL_KINDS),
-    "crc/core": frozenset({"clock", "print", "sys.exit"}),
-    "crc/cli": frozenset({"re"}),
+    "crc/core": frozenset({"clock", "clock_ref", "env", "print", "sys.exit"}),
+    "crc/cli": frozenset({"re", "clock_ref"}),
     "crc/notify": frozenset({"re", "env", "sys.exit"}),
 }
 
-# Explicit exceptions: repo-relative path -> banned kinds that file may use.
-# Kinds: "re", "clock", "env", "print", "sys.exit". Only the repository owner adds entries.
+# Explicit exceptions: repo-relative path -> banned kinds that file may use
+# ("re", "clock", "clock_ref", "env", "print", "sys.exit"). Only the repository owner adds entries.
 ARCH003_ALLOWLIST: Mapping[str, frozenset[str]] = {
     # Credential loading, owner-approved 2026-10-21: `Base` reads the credentials from the
     # environment when an Azure or OCI cleaner is built, exactly as on main. Reading them in
@@ -36,6 +39,7 @@ ARCH003_ALLOWLIST: Mapping[str, frozenset[str]] = {
 _CLOCK_CALLS = frozenset(
     {"datetime.now", "datetime.utcnow", "datetime.datetime.now", "datetime.datetime.utcnow"}
 )
+_CLOCK_REFS = _CLOCK_CALLS | {"time.time"}
 _FROM_IMPORT_BANS = {
     ("time", "time"): "clock",
     ("os", "environ"): "env",
@@ -48,6 +52,8 @@ _REMEDIATION = {
     "clock": "Do not read the wall clock for age decisions. Take `now` as a parameter and "
     "decide in crc/core/age.py or crc/core/policy.py. `time.monotonic` and `time.sleep` "
     "are fine for polling and waits.",
+    "clock_ref": "Do not pass the wall clock around as a value (default argument, attribute, "
+    "factory). Take `now` as a parameter; only the CLI boundary calls `datetime.now(UTC)`.",
     "env": "Do not read os.environ or os.getenv here. Parse env vars once at the "
     "CLI boundary and inject the value through the constructor.",
     "print": "Do not call print. Use the injected logger.",
@@ -89,9 +95,43 @@ def _expr_kind(node: ast.AST) -> str | None:
     return "sys.exit" if dotted == "sys.exit" else None
 
 
+def _clock_aliases(tree: ast.Module) -> dict[str, str]:
+    """Local name -> full name for the clock modules and names a module imports."""
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name in {"datetime", "time"}:
+                    aliases[alias.asname or alias.name] = alias.name
+        elif isinstance(node, ast.ImportFrom) and node.module in {"datetime", "time"}:
+            for alias in node.names:
+                aliases[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+    return aliases
+
+
+def _clock_refs(tree: ast.Module) -> list[int]:
+    """Lines where a clock function is referenced without being called."""
+    called = {id(node.func) for node in ast.walk(tree) if isinstance(node, ast.Call)}
+    aliases = _clock_aliases(tree)
+    lines: list[int] = []
+    for node in ast.walk(tree):
+        if id(node) in called or not isinstance(node, ast.Attribute | ast.Name):
+            continue
+        if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
+            continue
+        dotted = _dotted(node)
+        if dotted is None:
+            continue
+        head, _, rest = dotted.partition(".")
+        full = ".".join(filter(None, (aliases.get(head, head), rest)))
+        if dotted in _CLOCK_REFS or full in _CLOCK_REFS:
+            lines.append(node.lineno)
+    return lines
+
+
 def find_bans(tree: ast.Module) -> list[tuple[int, str]]:
     """Return `(line, kind)` for every banned construct in a module."""
-    found: list[tuple[int, str]] = []
+    found: list[tuple[int, str]] = [(line, "clock_ref") for line in _clock_refs(tree)]
     for node in ast.walk(tree):
         if isinstance(node, ast.Import | ast.ImportFrom):
             found.extend((node.lineno, kind) for kind in _import_kinds(node))
@@ -100,6 +140,17 @@ def find_bans(tree: ast.Module) -> list[tuple[int, str]]:
             if kind is not None:
                 found.append((getattr(node, "lineno", 0), kind))
     return sorted(found)
+
+
+def cloud_clock_refs(root: Path, legacy: frozenset[str]) -> list[str]:
+    """`path:line` of every clock-as-a-value in the cloud packages (reported, not failed)."""
+    hits: list[str] = []
+    for package in CLOUD_PACKAGES:
+        for path in non_legacy_files(root, legacy, package):
+            for line, kind in find_bans(parse_module(path)):
+                if kind == "clock_ref":
+                    hits.append(f"{relpath(root, path)}:{line}")
+    return hits
 
 
 def check_bans(
