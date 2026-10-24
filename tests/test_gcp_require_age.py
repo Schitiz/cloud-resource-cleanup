@@ -138,11 +138,11 @@ def test_bug_124_dry_run_and_positive_detach_age_still_build(
     monkeypatch.setattr("crc.gcp.disk_cleaner.ComputeDiskClient", lambda: client)
     options: dict[str, Any] = {"project_id": PROJECT}
     dry = get("gcp", "disk")(context(options, dry_run=True))
-    assert deleted_ids(run_engine(dry, "disk", dry_run=True)) == ["young", "old"]
+    assert deleted_ids(run_engine(dry, "disk", dry_run=True, now=NOW)) == ["young", "old"]
     assert client.calls == []
     options["detach_age"] = {"hours": 2}
     real = get("gcp", "disk")(context(options))
-    assert deleted_ids(run_engine(real, "disk")) == ["old"]
+    assert deleted_ids(run_engine(real, "disk", now=NOW)) == ["old"]
     assert client.calls == [("delete_disk", "old")]
 
 
@@ -162,7 +162,7 @@ def test_bug_183_dry_run_without_age_still_lists_every_instance(
     client = Client([instance("young", days=0.001), instance("old", days=30)])
     monkeypatch.setattr("crc.gcp.vm_cleaner.ComputeVmClient", lambda: client)
     built = get("gcp", "vm")(context({"project_id": PROJECT}, dry_run=True, op=op))
-    outcome = run_engine(built, "vm", dry_run=True)
+    outcome = run_engine(built, "vm", dry_run=True, now=NOW)
     assert deleted_ids(outcome) == ["young", "old"]
     assert client.calls == []
 
@@ -180,7 +180,7 @@ def test_bug_183_custom_age_label_still_replaces_the_positive_age(
     )
     monkeypatch.setattr("crc.gcp.vm_cleaner.ComputeVmClient", lambda: client)
     options = {"project_id": PROJECT, "age": {"days": 1}, "custom_age_tag_key": "ttl"}
-    outcome = run_engine(get("gcp", "vm")(context(options)), "vm")
+    outcome = run_engine(get("gcp", "vm")(context(options)), "vm", now=NOW)
     assert deleted_ids(outcome) == ["short-ttl", "no-label"]
 
 
@@ -197,7 +197,7 @@ def test_bug_062_dry_run_without_age_lists_every_reserved_address(
     client = Client([address("a", stamp(minutes=1)), address("b", stamp(days=40))])
     monkeypatch.setattr("crc.gcp.ip_cleaner.ComputeIpClient", lambda: client)
     built = get("gcp", "ip")(context({"project_id": PROJECT}, dry_run=True))
-    assert deleted_ids(run_engine(built, "ip", dry_run=True)) == ["a", "b"]
+    assert deleted_ids(run_engine(built, "ip", dry_run=True, now=NOW)) == ["a", "b"]
     assert client.calls == []
 
 
@@ -212,7 +212,7 @@ def test_bug_062_only_addresses_old_enough_are_deleted(monkeypatch: pytest.Monke
     )
     monkeypatch.setattr("crc.gcp.ip_cleaner.ComputeIpClient", lambda: client)
     options = {"project_id": PROJECT, "age": {"days": 1}}
-    outcome = run_engine(get("gcp", "ip")(context(options)), "ip")
+    outcome = run_engine(get("gcp", "ip")(context(options)), "ip", now=NOW)
     assert deleted_ids(outcome) == ["old", "exactly-a-day"]
     assert client.calls == [("delete_address", "old"), ("delete_address", "exactly-a-day")]
 
@@ -223,16 +223,16 @@ def test_bug_062_hours_age_and_another_utc_offset() -> None:
     )
     client = Client([address("a", created.strftime("%Y-%m-%dT%H:%M:%S.%f%z"))])
     keep = IpCleaner(client, PROJECT, None, None, age={"hours": 8})
-    assert deleted_ids(run_engine(keep, "ip", dry_run=True)) == []
+    assert deleted_ids(run_engine(keep, "ip", dry_run=True, now=NOW)) == []
     take = IpCleaner(client, PROJECT, None, None, age={"hours": 6})
-    assert deleted_ids(run_engine(take, "ip", dry_run=True)) == ["a"]
+    assert deleted_ids(run_engine(take, "ip", dry_run=True, now=NOW)) == ["a"]
 
 
 @pytest.mark.parametrize("created", ["", "yesterday", "2026-02-01T00:00:00-08:00", None])
 def test_bug_062_an_unreadable_creation_timestamp_keeps_the_address(created: Any) -> None:
     client = Client([address("a", created), address("b", stamp(days=3))])
     cleaner = IpCleaner(client, PROJECT, None, None, age={"days": 1})
-    outcome = run_engine(cleaner, "ip")
+    outcome = run_engine(cleaner, "ip", now=NOW)
     assert deleted_ids(outcome) == ["b"]
     assert client.calls == [("delete_address", "b")]
 

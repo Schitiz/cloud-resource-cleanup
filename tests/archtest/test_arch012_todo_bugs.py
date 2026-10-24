@@ -7,7 +7,7 @@ import pytest
 from tests.archtest._common import REPO_ROOT
 from tests.archtest.todo_bugs import check_todo_bugs, tracked_bug_rows
 
-MIN_REQUIRED = 5
+MIN_OPEN = 5  # the register always holds open medium/low rows; 0 means the parser broke
 HEADER = "| ID | Title | Loc | Main | Effect | Risk | Found | Status |\n|---|---|---|---|---|---|---|---|\n"  # noqa: E501
 WORD = "TO" + "DO"
 PREFIX = WORD + "(BUG-"
@@ -40,7 +40,8 @@ def test_arch012_repository_todos_match_the_register() -> None:
 
 def test_arch012_register_requires_the_open_critical_and_high_rows() -> None:
     open_ids, required = tracked_bug_rows(REPO_ROOT)
-    assert len(required) >= MIN_REQUIRED
+    # Every critical/high row may be fixed; the open medium/low rows prove the register parses.
+    assert len(open_ids) >= MIN_OPEN
     assert required <= open_ids
 
 
