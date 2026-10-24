@@ -604,14 +604,26 @@ def test_no_oracle_abbreviation_changed_meaning(
 
 
 def _parser_with(
-    oracle: ModuleType, monkeypatch: pytest.MonkeyPatch, resource_choice: str | None = None
+    oracle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    resource_choice: str | None = None,
+    fake_flag: bool = True,
 ) -> tuple[argparse.ArgumentParser, argparse.ArgumentParser]:
+    """An oracle parser and a copy with a fake flag; the checker runs on an empty ADDED table."""
     old = _built_parser(oracle.get_argparser, monkeypatch)
     new = _built_parser(oracle.get_argparser, monkeypatch)
-    new.add_argument("--fake_flag", default=None, help="fake")
+    if fake_flag:
+        new.add_argument("--fake_flag", default=None, help="fake")
     if resource_choice is not None:
         action = next(a for a in new._actions if "--resource" in a.option_strings)
         action.choices = [*(action.choices or []), resource_choice]
+    for name, empty in (
+        ("ADDED_FLAGS", ()),
+        ("ADDED_CHOICES", ()),
+        ("ADDED_RESOURCES", ()),
+        ("RESOURCE_HELP", None),
+    ):
+        monkeypatch.setattr(added_args, name, empty)
     return new, old
 
 
@@ -655,8 +667,7 @@ def test_listed_flag_and_resource_pass_and_the_rest_stays_exact(
 def test_a_changed_oracle_flag_always_fails(
     oracle: ModuleType, monkeypatch: pytest.MonkeyPatch, change: str
 ) -> None:
-    new = _built_parser(oracle.get_argparser, monkeypatch)
-    old = _built_parser(oracle.get_argparser, monkeypatch)
+    new, old = _parser_with(oracle, monkeypatch, fake_flag=False)
     cloud = next(a for a in new._actions if "--cloud" in a.option_strings)
     if change == "default":
         cloud.default = "gcp"
