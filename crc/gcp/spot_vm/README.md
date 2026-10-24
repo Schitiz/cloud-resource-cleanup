@@ -12,13 +12,11 @@ Modules:
 - `operations.py`: waiting for a zone or region operation.
 - `disks.py`: leftover disk references, label check and delete.
 - `cleaner.py`: `SpotVMCleaner`, its summary log and the registry factory.
-- `adapter.py`: the `SpotVM` class kept for the hash-locked safety test (`tests/test_gcp_spot_vm_fix.py`).
 
 ## Public API
 
 The package init re-exports the public names below.
 
-- `SpotVM`: the class the hash-locked safety test calls (delete(), get_deleted, delete_count, get_deleted_disks, instance_names_to_delete, disks_to_delete, service_name, service_version, default_instance_state, time_format, INSTANCE_DELETE_WAIT_SEC, INSTANCE_POLL_INTERVAL_SEC); the optional eighth and ninth constructor arguments inject a client and a clock.
 - `SpotVMCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus zones, list_zone, scan_zone, evaluate, preview_instance and apply_instance).
 - `build_spot_cleaner()`: registry factory behind @register("gcp", "spot_instances").
 - `log_summary()`: the closing log lines (no VMs warning, VM list, leftover disk list).
@@ -50,7 +48,7 @@ The package init re-exports the public names below.
 - A leftover disk is kept when its own labels match `exception_labels` or `notags`, and (BUG-242, fixed) when `custom_age_tag_key` is set and the disk carries that label: a disk younger than its custom age (`creationTimestamp` of the disk, skip reason `disk_too_young`), an invalid label (`disk_invalid_age_tag`) or an unreadable `creationTimestamp` (`disk_age_unknown`) keeps the disk. A disk without the label is checked as before. The disk's `filter_labels` and `users` are still not read (rest of BUG-242, `docs/archive/reviews/FIX-GCP-SPOT.md`).
 - If the delete call fails, or its operation errors, times out (`INSTANCE_DELETE_WAIT_SEC`, default 180 s) or has no name, the VM is recorded as failed (never as deleted; BUG-229 is not changed) and its leftover disks are kept. Errors per VM are logged (`Error processing GCP Spot VM ...`) and the run goes on; a zone listing error skips the zone; the zone listing itself, the instances client and the session errors propagate unchanged (no connectivity fallback).
 - The wait reads `time.monotonic` and `time.sleep` (ARCH-003 bans `time.time`).
-- `SpotVM.delete()` acts per zone (list, then VM by VM: filter, delete, wait, disks); the registered Cleaner lists and filters every zone first, then deletes, so an error while listing a later zone stops before any delete, and in a dry run `plan()` also reads the leftover disks. Quirks are in `docs/refactor/BUGS.md` (`BUG-228` to `BUG-243`).
+- `plan()` lists and filters every zone first, then `apply()` deletes, so an error while listing a later zone stops before any delete, and in a dry run `plan()` also reads the leftover disks. Quirks are in `docs/refactor/BUGS.md` (`BUG-228` to `BUG-243`).
 - Do not call real cloud APIs in tests; mock every SDK client.
 
 ## Extension Rules

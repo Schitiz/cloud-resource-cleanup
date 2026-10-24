@@ -5,8 +5,7 @@
 `DiskCleaner` implements the `crc.core.cleaner.Cleaner` contract for available (unattached)
 EBS volumes. Region by region `plan_region()` lists, filters and applies the CloudWatch
 detach-age guard (read-only), `note_dry_run()` records the dry-run candidates and
-`apply_region()` calls `delete_volume`. `Disk` (the package `__init__`) drives the same steps
-region by region in the call and log order of `main`.
+`apply_region()` calls `delete_volume`.
 """
 
 import datetime
@@ -217,5 +216,5 @@ class DiskCleaner:
 @register("aws", "disk")
 def build_disk_cleaner(context: RunContext) -> Cleaner:
     """Registry factory. Options: filter_tags, exception_tags, notags, name_regex,
-    exception_regex, custom_age_tag_key, age and detach_age (as `crc.py` passes them)."""
+    exception_regex, custom_age_tag_key, age and detach_age."""
     return DiskCleaner(build_settings(context.options), DiskRuntime())

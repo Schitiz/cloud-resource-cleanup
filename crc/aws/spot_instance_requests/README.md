@@ -11,18 +11,14 @@ filter, age), `volume_tags.py` (volume tag reads), `lookups.py` (instance and le
 reads), `sweep.py` (sweep gates), `volumes.py` (re-exports those three), `preview.py`
 (dry-run path, reads only), `leftover.py` (marker tags, wait and delete), `cleanup.py` (one
 request, region sweep), `runtime.py` (`SpotRuntime`, settings), `regions.py` (region listing,
-error isolation), `summary.py` (closing log lines), `cleaner.py` (`plan()` / `apply()`),
-`adapter.py` (the `SpotInstanceRequests` class, kept for the hash-locked safety tests).
+error isolation), `summary.py` (closing log lines), `cleaner.py` (`plan()` / `apply()`).
 
 ## Public API
 
-from crc.aws.spot_instance_requests import SpotInstanceRequests keeps working.
-
-- `SpotInstanceRequests`: class the hash-locked safety tests build (delete(), get_deleted, delete_count, spot_requests_to_delete, instance_ids_to_delete, volumes_to_delete); runs the cleaner region by region.
 - `SpotRequestCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus apply_region).
 - `build_spot_request_cleaner`: registry factory behind @register("aws", "spot_instance_requests"); reads filter_tags, exception_tags, notags, age (required) and custom_age_tag_key from RunContext.options.
 - `SpotRuntime`: (runtime.py) frozen dataclass with the injected client factory, region lister, clock and `Waiter`.
-- `settings_from_options` (runtime.py), `log_summary` (summary.py), `list_matches`, `guarded_sweep`, `guarded_cleanup` (regions.py): helpers shared by the cleaner and `SpotInstanceRequests`, re-exported by cleaner.py (settings, closing warnings, per-region listing, error isolation).
+- `settings_from_options` (runtime.py), `log_summary` (summary.py), `list_matches`, `guarded_sweep`, `guarded_cleanup` (regions.py): helpers used by the cleaner and re-exported by cleaner.py (settings, closing warnings, per-region listing, error isolation).
 - `SpotClient`, `VolumePaginator`: Protocols of the EC2 calls used; tests pass fakes. `boto3_client`, `all_regions`: the real client and region factories.
 - `SpotSettings`, `RequestMatch`, `SpotState`, `Waiter`, `Inspection`: frozen/slot dataclasses of model.py.
 - `tag_map`, `should_skip`, `matches_filter`, `volume_tags_protect`, `is_crc_marker`, `own_volume_tags`, `own_tags_for_protect`, `effective_sweep_tags`, `scope_tags_for_volume`: pure decisions (rules.py, through crc.core.policy).
@@ -48,7 +44,7 @@ from crc.aws.spot_instance_requests import SpotInstanceRequests keeps working.
 2. Keep reads in `requests.py`, `volume_tags.py`, `lookups.py`, `sweep.py`, `preview.py` and mutations in `leftover.py`,
    `cleanup.py` (ARCH-005). Decide through `crc.core.policy` and `crc.core.age`.
 3. Changes need `tests/test_aws_spot_instance_requests_parity.py` (oracle
-   `tests/legacy/aws_spot_instance_requests.txt`, a frozen copy of `main`, never edit it),
+   `tests/legacy/aws_spot_instance_requests.txt`, never edit it),
    `tests/test_aws_spot_instance_requests_cleaner.py` and `tests/test_aws_spot_instance_requests_engine.py`
    to stay green.
 4. Every file at most 250 lines; update this README and the symbol list above.

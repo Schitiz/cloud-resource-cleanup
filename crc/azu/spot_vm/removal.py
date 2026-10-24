@@ -33,7 +33,7 @@ NicDeleter = Callable[[SpotNetworkClient, str, str, bool, list[str]], None]
 
 @dataclass(frozen=True, slots=True)
 class RemovalOps:
-    """The two shared delete helpers; tests (and the legacy adapter) can swap them."""
+    """The two shared delete helpers; tests can swap them."""
 
     delete_vm: VmDeleter = begin_delete_vm_and_wait
     delete_nic: NicDeleter = delete_vm_primary_nic

@@ -1,9 +1,8 @@
-"""Parity: `crc.aws.disk.Disk` against main's version (`tests/legacy/aws_disk.txt`).
+"""Parity: `crc.aws.disk` against main's version (`tests/legacy/aws_disk.txt`).
 
-Both run against the same fake `boto3.client`; SDK calls (in order), results, log records,
-stdout and raised errors must be identical for every case. The table runs twice: through the
-legacy adapter class and through the registered Cleaner (`plan()` then `apply()`, `plan()`
-alone in a dry run).
+Both run against the same fake `boto3.client`; SDK calls, results, log records, stdout and
+raised errors must match for every case. The table runs twice: through `crc.core.engine.run`
+and through the registered Cleaner (`plan()` then `apply()`, `plan()` alone in a dry run).
 """
 
 import dataclasses
@@ -18,13 +17,18 @@ from typing import Any
 import pytest
 from botocore.exceptions import ClientError, ConnectTimeoutError, EndpointConnectionError
 
-from crc.aws.disk import Disk, DiskCleaner, build_disk_cleaner
-from crc.core import registry
+from crc.aws.disk import DiskCleaner, build_disk_cleaner
+from crc.aws.disk.settings import normalize_age
+from crc.aws.disk.volumes import server_filters
+from crc.core import age as core_age
+from crc.core import policy, registry
 from crc.core.cleaner import Operation, RunContext
+from tests.helpers_ad_spot_engine import run_through_engine
 from tests.helpers_log_fix import expected_logs
 from tests.log_fix_aws_compute import RULES
 
 FIXED_BUGS = {"BUG-356"}
+
 
 @dataclass(frozen=True)
 class Divergence:
@@ -921,10 +925,6 @@ def _legacy(case: Case) -> Any:
     return _load_oracle().Disk(case.dry_run, **_kwargs(case))
 
 
-def _new(case: Case) -> Any:
-    return Disk(case.dry_run, clock=lambda: NOW, **_kwargs(case))
-
-
 def _prepare(
     case: Case,
     monkeypatch: pytest.MonkeyPatch,
@@ -971,6 +971,32 @@ def _run(
     return Outcome(aws.calls, deleted, count, logs, out, error)
 
 
+def _run_engine(
+    case: Case,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> Outcome:
+    aws = _prepare(case, monkeypatch, caplog, capsys)
+    ctx = RunContext(
+        dry_run=case.dry_run,
+        operation=Operation.DELETE,
+        options=_kwargs(case),
+        now=NOW,
+    )
+    error: tuple[str, str] | None = None
+    deleted: list[str] = []
+    try:
+        outcome = run_through_engine("aws", "disk", build_disk_cleaner, ctx)
+        if outcome.result is None:
+            deleted = [c.id for c in outcome.plan.candidates]
+        else:
+            deleted = list(outcome.result.succeeded)
+    except Exception as e:
+        error = (type(e).__name__, str(e))
+    return Outcome(aws.calls, deleted, len(deleted), _logs(caplog), capsys.readouterr().out, error)
+
+
 def _run_cleaner(
     case: Case,
     monkeypatch: pytest.MonkeyPatch,
@@ -1003,48 +1029,6 @@ def debug_logs(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG)
 
 
-@pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
-def test_matches_main(
-    case: Case,
-    debug_logs: None,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
-    old = dataclasses.replace(old, logs=expected_logs(old.logs, FIXED_BUGS, rules=RULES))
-    if case.id in DIVERGING:
-        _check_divergence(case, old, new)
-        return
-    assert new.calls == old.calls
-    assert new.error == old.error
-    assert new.deleted == old.deleted
-    assert new.count == old.count
-    assert new.logs == old.logs
-    assert new.stdout == old.stdout
-
-
-def test_skip_lines_are_debug_only_in_new_code(
-    debug_logs: None,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """BUG-356: every INFO "Skipping volume ..." line of the oracle is DEBUG now."""
-    differing = 0
-    for case in CASES:
-        old = _run(_legacy, case, monkeypatch, caplog, capsys)
-        new = _run(_new, case, monkeypatch, caplog, capsys)
-        if case.id in DIVERGING:
-            skip_levels = {lvl for _, lvl, msg in new.logs if msg.startswith("Skipping volume ")}
-            assert skip_levels == {logging.DEBUG}, case.id
-            continue
-        assert new.logs == expected_logs(old.logs, FIXED_BUGS, rules=RULES), case.id
-        differing += old.logs != new.logs
-    assert differing > 0
-
-
 def _is_delete_call(call: tuple[Any, ...]) -> bool:
     return bool(call[0] == "delete_volume")
 
@@ -1057,20 +1041,7 @@ def _interleaves(case: Case) -> bool:
     return not case.dry_run and len(case.regions) > 1
 
 
-@pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
-def test_cleaner_protocol_matches_main(
-    case: Case,
-    debug_logs: None,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """A dry run (plan only) and a single region are identical to main, call for call and log
-    line for line. A real run over several regions lists every region before it deletes, so
-    only the interleaving of the delete calls and delete log lines with the other regions'
-    listing differs; each stream, the results and the errors are equal."""
-    old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run_cleaner(case, monkeypatch, caplog, capsys)
+def _assert_matches_main(case: Case, old: Outcome, new: Outcome) -> None:
     old = dataclasses.replace(old, logs=expected_logs(old.logs, FIXED_BUGS, rules=RULES))
     if case.id in DIVERGING:
         _check_divergence(case, old, new)
@@ -1099,6 +1070,56 @@ def test_cleaner_protocol_matches_main(
         assert [r for r in new.logs if not _is_delete_log(r) and "AWS EBS" not in r[2]] == [
             r for r in old.logs if not _is_delete_log(r) and "AWS EBS" not in r[2]
         ]
+
+
+@pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
+def test_engine_matches_main(
+    case: Case,
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    old = _run(_legacy, case, monkeypatch, caplog, capsys)
+    new = _run_engine(case, monkeypatch, caplog, capsys)
+    _assert_matches_main(case, old, new)
+
+
+def test_skip_lines_are_debug_only_in_new_code(
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """BUG-356: every INFO "Skipping volume ..." line of the oracle is DEBUG now."""
+    differing = 0
+    for case in CASES:
+        old = _run(_legacy, case, monkeypatch, caplog, capsys)
+        new = _run_engine(case, monkeypatch, caplog, capsys)
+        if case.id in DIVERGING:
+            skip_levels = {lvl for _, lvl, msg in new.logs if msg.startswith("Skipping volume ")}
+            assert skip_levels == {logging.DEBUG}, case.id
+            continue
+        assert sorted(new.logs) == sorted(expected_logs(old.logs, FIXED_BUGS, rules=RULES)), case.id
+        differing += sorted(old.logs) != sorted(new.logs)
+    assert differing > 0
+
+
+@pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
+def test_cleaner_protocol_matches_main(
+    case: Case,
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A dry run (plan only) and a single region are identical to main, call for call and log
+    line for line. A real run over several regions lists every region before it deletes, so
+    only the interleaving of the delete calls and delete log lines with the other regions'
+    listing differs; each stream, the results and the errors are equal."""
+    old = _run(_legacy, case, monkeypatch, caplog, capsys)
+    new = _run_cleaner(case, monkeypatch, caplog, capsys)
+    _assert_matches_main(case, old, new)
 
 
 @pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
@@ -1180,7 +1201,8 @@ FIXED_QUIRKS: Sequence[FixedQuirk] = [
         lambda o: (
             o.deleted == ["us-west-2/a yb_task=itest"]
             and "Skipping volume b: detach time unknown and CreateTime younger than "
-            "age plus detach_age" in _flatten(o)
+            "age plus detach_age"
+            in _flatten(o)
         ),
     ),
 ]
@@ -1376,7 +1398,7 @@ def test_quirk_is_preserved(
 ) -> None:
     selected = next(c for c in CASES if c.id == case_id)
     old = _run(_legacy, selected, monkeypatch, caplog, capsys)
-    new = _run(_new, selected, monkeypatch, caplog, capsys)
+    new = _run_engine(selected, monkeypatch, caplog, capsys)
     # BUG-004/BUG-016: the oracle class inherits the live crc.service.Service, so it cannot
     # show the old custom-age-tag behaviour here; tests/test_crc_service_parity.py pins it
     # against the frozen crc_service oracle. Fixed cases assert the new outcome only.
@@ -1399,7 +1421,7 @@ def test_fixed_quirk_is_pinned(
 ) -> None:
     selected = next(c for c in CASES if c.id == quirk.case_id)
     old = _run(_legacy, selected, monkeypatch, caplog, capsys)
-    new = _run(_new, selected, monkeypatch, caplog, capsys)
+    new = _run_engine(selected, monkeypatch, caplog, capsys)
     assert quirk.old_check(old), f"oracle no longer shows {quirk.bug_id}"
     assert not quirk.new_check(old), f"oracle unexpectedly satisfies fixed check for {quirk.bug_id}"
     assert quirk.new_check(new), quirk.bug_id
@@ -1433,21 +1455,30 @@ def test_second_delete_accumulates_and_count_logs_like_main(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     selected = case("two-calls", one(vol("a")))
-    for builder in (_legacy, _new):
-        _prepare(selected, monkeypatch, caplog, capsys)
-        disk = builder(selected)
-        disk.delete()
-        disk.delete()
-        assert disk.get_deleted == [
-            "us-west-2/a yb_task=itest",
-            "us-west-2/a yb_task=itest",
-        ]
-        caplog.clear()
-        assert disk.count == TWO
-        assert _logs(caplog) == [("root", logging.INFO, "count of items in disks_to_delete: 2")]
+    aws = _prepare(selected, monkeypatch, caplog, capsys)
+    disk = _legacy(selected)
+    disk.delete()
+    disk.delete()
+    assert disk.get_deleted == [
+        "us-west-2/a yb_task=itest",
+        "us-west-2/a yb_task=itest",
+    ]
+    old_calls = list(aws.calls)
+    caplog.clear()
+    assert disk.count == TWO
+    assert _logs(caplog) == [("root", logging.INFO, "count of items in disks_to_delete: 2")]
+    aws = _prepare(selected, monkeypatch, caplog, capsys)
+    ctx = RunContext(dry_run=False, operation=Operation.DELETE, options=_kwargs(selected), now=NOW)
+    deleted: list[str] = []
+    for _ in range(2):
+        outcome = run_through_engine("aws", "disk", build_disk_cleaner, ctx)
+        assert outcome.result is not None
+        deleted.extend(outcome.result.succeeded)
+    assert deleted == ["us-west-2/a yb_task=itest", "us-west-2/a yb_task=itest"]
+    assert aws.calls == old_calls
 
 
-def test_adapter_private_helpers_match_main(
+def test_cleaner_helpers_match_main(
     debug_logs: None,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -1467,14 +1498,16 @@ def test_adapter_private_helpers_match_main(
     )
     _prepare(selected, monkeypatch, caplog, capsys)
     old = _legacy(selected)
-    new = _new(selected)
-    assert new.SENSITIVE_YB_TASK == old.SENSITIVE_YB_TASK
-    assert new.AGE_KEYS == old.AGE_KEYS
-    assert new._normalize_age({"days": "2", "hours": 4}, "age") == old._normalize_age(
+    ctx = RunContext(dry_run=False, operation=Operation.DELETE, options=_kwargs(selected), now=NOW)
+    cleaner = build_disk_cleaner(ctx)
+    assert isinstance(cleaner, DiskCleaner)
+    assert policy.SENSITIVE_YB_TASK == old.SENSITIVE_YB_TASK
+    assert core_age.AGE_KEYS == old.AGE_KEYS
+    assert normalize_age({"days": "2", "hours": 4}, "age") == old._normalize_age(
         {"days": "2", "hours": 4}, "age"
     )
-    assert new._age_to_timedelta(5) == old._age_to_timedelta(5)
-    assert new._volume_filters() == old._volume_filters()
+    assert policy.age_to_timedelta(5) == old._age_to_timedelta(5)
+    assert server_filters(_kwargs(selected)["filter_tags"]) == old._volume_filters()
     for sample in (
         {"yb_task": "itest", "yb_owner": "qa"},
         {"yb_task": "prod", "yb_owner": "qa"},
@@ -1485,14 +1518,15 @@ def test_adapter_private_helpers_match_main(
         old_skip = old._should_skip(sample, "foo", "vol-1")
         old_logs = _logs(caplog)
         caplog.clear()
-        assert new._matches_filter_tags(sample) == old_match
-        assert new._should_skip(sample, "foo", "vol-1") == old_skip
+        assert cleaner.filter.matches_filter_tags(sample) == old_match
+        assert cleaner.filter.should_skip(sample, "foo", "vol-1") == old_skip
         assert _logs(caplog) == expected_logs(old_logs, FIXED_BUGS, rules=RULES)
     candidate_vol = vol(
         "idle", tag_list=[tag("yb_task", "itest"), tag("yb_owner", "qa"), tag("Name", "foo")]
     )
-    assert new._is_candidate(candidate_vol) == old._is_candidate(candidate_vol)
-    vols = [vol("idle"), vol("busy")]
-    assert new._drop_recently_attached("us-west-2", vols) == old._drop_recently_attached(
-        "us-west-2", vols
-    )
+    assert cleaner.filter.is_candidate(candidate_vol, NOW) == old._is_candidate(candidate_vol)
+    vols: list[Mapping[str, Any]] = [vol("idle"), vol("busy")]
+    window = policy.age_to_timedelta(selected.opts["detach_age"])
+    assert cleaner.detach_guard.drop_recently_attached(
+        "us-west-2", vols, window, NOW
+    ) == old._drop_recently_attached("us-west-2", vols)

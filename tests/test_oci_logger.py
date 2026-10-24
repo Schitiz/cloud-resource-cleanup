@@ -13,10 +13,11 @@ from oci.exceptions import ConnectTimeout
 from crc.core import logger
 from crc.core.cleaner import Operation, RunContext
 from crc.oci.disk import DiskCleaner, DiskSettings
-from crc.oci.spot_vm import SpotVM, SpotVmCleaner, SpotVmRuntime
+from crc.oci.spot_vm import SpotVmCleaner
 from crc.oci.spot_vm.client import RegionClients
 from crc.oci.spot_vm.decide import SpotVmSettings
 from crc.oci.vm import VM, VmCleaner, VmRuntime, VmSettings
+from tests.helpers_ad_spot_engine import run_through_engine
 from tests.helpers_wc_oci_disk import run_disk
 
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=datetime.UTC)
@@ -374,18 +375,30 @@ def _paginate(call: Any, **kwargs: Any) -> Any:
     return call(**kwargs)
 
 
-def _spot(client: SpotClient, *, dry_run: bool) -> Any:
-    runtime = SpotVmRuntime(
-        clients_factory=lambda region: RegionClients(client, client, "cmp"),
-        list_regions=lambda: ["r1"],
-        pager=_paginate,
-        clock=lambda: NOW,
+def _run_spot(
+    client: SpotClient,
+    *,
+    dry_run: bool,
+    exception_tags: Mapping[str, Sequence[str]] | None = None,
+) -> None:
+    settings = SpotVmSettings(
+        filter_tags=FILTER,
+        exception_tags=exception_tags or {},
+        age=AGE,
     )
-    return SpotVM(dry_run, FILTER, {}, AGE, "", {}, runtime)
+    cleaner = SpotVmCleaner(
+        lambda region: RegionClients(client, client, "cmp"),
+        lambda: ["r1"],
+        settings,
+        _paginate,
+        engine=True,
+    )
+    ctx = RunContext(dry_run=dry_run, operation=Operation.DELETE, options={}, now=NOW)
+    run_through_engine("oci", "spot_instances", lambda _c: cleaner, ctx)
 
 
 @pytest.mark.parametrize(("dry_run", "kind"), [(False, "deleted"), (True, "would_delete")])
-def test_spot_vm_adapter_reports_instance_and_volume_actions(
+def test_spot_vm_engine_reports_instance_and_volume_actions(
     caplog: pytest.LogCaptureFixture, dry_run: bool, kind: str
 ) -> None:
     caplog.set_level(logging.DEBUG)
@@ -394,19 +407,23 @@ def test_spot_vm_adapter_reports_instance_and_volume_actions(
         [spot_inst("a"), spot_inst("young", hours=1), spot_inst("od", preemptible=False)]
     )
     client.volume_tags = {"v-a": {}}
-    _spot(client, dry_run=dry_run).delete()
+    _run_spot(client, dry_run=dry_run)
     logger.finish()
     done = 0 if dry_run else 2
-    assert _lines(caplog, "ACTION", "REGION", "SKIPPED", "RESULT") == [
+    actions = [
         (
             logging.INFO,
             f"ACTION {kind} cloud=oci resource=spot_instances region=r1 id=a name=name-a",
         ),
         (logging.INFO, f"ACTION {kind} cloud=oci resource=spot_instances region=r1 id=v-a name=-"),
-        (
-            logging.INFO,
-            "REGION cloud=oci resource=spot_instances region=r1 scanned=3 selected=1 seconds=0",
-        ),
+    ]
+    region = (
+        logging.INFO,
+        "REGION cloud=oci resource=spot_instances region=r1 scanned=3 selected=1 seconds=0",
+    )
+    ordered = [region, *actions] if not dry_run else [*actions, region]
+    assert _lines(caplog, "ACTION", "REGION", "SKIPPED", "RESULT") == [
+        *ordered,
         (logging.INFO, "SKIPPED cloud=oci resource=spot_instances reason=not_preemptible count=1"),
         (logging.INFO, "SKIPPED cloud=oci resource=spot_instances reason=too_young count=1"),
         (
@@ -424,9 +441,7 @@ def test_spot_vm_protected_leftover_volume_is_debug_and_counted(
     caplog.set_level(logging.DEBUG)
     _begin("spot_instances", dry_run=False)
     client = SpotClient([spot_inst("a")], {"v-a": {"keep": "1"}})
-    spot = _spot(client, dry_run=False)
-    spot.exception_tags = {"keep": ["1"]}
-    spot.delete()
+    _run_spot(client, dry_run=False, exception_tags={"keep": ["1"]})
     logger.finish()
     assert _lines(caplog, "Skipping leftover") == [
         (logging.DEBUG, "Skipping leftover volume v-a: exception_tags/notags")
@@ -444,7 +459,7 @@ def test_spot_vm_attachment_failure_is_a_listed_failure(caplog: pytest.LogCaptur
     _begin("spot_instances", dry_run=False)
     client = SpotClient([spot_inst("a")])
     client.fail_attachments = True
-    _spot(client, dry_run=False).delete()
+    _run_spot(client, dry_run=False)
     logger.finish()
     assert _lines(caplog, "ERRORS", "FAILED", "RESULT") == [
         (logging.ERROR, "ERRORS count=1"),
