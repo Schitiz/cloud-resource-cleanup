@@ -9,9 +9,10 @@ import pytest
 
 from crc.core.cleaner import Operation, RunContext
 from crc.core.registry import DEFAULT_REGISTRY
-from crc.oci.spot_vm import SpotVM, SpotVmCleaner, SpotVmRuntime
+from crc.oci.spot_vm import SpotVmCleaner
 from crc.oci.spot_vm.client import RegionClients
 from crc.oci.spot_vm.decide import SpotVmSettings
+from tests.helpers_ad_spot_engine import run_through_engine
 
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=datetime.UTC)
 MUTATING = ("terminate_instance", "delete_volume")
@@ -53,9 +54,7 @@ class FakeClient:
     ) -> Any:
         if volume_id:
             self.calls.append(("list_volume_attachments", volume_id))
-            owners = [
-                owner for owner, volumes in self.attachments.items() if volume_id in volumes
-            ]
+            owners = [owner for owner, volumes in self.attachments.items() if volume_id in volumes]
             data = [
                 types.SimpleNamespace(
                     volume_id=volume_id, lifecycle_state="ATTACHED", instance_id=owner
@@ -215,19 +214,17 @@ def test_registered_and_factory_requires_a_positive_age(monkeypatch: pytest.Monk
     assert isinstance(cleaner, SpotVmCleaner)
 
 
-def test_adapter_with_injected_fakes(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("OCI_PRIVATE_KEY_CONTENT", "not-a-key")
-    monkeypatch.setattr("crc.service.init_logging", lambda *args, **kwargs: None)
+def test_engine_runs_cleaner_with_injected_fakes() -> None:
     client = FakeClient([inst("a")], {"a": ["v1"]})
-    runtime = SpotVmRuntime(
-        clients_factory=lambda region: RegionClients(client, client, "cmp"),
-        list_regions=lambda: ["r1"],
-        pager=paginate,
-        clock=lambda: NOW,
+    cleaner = SpotVmCleaner(
+        lambda region: RegionClients(client, client, "cmp"),
+        lambda: ["r1"],
+        SpotVmSettings(filter_tags={"env": ["ci"]}, age={"hours": 5}),
+        paginate,
+        engine=True,
     )
-    spot = SpotVM(False, {"env": ["ci"]}, {}, {"hours": 5}, "", {}, runtime)
-    spot.delete()
-    assert spot.get_deleted == ["name-a"]
-    assert spot.get_deleted_volumes == ["v1"]
-    assert spot.delete_count == 1
+    outcome = run_through_engine("oci", "spot_instances", lambda _ctx: cleaner, context())
+    assert outcome.result is not None
+    assert outcome.result.succeeded == ("name-a",)
+    assert outcome.result.related["Disk"] == ("v1",)
     assert mutations(client) == [("terminate_instance", "a", "False"), ("delete_volume", "v1")]

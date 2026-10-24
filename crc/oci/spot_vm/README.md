@@ -15,7 +15,6 @@ Modules, split by responsibility:
 - `report.py`: summary and failure logging and the dry-run action records
 - `terminate.py`: terminating one planned instance, its leftover volumes and the dry-run volume check
 - `cleaner.py`: `SpotVmCleaner` (registered as `oci` / `spot_instances`) with its `plan()` / `apply()`, and the registry factory
-- `adapter.py`: `SpotVM`, the class that drives the cleaner region by region
 
 ## Public API
 
@@ -48,8 +47,6 @@ Modules, split by responsibility:
 - `log_instance_error()`: the per-instance "Error processing OCI preemptible instance" line.
 - `SpotVmCleaner`: the Cleaner (supports delete only, read-only plan, mutating apply, plus list_region, consider and terminate); built by the registry factory with the engine flag, see Safety Invariants.
 - `build_spot_vm_cleaner()`: registry factory behind @register("oci", "spot_instances"); reads filter_tags, exception_tags, notags, age (required, positive) and custom_age_tag_key from RunContext.options.
-- `SpotVmRuntime`: frozen dataclass with the injected clients factory, region lister, pager and clock (now) of `SpotVM`; unset parts come from Base and the SDK.
-- `SpotVM`: class the hash-locked safety test builds (delete(), get_deleted, get_deleted_volumes, delete_count, instance_names_to_delete, volumes_to_delete, and the private hooks the hash-locked safety test uses); subclasses Service and Base; acts instance by instance in a fixed order.
 - `record_dry_run()`: one dry-run ACTION record per planned instance and its leftover volumes (report module).
 - `terminate_instance()`: terminates one planned instance, waits for it and deletes its leftover volumes (terminate module).
 - `with_checked_volumes()`: in a dry run, the candidate with the leftover volumes that pass the tag check (terminate module).

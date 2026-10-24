@@ -2,7 +2,7 @@
 
 ## Purpose
 
-AWS EBS disk cleaner. Deletes available (unattached) EBS volumes in every region that pass the tag, name and age rules, with an optional CloudWatch detach-age guard. `DiskCleaner` is registered as `aws` / `disk`; `crc/cli` runs it through `crc.core.engine` (route in `crc/cli/routes/aws.py`). The `Disk` class stays importable for the hash-locked safety tests only.
+AWS EBS disk cleaner. Deletes available (unattached) EBS volumes in every region that pass the tag, name and age rules, with an optional CloudWatch detach-age guard. `DiskCleaner` is registered as `aws` / `disk`; `crc/cli` runs it through `crc.core.engine` (route in `crc/cli/routes/aws.py`).
 
 Modules, one per responsibility:
 
@@ -17,7 +17,6 @@ Modules, one per responsibility:
 
 - `region_guard()`: region level error policy (connectivity and unauthorised errors skip the region, others are logged and flagged).
 - `log_summary()`: the summary lines logged once all regions are done.
-- `Disk`: class the hash-locked safety tests build (delete(), get_deleted, count, disks_to_delete, age, detach_age); runs the cleaner region by region.
 - `DiskCleaner`: the Cleaner (supports, read-only plan, mutating apply, partial_succeeded for the report-then-reraise bridge mode, plus plan_region, note_dry_run, apply_region, region_guard and log_summary).
 - `DiskRuntime`: frozen dataclass with the injected EC2 and CloudWatch client factories and the region lister.
 - `build_disk_cleaner()`: registry factory behind the aws / disk registration; reads filter_tags, exception_tags, notags, name_regex, exception_regex, custom_age_tag_key, age and detach_age from RunContext.options.
@@ -57,7 +56,7 @@ Modules, one per responsibility:
 ## Extension Rules
 
 1. Behaviour changes need a `BUG-NNN` row in `docs/refactor/BUGS.md` and a test that fails without them.
-2. Keep filtering in `crc.core.policy` and age in `crc.core.age`; no `re`, clock reads or environment reads here (ARCH-003): `now` comes from `RunContext` (or the `Disk` clock).
+2. Keep filtering in `crc.core.policy` and age in `crc.core.age`; no `re`, clock reads or environment reads here (ARCH-003): `now` comes from `RunContext`.
 3. Keep every mutating call in `apply_region()`; `plan()` and what it calls stay read-only (ARCH-005).
-4. Changes need `tests/test_aws_disk_parity.py` (oracle `tests/legacy/aws_disk.txt`, a frozen copy of `main`, never edit it), `tests/test_aws_disk_cleaner.py` and `tests/test_aws_disk_engine.py` to stay green.
+4. Changes need `tests/test_aws_disk_parity.py` (oracle `tests/legacy/aws_disk.txt`, never edit it), `tests/test_aws_disk_cleaner.py` and `tests/test_aws_disk_engine.py` to stay green.
 5. Every file stays at most 250 lines; split by responsibility and give a new subpackage its own README.md.

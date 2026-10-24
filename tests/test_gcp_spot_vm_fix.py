@@ -1,7 +1,4 @@
-"""BUG-228 (unlabelled Spot VM), BUG-229 (failed delete), BUG-242 (disk age).
-
-`tests/test_gcp_spot_vm.py` is hash-locked, so the tests of the fixes live here.
-"""
+"""BUG-228 (unlabelled Spot VM), BUG-229 (failed delete), BUG-242 (disk age)."""
 
 import dataclasses
 import datetime
@@ -12,8 +9,9 @@ from typing import Any
 import pytest
 
 from crc.core import logger
-from crc.gcp.spot_vm import SpotSettings, SpotVM, SpotVMCleaner
+from crc.gcp.spot_vm import SpotSettings, SpotVMCleaner
 from crc.gcp.spot_vm.instances import reject_reason
+from tests.helpers_ad_spot_engine import run_through_engine
 from tests.test_gcp_spot_instances import (
     NOW,
     SETTINGS,
@@ -114,11 +112,15 @@ def test_bug_228_plan_and_apply_never_delete_an_unlabelled_vm(
     assert any(m.startswith("SKIPPED") and "reason=unlabelled count=1" in m for m in lines)
 
 
-def test_bug_228_adapter_dry_run_lists_only_labelled_vms() -> None:
+def test_bug_228_engine_dry_run_lists_only_labelled_vms() -> None:
     client = FakeClient([instance("u", labels={}), instance("l")])
-    spot = SpotVM(True, "p", {}, {}, {"days": 1}, None, {}, client=client, clock=clock)
-    spot.delete()
-    assert spot.get_deleted == ["l"]
+    outcome = run_through_engine(
+        "gcp",
+        "spot_instances",
+        lambda _ctx: SpotVMCleaner(client, SETTINGS),
+        context(dry_run=True),
+    )
+    assert [c.id for c in outcome.plan.candidates] == ["l"]
 
 
 def test_bug_228_unlabelled_vm_with_exception_labels_set_is_kept() -> None:
@@ -160,13 +162,17 @@ def test_bug_229_a_delete_that_does_not_complete_is_failed_not_deleted(
     assert any("failed=1" in m for m in lines if m.startswith("RESULT"))
 
 
-def test_bug_229_adapter_does_not_record_a_failed_delete() -> None:
+def test_bug_229_engine_does_not_record_a_failed_delete() -> None:
     client = OpClient([instance("a", [leftover("d1")])], {}, {"status": "DONE"})
-    spot = SpotVM(False, "p", {}, {}, {"days": 1}, None, {}, client=client, clock=clock)
-    spot.delete()
-    assert spot.get_deleted == []
-    assert spot.delete_count == 0
-    assert spot.get_deleted_disks == []
+    outcome = run_through_engine(
+        "gcp",
+        "spot_instances",
+        lambda _ctx: SpotVMCleaner(client, SETTINGS),
+        context(dry_run=False),
+    )
+    assert outcome.result is not None
+    assert outcome.result.succeeded == ()
+    assert outcome.result.related["Disk"] == ()
 
 
 # BUG-242
@@ -261,13 +267,18 @@ def test_bug_242_skip_is_counted_and_logged_at_debug(caplog: pytest.LogCaptureFi
     )
 
 
-def test_bug_242_adapter_honours_the_disk_custom_age() -> None:
+def test_bug_242_engine_honours_the_disk_custom_age() -> None:
     client = DiskClient(
         [instance("a", [leftover("d1")])],
         disk_resource(ago(days=1), **{AGE_KEY: "{'days': 5}"}),
     )
-    spot = SpotVM(False, "p", {}, {}, {"days": 1}, AGE_KEY, {}, client=client, clock=clock)
-    spot.delete()
-    assert spot.get_deleted == ["a"]
-    assert spot.get_deleted_disks == []
+    outcome = run_through_engine(
+        "gcp",
+        "spot_instances",
+        lambda _ctx: SpotVMCleaner(client, CUSTOM),
+        context(dry_run=False),
+    )
+    assert outcome.result is not None
+    assert outcome.result.succeeded == ("a",)
+    assert outcome.result.related["Disk"] == ()
     assert ("delete_disk", "zone", "z", "d1") not in client.calls

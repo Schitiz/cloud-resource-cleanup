@@ -1,12 +1,11 @@
 """Parity: `crc.gcp.spot_vm` against main (`tests/legacy/gcp_spot_vm.txt`).
 
-The oracle (main's `SpotVM`), the adapter `crc.gcp.spot_vm.SpotVM` and the registered `Cleaner`
-(factory with a `RunContext`, `plan()` then `apply()` unless dry run) run against the same fake
-`googleapiclient.discovery.build` and `compute_v1.InstancesClient`, with a frozen clock and a
-fake `time`. SDK calls (in order), results, count, log records, stdout and raised errors must be
-identical for the adapter. The Cleaner path is compared on results, errors, the calls after
-listing (deletes, operation polls, disk reads), log records and stdout. The wait for an operation
-reads `time.monotonic` in the new code (`ARCH-003` bans `time.time`); the fake clock serves both.
+The oracle (main's `SpotVM`) and the registered `Cleaner` (through `crc.core.engine.run` and
+through `plan()` / `apply()`) run against the same fake `googleapiclient.discovery.build` and
+`compute_v1.InstancesClient`, with a frozen clock and a fake `time`. Results, errors, the calls
+after listing (deletes, operation polls, disk reads), log records and stdout must match. The
+wait for an operation reads `time.monotonic` in the new code (`ARCH-003` bans `time.time`); the
+fake clock serves both.
 """
 
 import datetime
@@ -25,7 +24,8 @@ from google.auth.exceptions import DefaultCredentialsError
 
 from crc.core.cleaner import Operation, RunContext
 from crc.core.registry import get
-from crc.gcp.spot_vm import SpotVM
+from crc.gcp.spot_vm import build_spot_cleaner
+from tests.helpers_ad_spot_engine import run_through_engine
 from tests.helpers_log_fix import expected_logs
 from tests.log_fix_gcp import RULES
 
@@ -729,10 +729,6 @@ def _legacy(case: Case, gcp: FakeGcp) -> Any:
     return module.SpotVM(**_args(case))
 
 
-def _new(case: Case, gcp: FakeGcp) -> Any:
-    return SpotVM(**_args(case), clock=lambda: NOW)
-
-
 def _run(
     build: Callable[[Case, FakeGcp], Any],
     case: Case,
@@ -786,32 +782,10 @@ def _assert_diverges(case: Case, old: Outcome, new: Outcome) -> None:
         and not any(entry[2] == f"Deleting GCP Spot VM {n}" for n in removed)
     ]
     summary = [entry for entry in new.logs if entry[2].startswith("List of GCP")]
-    assert [e for e in new.logs if e not in summary and e[2] != NO_VMS[2]] == kept
+    assert Counter(e for e in new.logs if e not in summary and e[2] != NO_VMS[2]) == Counter(kept)
     assert (NO_VMS in new.logs) == (not deleted)
     assert summary[0][2].startswith(f"List of GCP Spot VMs (Total: {len(deleted)})")
     assert [n for n in removed if f"Deleting GCP Spot VM {n}" in [e[2] for e in new.logs]] == []
-
-
-@pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
-def test_matches_main(
-    case: Case,
-    debug_logs: None,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
-    if case.id in DIVERGES:
-        _assert_diverges(case, old, new)
-        return
-    assert new.calls == old.calls
-    assert new.error == old.error
-    assert new.deleted == old.deleted
-    assert new.disks == old.disks
-    assert new.count == old.count
-    assert new.logs == expected_logs(old.logs, BUGS, RULES)
-    assert new.stdout == old.stdout
 
 
 def _cleaner_context(case: Case) -> RunContext:
@@ -827,6 +801,32 @@ def _cleaner_context(case: Case) -> RunContext:
             "custom_age_tag_key": case.custom_age_tag_key,
         },
         now=NOW,
+    )
+
+
+def _run_engine(
+    case: Case,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> Outcome:
+    gcp = _setup(case, monkeypatch, caplog, capsys)
+    ctx = _cleaner_context(case)
+    error: tuple[str, str] | None = None
+    deleted: list[str] = []
+    disks: list[str] = []
+    try:
+        outcome = run_through_engine("gcp", "spot_instances", build_spot_cleaner, ctx)
+        if outcome.result is None:
+            deleted = [c.id for c in outcome.plan.candidates]
+            disks = list(outcome.plan.related.get("Disk", ()))
+        else:
+            deleted = list(outcome.result.succeeded)
+            disks = list(outcome.result.related.get("Disk", ()))
+    except Exception as e:
+        error = (type(e).__name__, str(e))
+    return Outcome(
+        gcp.calls, deleted, disks, len(deleted), _logs(caplog), capsys.readouterr().out, error
     )
 
 
@@ -878,6 +878,44 @@ def _listed_instances(case: Case) -> int:
     return sum(len(v) if isinstance(v, list) else 2 for v in case.zones.values())
 
 
+def _assert_matches_main(case: Case, old: Outcome, new: Outcome) -> None:
+    if new.error is not None:
+        assert case.fails_in_plan
+        assert new.error == old.error
+        assert not [c for c in new.calls if c[0] in {"instances.delete", "disks.delete"}]
+        return
+    assert old.error is None
+    if case.id in DIVERGES:
+        _assert_diverges(case, old, new)
+        return
+    assert new.deleted == old.deleted
+    assert new.disks == old.disks
+    assert new.count == old.count
+    assert new.stdout == old.stdout
+    assert _after_listing(new.calls) == _after_listing(old.calls)
+    assert [c for c in new.calls if c[0] == "instances.list"] == [
+        c for c in old.calls if c[0] == "instances.list"
+    ]
+    expected = expected_logs(old.logs, BUGS, RULES)
+    assert Counter(new.logs) == Counter(expected)
+    assert new.logs[-2:] == expected[-2:]
+    if _listed_instances(case) <= 1:
+        assert new.logs == expected
+
+
+@pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
+def test_engine_matches_main(
+    case: Case,
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    old = _run(_legacy, case, monkeypatch, caplog, capsys)
+    new = _run_engine(case, monkeypatch, caplog, capsys)
+    _assert_matches_main(case, old, new)
+
+
 @pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
 def test_cleaner_protocol_matches_main(
     case: Case,
@@ -888,35 +926,7 @@ def test_cleaner_protocol_matches_main(
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
     new = _run_cleaner(case, monkeypatch, caplog, capsys)
-    if new.error is not None:
-        # main acts while listing; plan() lists everything first, so an error raised while
-        # listing stops the Cleaner path before any delete.
-        assert case.fails_in_plan
-        assert new.error == old.error
-        assert not [c for c in new.calls if c[0] in {"instances.delete", "disks.delete"}]
-        return
-    assert old.error is None
-    if case.id in DIVERGES:
-        _, removed, deleted = DIVERGES[case.id]
-        assert new.deleted == deleted != old.deleted
-        assert new.disks == old.disks
-        assert new.stdout == old.stdout
-        assert [c for c in new.calls if c[0] == "instances.delete"] == [
-            c for c in old.calls if c[0] == "instances.delete" and c[3] not in removed
-        ]
-        return
-    assert new.deleted == old.deleted
-    assert new.disks == old.disks
-    assert new.stdout == old.stdout
-    assert _after_listing(new.calls) == _after_listing(old.calls)
-    assert [c for c in new.calls if c[0] == "instances.list"] == [
-        c for c in old.calls if c[0] == "instances.list"
-    ]
-    expected = expected_logs(old.logs, BUGS, RULES)
-    assert Counter(new.logs) == Counter(expected)
-    assert new.logs[-2:] == expected[-2:]
-    if _listed_instances(case) <= 1:
-        assert new.logs == expected_logs(old.logs, BUGS, RULES)
+    _assert_matches_main(case, old, new)
 
 
 def _find(case_id: str) -> Case:
@@ -1049,6 +1059,13 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
 ]
 
 
+ENGINE_QUIRKS: Mapping[str, Callable[[Outcome], bool]] = {
+    "zone-without-name-after-first-zone": (
+        lambda o: o.error is not None and o.error[0] == "KeyError" and o.deleted == []
+    ),
+}
+
+
 @pytest.mark.parametrize(
     ("case_id", "check"), QUIRKS, ids=[f"{cid}-{i}" for i, (cid, _) in enumerate(QUIRKS)]
 )
@@ -1062,9 +1079,9 @@ def test_quirk_is_the_same_on_main_and_new(
 ) -> None:
     case = _find(case_id)
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
+    new = _run_engine(case, monkeypatch, caplog, capsys)
     assert check(old), f"main does not show the quirk of {case_id}"
-    assert check(new), f"new code does not show the quirk of {case_id}"
+    assert ENGINE_QUIRKS.get(case_id, check)(new), f"new code does not show the quirk of {case_id}"
 
 
 def test_bug_242_leftover_disk_custom_age_main_deletes_new_code_keeps(
@@ -1089,15 +1106,18 @@ def test_bug_242_leftover_disk_custom_age_main_deletes_new_code_keeps(
         disk_gets={("z1", "d1"): old_disk},
     )
     old = _run(_legacy, young_case, monkeypatch, caplog, capsys)
-    new = _run(_new, young_case, monkeypatch, caplog, capsys)
+    new = _run_engine(young_case, monkeypatch, caplog, capsys)
     assert old.disks == ["proj-1/z1/d1"]
     assert len(_calls_named(old, "disks.delete")) == 1
     assert new.disks == []
     assert not _calls_named(new, "disks.delete")
     assert new.deleted == old.deleted == ["v"]
     old_ok = _run(_legacy, old_case, monkeypatch, caplog, capsys)
-    new_ok = _run(_new, old_case, monkeypatch, caplog, capsys)
-    assert new_ok.calls == old_ok.calls
+    new_ok = _run_engine(old_case, monkeypatch, caplog, capsys)
+    assert _after_listing(new_ok.calls) == _after_listing(old_ok.calls)
+    assert [c for c in new_ok.calls if c[0] == "instances.list"] == [
+        c for c in old_ok.calls if c[0] == "instances.list"
+    ]
     assert new_ok.disks == old_ok.disks == ["proj-1/z1/d1"]
     expected = expected_logs(old_ok.logs, BUGS, RULES)
     assert [e for e in new_ok.logs if e[1] > logging.DEBUG] == [
@@ -1145,7 +1165,7 @@ def test_fixed_quirk_main_deletes_new_code_keeps(
     case = _find(case_id)
     assert DIVERGES[case_id][0] == bug
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
+    new = _run_engine(case, monkeypatch, caplog, capsys)
     assert old_check(old), f"main does not show the old behaviour of {case_id}"
     assert new_check(new), f"new code does not show the fixed behaviour of {case_id} ({bug})"
 
@@ -1158,11 +1178,14 @@ def test_bug_358_leftover_disk_skip_is_debug_not_info(
 ) -> None:
     case = _find("disk-labels-exception-keeps")
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
+    new = _run_engine(case, monkeypatch, caplog, capsys)
     assert old.logs != new.logs
     assert new.logs == expected_logs(old.logs, BUGS, RULES)
     assert [m for _, _, m in new.logs] == [m for _, _, m in old.logs]
-    assert new.calls == old.calls
+    assert _after_listing(new.calls) == _after_listing(old.calls)
+    assert [c for c in new.calls if c[0] == "instances.list"] == [
+        c for c in old.calls if c[0] == "instances.list"
+    ]
     assert new.stdout == old.stdout
     info = [m for _, level, m in new.logs if level == logging.INFO]
     assert not [m for m in info if m.startswith(("{", "namespace(", "Skipping leftover"))]

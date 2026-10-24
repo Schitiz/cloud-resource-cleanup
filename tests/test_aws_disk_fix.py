@@ -7,10 +7,12 @@ from typing import Any
 
 import pytest
 
-from crc.aws.disk import Disk, DiskRuntime
+from crc.aws.disk import DiskCleaner, DiskRuntime
 from crc.aws.disk.settings import build_settings
 from crc.aws.disk.volumes import VolumeFilter, tag_map, volume_label
 from crc.core import logger
+from crc.core.cleaner import Operation, RunContext
+from tests.helpers_ad_spot_engine import run_through_engine
 
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=datetime.UTC)
 
@@ -211,43 +213,48 @@ def test_production_command_1_end_to_end() -> None:
     ]
     ec2 = _FakeEc2(volumes)
     runtime = DiskRuntime(lambda r: ec2, lambda r: _FakeCloudWatch(), lambda: ["us-west-2"])
-    disk = Disk(
-        dry_run=False,
-        filter_tags={
-            "yb_task": [
-                "bug_bash_22_9_2023",
-                "uitest",
-                "itest",
-                "itests",
-                "itest-system",
-                "db-cross-functional",
-                "itest_yba",
-                "ybtest",
-                "dev-itest",
-                "dev-uitest",
-                "itest-keep-universe",
-                "itest-system-keep-universe",
-                "db-cross-functional-keep-universe",
-                "uitest-keep-universe",
-                "dev-itest-keep-universe",
-                "dev-uitest-keep-universe",
-            ]
-        },
-        exception_tags={
-            "autoclean": ["false", "False", "FALSE"],
-            "auto_clean": ["false", "False", "FALSE"],
-            "crc": ["gke"],
-        },
-        age={"days": 7},
-        custom_age_tag_key="max_retention_age",
-        notags=None,
-        detach_age={"days": 3},
-        runtime=runtime,
-        clock=lambda: NOW,
+    settings = build_settings(
+        {
+            "filter_tags": {
+                "yb_task": [
+                    "bug_bash_22_9_2023",
+                    "uitest",
+                    "itest",
+                    "itests",
+                    "itest-system",
+                    "db-cross-functional",
+                    "itest_yba",
+                    "ybtest",
+                    "dev-itest",
+                    "dev-uitest",
+                    "itest-keep-universe",
+                    "itest-system-keep-universe",
+                    "db-cross-functional-keep-universe",
+                    "uitest-keep-universe",
+                    "dev-itest-keep-universe",
+                    "dev-uitest-keep-universe",
+                ]
+            },
+            "exception_tags": {
+                "autoclean": ["false", "False", "FALSE"],
+                "auto_clean": ["false", "False", "FALSE"],
+                "crc": ["gke"],
+            },
+            "age": {"days": 7},
+            "custom_age_tag_key": "max_retention_age",
+            "notags": None,
+            "detach_age": {"days": 3},
+        }
     )
-    disk.delete()
+    outcome = run_through_engine(
+        "aws",
+        "disk",
+        lambda _ctx: DiskCleaner(settings, runtime),
+        RunContext(dry_run=False, operation=Operation.DELETE, options={}, now=NOW),
+    )
+    assert outcome.result is not None
     assert ec2.deleted == ["vol-old", "vol-custom-ok"]
-    assert disk.get_deleted == [
+    assert list(outcome.result.succeeded) == [
         "us-west-2/vol-old yb_task=itest",
         "us-west-2/vol-custom-ok yb_task=itest",
     ]
@@ -262,21 +269,26 @@ def test_production_command_2_end_to_end() -> None:
     ]
     ec2 = _FakeEc2(volumes)
     runtime = DiskRuntime(lambda r: ec2, lambda r: _FakeCloudWatch(), lambda: ["us-west-2"])
-    disk = Disk(
-        dry_run=False,
-        filter_tags=None,
-        exception_tags={
-            "autoclean": ["false", "False", "FALSE"],
-            "auto_clean": ["false", "False", "FALSE"],
-            "crc": ["gke"],
-        },
-        age={"days": 30},
-        custom_age_tag_key=None,
-        notags={"yb_task": []},
-        detach_age={"days": 7},
-        runtime=runtime,
-        clock=lambda: NOW,
+    settings = build_settings(
+        {
+            "filter_tags": None,
+            "exception_tags": {
+                "autoclean": ["false", "False", "FALSE"],
+                "auto_clean": ["false", "False", "FALSE"],
+                "crc": ["gke"],
+            },
+            "age": {"days": 30},
+            "custom_age_tag_key": None,
+            "notags": {"yb_task": []},
+            "detach_age": {"days": 7},
+        }
     )
-    disk.delete()
+    outcome = run_through_engine(
+        "aws",
+        "disk",
+        lambda _ctx: DiskCleaner(settings, runtime),
+        RunContext(dry_run=False, operation=Operation.DELETE, options={}, now=NOW),
+    )
+    assert outcome.result is not None
     assert ec2.deleted == ["vol-untagged-old"]
-    assert disk.get_deleted == ["us-west-2/vol-untagged-old"]
+    assert list(outcome.result.succeeded) == ["us-west-2/vol-untagged-old"]

@@ -16,7 +16,7 @@ import pytest
 from crc.azu import _logger
 from crc.azu.disk import AzureDiskCleaner, DiskSettings
 from crc.azu.nic import AzureNicCleaner
-from crc.azu.spot_vm import SpotVM
+from crc.azu.spot_vm import build_spot_vm_cleaner
 from crc.azu.vm import VM, VmCleaner, VmSettings
 from crc.core import logger
 from crc.core.cleaner import Operation, RunContext
@@ -25,6 +25,7 @@ from tests import helpers_azure_ip as hi
 from tests import helpers_azure_nic as hn
 from tests import helpers_azure_spot as hs
 from tests import helpers_azure_vm as hv
+from tests.helpers_ad_spot_engine import run_through_engine
 from tests.helpers_wc_azu_engine import candidate_ids, engine_run
 
 _PREFIXES = ("RUN START", "REGION", "ACTION", "SKIPPED", "ERRORS", "FAILED", "RESULT")
@@ -351,8 +352,14 @@ def test_vm_tag_dump_is_debug_with_unchanged_text(
 # ----- spot vm ------------------------------------------------------------------------------
 
 
-def _spot(*, dry_run: bool) -> SpotVM:
-    return SpotVM(hs.RG, dry_run, None, None, {"days": 1}, None, None, clock=lambda: hs.NOW)
+def _run_spot(*, dry_run: bool) -> None:
+    ctx = RunContext(
+        dry_run=dry_run,
+        operation=Operation.DELETE,
+        options={"resource_group": hs.RG, "age": {"days": 1}},
+        now=hs.NOW,
+    )
+    run_through_engine("azure", "spot_instances", build_spot_vm_cleaner, ctx)
 
 
 def test_spot_real_run_reports_region_action_skips_and_failures(
@@ -377,7 +384,7 @@ def test_spot_real_run_reports_region_action_skips_and_failures(
     )
     azure.install(monkeypatch)
     _begin("spot_instances", dry_run=False)
-    _spot(dry_run=False).delete()
+    _run_spot(dry_run=False)
     logger.finish()
     lines = _lines(caplog)
     region = f"REGION cloud=azure resource=spot_instances region={hs.RG} scanned=5 selected=2"
@@ -402,7 +409,7 @@ def test_spot_dry_run_and_leftover_disk_skips_are_debug(
     )
     azure.install(monkeypatch)
     _begin("spot_instances", dry_run=True)
-    _spot(dry_run=True).delete()
+    _run_spot(dry_run=True)
     logger.finish()
     lines = _lines(caplog)
     assert (
