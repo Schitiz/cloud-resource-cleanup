@@ -34,6 +34,7 @@ from crc.cli import scan as cli_scan
 from crc.cli.routes import skips
 from crc.core import logger
 from crc.core.cleaner import Candidate, Operation, Plan, Result, RunContext
+from tests import helpers_ag_cli_added as added_table
 from tests.helpers_cli_routes import FakeCleaners
 from tests.helpers_oracle import load_legacy_crc
 from tests.helpers_routed_calls import RoutedCall
@@ -55,6 +56,9 @@ DEFAULT_ENV: dict[str, str | None] = {
     "GCP_PROJECT": None,
 }
 CLOUD_ARGS = ["aws", "azure", "gcp", "oci", "all"]
+# The kinds of the oracle: every case is compared with `tests/legacy/crc_main.txt`. A kind that
+# is not in the oracle is listed in tests/helpers_ag_cli_added.py and has no oracle to compare
+# with; `test_added_resources_reach_their_cleaner_through_main` covers it instead.
 RESOURCE_ARGS = [
     "disk",
     "ip",
@@ -182,6 +186,7 @@ class Fakes:
         self.InfluxDBClient = self.make_client("InfluxDBClient")
         self.CRC = self.make_crc()
         self.Snapshot = self.make_snapshot()
+        self.cleaners: FakeCleaners | None = None
 
     def make_client(self, kind: str) -> type:
         fakes = self
@@ -308,8 +313,8 @@ def run_oracle(case: Case, monkeypatch: pytest.MonkeyPatch) -> Outcome:
     return outcome
 
 
-def run_new(case: Case, monkeypatch: pytest.MonkeyPatch) -> Outcome:
-    fakes = Fakes(case)
+def run_new(case: Case, monkeypatch: pytest.MonkeyPatch, fakes: Fakes | None = None) -> Outcome:
+    fakes = fakes or Fakes(case)
     monkeypatch.setattr(cli_context, "CRC", fakes.CRC)
     monkeypatch.setattr(cli_clients, "WebClient", fakes.WebClient)
     monkeypatch.setattr(cli_clients, "InfluxDBClient", fakes.InfluxDBClient)
@@ -415,11 +420,13 @@ def snapshot_side_effect(fakes: Fakes) -> Callable[[RunContext], None]:
 def install_routed_fakes(fakes: Fakes, monkeypatch: pytest.MonkeyPatch) -> None:
     """Engine-routed pairs reach a fake cleaner that records what the oracle CRC fake recorded."""
     cleaners = FakeCleaners().install(monkeypatch)
+    fakes.cleaners = cleaners
     pairs = [
         (cloud, kind)
         for cloud, table in bridge.TABLES.items()
         for kind, route in table.items()
         if route.options is not skips.no_options
+        and (cloud, kind) not in added_table.added_routed_pairs()
     ]
     for cloud, kind in pairs:
         call = routed_call(cloud, kind)
@@ -1077,3 +1084,21 @@ def test_bug_360_main_logs_run_start_and_result_around_each_cleaner_pass(
             "done=0 failed=0 skipped=0 regions=0 regions_skipped=0 duration_s=0",
         ),
     ]
+
+
+@pytest.mark.parametrize(
+    ("cloud", "kind"), sorted(added_table.added_routed_pairs()), ids=lambda v: str(v)
+)
+def test_added_resources_reach_their_cleaner_through_main(
+    cloud: str, kind: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A kind that is not in the oracle runs through `main()` and gets the parsed flags."""
+    argv = ("--cloud", cloud, "--resource", kind, "--dry_run", "--age", "{'days': 2}")
+    case = Case(f"added-{cloud}-{kind}", argv)
+    fakes = Fakes(case)
+    outcome = run_new(case, monkeypatch, fakes)
+    assert outcome.result in (("returned",), ("exit", 0)), outcome.result
+    assert fakes.cleaners is not None
+    pairs = [(c, k) for c, k, _ in fakes.cleaners.runs]
+    assert pairs == [(cloud, kind)]
+    assert fakes.cleaners.contexts[0].dry_run is True
