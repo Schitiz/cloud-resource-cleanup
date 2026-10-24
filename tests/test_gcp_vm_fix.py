@@ -11,7 +11,8 @@ import pytest
 
 from crc.core import logger
 from crc.core.cleaner import Candidate, Operation, Plan, RunContext
-from crc.gcp.vm import VM, InstanceView, VmCleaner, VmSettings
+from crc.gcp.vm import InstanceView, VmCleaner, VmSettings
+from tests.helpers_ad_vm_engine import done_ids, run_vm
 
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=datetime.UTC)
 PROJECT = "proj-1"
@@ -169,12 +170,10 @@ def test_later_instances_are_still_processed_after_an_unfinished_operation() -> 
     assert cleaner(client).apply(plan, ctx()).succeeded == ("b",)
 
 
-def test_adapter_does_not_record_a_failed_delete() -> None:
+def test_engine_does_not_record_a_failed_delete() -> None:
     client = Client({"z": [inst("a")]}, states=[{"status": "DONE", "error": {"x": 1}}])
-    vm = VM(False, PROJECT, {}, {}, {"days": 1}, "", {}, client=client, clock=lambda: NOW)  # type: ignore[arg-type]
-    vm.delete()
-    assert vm.get_deleted == []
-    assert vm.delete_count == 0
+    outcome = run_vm("gcp", cleaner(client))
+    assert done_ids(outcome) == []
 
 
 def test_an_instance_error_is_recorded_and_the_next_instance_is_evaluated(
@@ -221,11 +220,10 @@ def test_an_error_while_iterating_a_zone_keeps_what_was_listed_and_skips_the_res
     assert failed_ids(run_log) == [("z1", "-")]
 
 
-def test_adapter_continues_with_the_next_zone_after_a_listing_error() -> None:
+def test_engine_continues_with_the_next_zone_after_a_listing_error() -> None:
     client = Client({"z1": RuntimeError("boom"), "z2": [inst("b")]})
-    vm = VM(False, PROJECT, {}, {}, {"days": 1}, "", {}, client=client, clock=lambda: NOW)  # type: ignore[arg-type]
-    vm.delete()
-    assert vm.get_deleted == ["b"]
+    outcome = run_vm("gcp", cleaner(client))
+    assert done_ids(outcome) == ["b"]
     assert [c for c in client.calls if c[0] == "delete"] == [("delete", "z2", "b")]
 
 

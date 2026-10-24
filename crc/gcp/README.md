@@ -2,7 +2,7 @@
 
 ## Purpose
 
-GCP cleaners (google-cloud-compute). They delete or stop leftover instances, disks and addresses. Each kind is a `Cleaner` registered with `@register("gcp", ...)` and run through `crc.core.engine` by the route table `crc/cli/routes/gcp.py` (the `VM` adapter class is no longer used by production; only tests do). Any change must follow `ARCHITECTURE.md`, with `make check` green.
+GCP cleaners (google-cloud-compute). They delete or stop leftover instances, disks and addresses. Each kind is a `Cleaner` registered with `@register("gcp", ...)` and run through `crc.core.engine` by the route table `crc/cli/routes/gcp.py`. Any change must follow `ARCHITECTURE.md`, with `make check` green.
 
 Modules:
 
@@ -14,7 +14,7 @@ Modules:
 - `ip.py`: re-exports the IP names; `ip_cleaner.py` holds `IpCleaner` (registered as `gcp` / `ip`) and `ip_client.py` the client protocols and `ComputeIpClient`. Deletes RESERVED addresses (`AddressesClient().delete`, waits for the operation); substring name and exception filters
 - `spot_vm/`: subpackage with its own README; the import path is `crc.gcp.spot_vm`
 - `vm_client.py`: `GcpVmClient`, `InstanceView` and `ComputeVmClient`, re-exported by `vm.py`
-- `vm.py`: re-exports the VM names; `vm_cleaner.py` holds `VmCleaner` (registered as `gcp` / `vm`), `vm_adapter.py` the `VM` class and `vm_settings.py` `VmSettings`. Deletes (`delete`) or stops (`stop`) RUNNING instances by labels (all keys), `notags` and exception labels, and age
+- `vm.py`: re-exports the VM names; `vm_cleaner.py` holds `VmCleaner` (registered as `gcp` / `vm`), and `vm_settings.py` `VmSettings`. Deletes (`delete`) or stops (`stop`) RUNNING instances by labels (all keys), `notags` and exception labels, and age
 
 ## Public API
 
@@ -43,7 +43,6 @@ The names below are synced with this README by ARCH-002. The spot_vm subpackage 
 - `VmSettings`: frozen dataclass with the fields the cleaner reads (project_id, filter_labels, exception_labels, notags, age, custom_age_tag_key, instance_state, wait_sec and poll_sec for the zone operation wait).
 - `VmCleaner`: the Cleaner (supports DELETE and STOP, read-only plan, mutating apply, plus zones, plan_zone and apply_instance); plan_zone is a lazy generator.
 - `build_vm_cleaner()`: registry factory behind @register("gcp", "vm"); reads project_id (ValueError without it), filter_tags, exception_tags, notags, age, custom_age_tag_key and instance_state from RunContext.options; the operation (delete or stop) is the RunContext operation.
-- `VM`: legacy adapter class no production code uses (delete(instance_state), stop(), get_deleted, delete_count, get_stopped, stopped_count, instance_names_to_delete, instance_names_to_stop, service_name, service_version, default_instance_state, time_format); the optional eighth and ninth constructor arguments inject a client and a clock (default is the current time). Both lists accumulate over calls.
 
 ## Safety Invariants
 
