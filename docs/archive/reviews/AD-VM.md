@@ -84,3 +84,73 @@ Scope reviewed: `git diff 7a8c936..HEAD` on branch `ad/vm` (lane `AD-VM`).
    - `python3 -m tests.archtest.test_count check`: `ARCH-008: 44417 tests, floor 44417`
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Scope: `git diff 7a8c936..HEAD` on `ad/vm`, including the round 1 fixes.
+
+### Round 1 fixes checked
+
+- The AWS (`VM`, `VmRuntime`) and Azure (`VM`) adapter deletions are correct. Their tests drive
+  the registered Cleaner through `crc.core.engine.run` against `tests/legacy/aws_vm.txt` and
+  `azu_vm.txt`, and the removed `VmCleaner.process` (Azure) and `_log_summary` (OCI) had no
+  other user.
+- The 12 out-of-lane reverts are confirmed: `git diff 7a8c936..HEAD` only touches lane files.
+- OCI `engine=True` in the tests matches `build_vm_cleaner`. The "New bugs" entry in the coding
+  summary about missing dry-run `ACTION would_*` lines (`crc/oci/vm/cleaner.py:75`) was a test
+  construction error, not a bug, and is withdrawn.
+
+### Independent checks
+
+1. Production: `crc/cli/**` (including `scan.py`, whose printed text holds the former class
+   paths as strings only), the routes, the four `@register(..., "vm")` factories and the five
+   adapters that the hash-locked tests build (`crc.aws.disk.Disk`,
+   `crc.aws.spot_instance_requests.SpotInstanceRequests`, and the Azure, GCP and OCI `SpotVM`)
+   are untouched.
+2. Parity: each `tests/test_{aws,azure,gcp,oci}_vm_parity.py` keeps its test function count
+   (10/10/9/6 before and after). Each runs `engine.run` with a fresh `Registry` holding the real
+   factory, plus the direct `plan()`/`apply()` protocol, and compares against its
+   `tests/legacy/*_vm.txt` oracle. Fixed bugs keep their markers (BUG-002/003/004/010/016/162/
+   185/186/198/358). Errors, stdout, non-mutating calls, mutating calls (in order), results and
+   counts are compared exactly. Logs are compared exactly for one region or a dry run; otherwise
+   each stream (listing, mutating, summary) is compared exactly. The only relaxation is the one
+   allowed plan-before-apply change, where an error case asserts no mutation.
+   Sabotage, done locally in a throwaway worktree and not committed: AWS terminate became stop,
+   GCP delete became stop, the Azure NIC delete was skipped, and OCI terminate became stop.
+   Result: 113, 110, 98 and 90 failures in the four VM parity files.
+3. Deleted names: `git grep` finds no `vm_adapter`, `vm.adapter`, `VmRuntime` or VM-adapter `VM`
+   in `crc/`, `crc.py` or `tests/` (outside `tests/legacy` and the `scan.py` / scan-parity
+   strings).
+4. No file in `tests/archtest/**`, `tests/legacy/**` or `safety_lock.json` changed (lock set
+   checked against the diff).
+5. ARCH-002 and ARCH-004 are green. The VM parity test files were already over 250 lines at
+   `7a8c936` (1026/915/1081/878 lines) and grew only slightly.
+
+### Fixes made in round 2
+
+- `crc/azu/README.md`: the Engine path line said `SpotVM` is used by
+  `tests/test_azu_spot_vm_engine.py`, which does not import it. It now names its real users,
+  `tests/test_azure_spot_instances_parity.py` and `tests/test_azure_logger.py`.
+- `crc/oci/vm/cleaner.py`: the `__init__` docstring no longer refers to the deleted
+  per-instance class.
+- `crc/azu/vm/client.py`: dropped the "legacy" wording from the module docstring.
+
+### Follow-up (not fixed, out of time budget)
+
+- `crc/oci/vm/cleaner.py:66` (`engine: bool = False`) and the `if not self._engine` dry-run
+  branch in `apply()` (`:113`) only reproduced the deleted adapter's dry-run behaviour.
+  Production always builds `engine=True` (`:238`); the `False` path is reached only by
+  `tests/test_oci_vm.py:72` and `tests/test_oci_vm_fix.py:92,143,217`. Dropping the flag needs
+  those tests rewritten for the engine dry-run behaviour.
+
+## New bugs
+
+None.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt`, then `make check`: ruff clean, mypy
+strict clean, lint-imports 5 kept / 0 broken, pytest **44417 passed**, ARCH-008 floor 44417.
+First run (before the round 2 fixes): 76 s wall. Final run after the fixes: pytest 50.66 s, `make check` 57 s wall, exit 0.
+
+ROUND 2 VERDICT: APPROVE

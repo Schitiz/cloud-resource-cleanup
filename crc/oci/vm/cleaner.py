@@ -66,8 +66,8 @@ class VmCleaner:
         engine: bool = False,
     ) -> None:
         """`engine` is True for the cleaner `crc.core.engine` builds: a dry-run `plan()` then
-        logs the ACTION lines per region and names its candidates by display name, the names
-        the old per-instance class reported (the engine never calls `apply()` in a dry run)."""
+        logs the ACTION lines per region and names its candidates by display name (the engine
+        never calls `apply()` in a dry run)."""
         self._engine = engine
         self._api_factory = api_factory
         self._list_regions = list_regions
