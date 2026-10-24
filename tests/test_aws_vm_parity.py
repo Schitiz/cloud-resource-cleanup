@@ -1,9 +1,9 @@
-"""Parity: `crc.aws.vm.VM` against main's version (`tests/legacy/aws_vm.txt`).
+"""Parity: the registered AWS VM `Cleaner`, run through `crc.core.engine.run`, against main's
+version (`tests/legacy/aws_vm.txt`).
 
-Both run against the same fake `boto3.client`; SDK calls (in order), results, log records,
-stdout and raised errors must be identical for every case. The table runs twice: through the
-legacy adapter class and through the registered Cleaner (`plan()` then `apply()`, or `plan()`
-alone in a dry run).
+Both run against the same fake `boto3.client`; results, log records, stdout, raised errors,
+non-mutating calls (in order) and mutating calls (in order) are compared for every case, both
+through `crc.core.engine.run` and through the direct `plan()` / `apply()` protocol.
 """
 
 import dataclasses
@@ -12,17 +12,19 @@ import logging
 import re
 import types
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
 import pytest
 from botocore.exceptions import ClientError, ConnectTimeoutError, EndpointConnectionError
 
-from crc.aws.vm import VM
+from crc.aws.vm import instance_name, scan_tag
 from crc.aws.vm.cleaner import VmCleaner, build_vm_cleaner
-from crc.core import registry
+from crc.core import engine, registry
 from crc.core.cleaner import Candidate, Operation, RunContext
+from crc.core.registry import Registry
+from crc.core.selection import Selection
 from tests.helpers_log_fix import expected_logs
 from tests.log_fix_aws_compute import RULES
 
@@ -502,18 +504,6 @@ def _legacy(case: Case) -> Any:
     return _load_oracle().VM(*_args(case))
 
 
-def _new(case: Case) -> Any:
-    vm = VM(*_args(case))
-    vm.runtime = dataclass_replace_clock(vm.runtime)
-    return vm
-
-
-def dataclass_replace_clock(runtime: Any) -> Any:
-    import dataclasses
-
-    return dataclasses.replace(runtime, clock=lambda: NOW)
-
-
 def _prepare(
     case: Case,
     monkeypatch: pytest.MonkeyPatch,
@@ -571,6 +561,8 @@ def _run_cleaner(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],
+    *,
+    via_engine: bool = True,
 ) -> Outcome:
     aws = _prepare(case, monkeypatch, caplog, capsys)
     operation = Operation(case.operation)
@@ -584,15 +576,25 @@ def _run_cleaner(
     if case.instance_state is not None:
         options["instance_state"] = case.instance_state
     ctx = RunContext(dry_run=case.dry_run, operation=operation, options=options, now=NOW)
-    cleaner = registry.get("aws", "vm")(ctx)
     error: tuple[str, str] | None = None
     names: list[str] = []
     try:
-        plan = cleaner.plan(ctx)
-        if case.dry_run:
-            names = [c.id for c in plan.candidates]
+        if via_engine:
+            reg = Registry()
+            reg.register("aws", "vm")(build_vm_cleaner)
+            (outcome,) = engine.run(Selection((("aws", "vm"),)), ctx, reg)
+            names = (
+                [c.id for c in outcome.plan.candidates]
+                if outcome.result is None
+                else list(outcome.result.succeeded)
+            )
         else:
-            names = list(cleaner.apply(plan, ctx).succeeded)
+            cleaner = registry.get("aws", "vm")(ctx)
+            plan = cleaner.plan(ctx)
+            if case.dry_run:
+                names = [c.id for c in plan.candidates]
+            else:
+                names = list(cleaner.apply(plan, ctx).succeeded)
     except Exception as e:
         error = (type(e).__name__, str(e))
     logs = _logs(caplog)
@@ -613,14 +615,8 @@ def test_matches_main(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
-    old = dataclasses.replace(old, logs=expected_logs(old.logs, FIXED_BUGS, rules=RULES))
-    assert new.calls == old.calls
-    assert new.error == old.error
-    assert new.deleted == old.deleted
-    assert new.count == old.count
-    assert new.logs == old.logs
-    assert new.stdout == old.stdout
+    new = _run_cleaner(case, monkeypatch, caplog, capsys)
+    _assert_matches_main(case, old, new)
 
 
 def test_bug_358_tag_dump_is_debug_only_in_new_code(
@@ -631,13 +627,17 @@ def test_bug_358_tag_dump_is_debug_only_in_new_code(
 ) -> None:
     case = next(c for c in CASES if c.id == "real-delete")
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
+    new = _run_cleaner(case, monkeypatch, caplog, capsys)
     dump = "[{'Key': 'Name', 'Value': 'vm-a'}]"
     assert ("root", logging.INFO, dump) in old.logs
     assert ("root", logging.DEBUG, dump) in new.logs
     assert ("root", logging.INFO, dump) not in new.logs
     assert old.logs != new.logs
-    assert new.logs == expected_logs(old.logs, {"BUG-358"}, rules=RULES)
+    expected = expected_logs(old.logs, {"BUG-358"}, rules=RULES)
+    listing = _stream(expected, lambda r: not _is_mutate_log(r) and not _is_summary_log(r))
+    mutating = _stream(expected, _is_mutate_log)
+    summary = _stream(expected, _is_summary_log)
+    assert new.logs == [*listing, *mutating, *summary]
 
 
 def _is_mutating(call: tuple[Any, ...]) -> bool:
@@ -661,19 +661,7 @@ def _stream(
     return [r for r in logs if pick(r)]
 
 
-@pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
-def test_cleaner_protocol_matches_main(
-    case: Case,
-    debug_logs: None,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """The Cleaner lists every region before it mutates, so only the interleaving of mutating
-    calls and their log lines with the listing differs from main; each stream is equal, and
-    with one region (or a dry run) the whole log is equal."""
-    old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run_cleaner(case, monkeypatch, caplog, capsys)
+def _assert_matches_main(case: Case, old: Outcome, new: Outcome) -> None:
     old = dataclasses.replace(old, logs=expected_logs(old.logs, FIXED_BUGS, rules=RULES))
     assert new.error == old.error
     assert new.stdout == old.stdout
@@ -688,12 +676,29 @@ def test_cleaner_protocol_matches_main(
         return
     assert [c for c in new.calls if _is_mutating(c)] == [c for c in old.calls if _is_mutating(c)]
     assert new.deleted == old.deleted
+    assert new.count == old.count
     if len(case.regions) <= 1 or case.dry_run:
         assert new.logs == old.logs
     listing = _stream(old.logs, lambda r: not _is_mutate_log(r) and not _is_summary_log(r))
     mutating = _stream(old.logs, _is_mutate_log)
     summary = _stream(old.logs, _is_summary_log)
     assert new.logs == [*listing, *mutating, *summary]
+
+
+@pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
+def test_cleaner_protocol_matches_main(
+    case: Case,
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The Cleaner lists every region before it mutates, so only the interleaving of mutating
+    calls and their log lines with the listing differs from main; each stream is equal, and
+    with one region (or a dry run) the whole log is equal."""
+    old = _run(_legacy, case, monkeypatch, caplog, capsys)
+    new = _run_cleaner(case, monkeypatch, caplog, capsys, via_engine=False)
+    _assert_matches_main(case, old, new)
 
 
 QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
@@ -784,7 +789,7 @@ def test_quirk_is_preserved(
 ) -> None:
     case = next(c for c in CASES if c.id == case_id)
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
+    new = _run_cleaner(case, monkeypatch, caplog, capsys)
     # BUG-004/BUG-016: the oracle class inherits the live crc.service.Service, so it cannot
     # show the old custom-age-tag behaviour here; tests/test_crc_service_parity.py pins it
     # against the frozen crc_service oracle. Fixed cases assert the new outcome only.
@@ -865,7 +870,7 @@ SCAN_CASES = [
 
 
 def _scan_run(
-    build: Callable[[], Any],
+    call_scan: Callable[[], Any],
     regions: Mapping[str, Region],
     mode: str | None,
     monkeypatch: pytest.MonkeyPatch,
@@ -881,7 +886,7 @@ def _scan_run(
     monkeypatch.setattr("crc.service.init_logging", lambda *a, **k: None)
     caplog.clear()
     try:
-        result: Any = build().find_instances_with_tag("k", "v")
+        result: Any = call_scan()
     except Exception as e:
         result = (type(e).__name__, str(e))
     return result, aws.calls, _logs(caplog)
@@ -906,13 +911,15 @@ def test_find_instances_with_tag_matches_main(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     legacy = _scan_run(
-        lambda: _load_oracle().VM(*([False, {}, {}, {}, None, {}])),
+        lambda: _load_oracle().VM(*([False, {}, {}, {}, None, {}])).find_instances_with_tag(
+            "k", "v"
+        ),
         regions,
         mode,
         monkeypatch,
         caplog,
     )
-    new = _scan_run(lambda: VM(False, {}, {}, {}, "", {}), regions, mode, monkeypatch, caplog)
+    new = _scan_run(lambda: scan_tag("k", "v"), regions, mode, monkeypatch, caplog)
     assert new == legacy
     if name == "regions-from-session":
         assert [r["id"] for r in new[0]] == ["i-1", "i-2", "i-3"]
@@ -930,7 +937,22 @@ def test_helpers_match_main(
 ) -> None:
     monkeypatch.setattr("crc.service.init_logging", lambda *a, **k: None)
     args: tuple[Any, ...] = (False, {"env": ["dev"]}, {"k": []}, {"days": 1}, None, {"x": []})
-    old, new = _load_oracle().VM(*args), VM(*args)
+    old = _load_oracle().VM(*args)
+    ctx = RunContext(
+        dry_run=False,
+        operation=Operation.DELETE,
+        options={
+            "filter_tags": {"env": ["dev"]},
+            "exception_tags": {"k": []},
+            "notags": {"x": []},
+            "age": {"days": 1},
+            "custom_age_tag_key": None,
+            "instance_state": ["running"],
+        },
+        now=NOW,
+    )
+    cleaner = build_vm_cleaner(ctx)
+    assert isinstance(cleaner, VmCleaner)
 
     def outcome(fn: Callable[[], Any]) -> Any:
         caplog.clear()
@@ -939,15 +961,11 @@ def test_helpers_match_main(
         except Exception as e:
             return (type(e).__name__, str(e), _logs(caplog))
 
-    assert outcome(lambda: new._get_instance_name(tags)) == outcome(
-        lambda: old._get_instance_name(tags)
-    )
-    assert outcome(lambda: new._should_skip_instance(tags)) == outcome(
+    assert outcome(lambda: instance_name(tags)) == outcome(lambda: old._get_instance_name(tags))
+    assert outcome(lambda: cleaner.should_skip(tags)) == outcome(
         lambda: old._should_skip_instance(tags)
     )
-    assert outcome(lambda: new._get_filter(["running"])) == outcome(
-        lambda: old._get_filter(["running"])
-    )
+    assert outcome(cleaner.build_filters) == outcome(lambda: old._get_filter(["running"]))
 
 
 FILTERED_CASES = [
@@ -972,9 +990,9 @@ def test_get_filtered_instances_matches_main(
 ) -> None:
     case = next(c for c in CASES if c.id == case_id)
 
-    def run_helper(build: Callable[[Case], Any]) -> Any:
+    def run_legacy() -> Any:
         aws = _prepare(case, monkeypatch, caplog, capsys)
-        vm = build(case)
+        vm = _legacy(case)
         ec2 = aws.client("ec2", "us-west-2")
         details = ec2.describe_instances(Filters=[])
         aws.calls.clear()
@@ -985,8 +1003,35 @@ def test_get_filtered_instances_matches_main(
             result = (type(e).__name__, str(e))
         return result, aws.calls, _logs(caplog)
 
-    result, calls, logs = run_helper(_legacy)
-    assert run_helper(_new) == (result, calls, expected_logs(logs, FIXED_BUGS, rules=RULES))
+    def run_new() -> Any:
+        aws = _prepare(case, monkeypatch, caplog, capsys)
+        ctx = RunContext(
+            dry_run=case.dry_run,
+            operation=Operation(case.operation),
+            options={
+                "filter_tags": case.filter_tags,
+                "exception_tags": case.exception_tags,
+                "notags": case.notags,
+                "age": case.age,
+                "custom_age_tag_key": case.custom_age_tag_key,
+            },
+            now=NOW,
+        )
+        cleaner = build_vm_cleaner(ctx)
+        assert isinstance(cleaner, VmCleaner)
+        ec2 = aws.client("ec2", "us-west-2")
+        details = ec2.describe_instances(Filters=[])
+        aws.calls.clear()
+        caplog.clear()
+        try:
+            found, _ = cleaner.filter_instances(ec2, details, "", NOW)
+            result: Any = ("ok", ([c.id for c in found], [c.name for c in found]))
+        except Exception as e:
+            result = (type(e).__name__, str(e))
+        return result, aws.calls, _logs(caplog)
+
+    result, calls, logs = run_legacy()
+    assert run_new() == (result, calls, expected_logs(logs, FIXED_BUGS, rules=RULES))
 
 
 @pytest.mark.parametrize(
@@ -1006,21 +1051,22 @@ def test_repeated_operations_match_main(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     first_op, second_op, second_has_instances = steps
-    first = Case("first", one(inst("a")))
-    second = Case("second", one(inst("b")) if second_has_instances else {"us-west-2": Region([])})
-
-    def run_twice(build: Callable[[Case], Any]) -> Outcome:
-        aws = _prepare(first, monkeypatch, caplog, capsys)
-        vm = build(first)
-        getattr(vm, first_op)()
-        aws.case = second
-        getattr(vm, second_op)()
-        logs = _logs(caplog)
-        stdout = capsys.readouterr().out
-        names = [*vm.get_deleted, *vm.get_stopped]
-        count = vm.delete_count + vm.stopped_count
-        return Outcome(aws.calls, names, count, logs, stdout, None)
-
-    old = run_twice(_legacy)
-    old = dataclasses.replace(old, logs=expected_logs(old.logs, FIXED_BUGS, rules=RULES))
-    assert run_twice(_new) == old
+    first = Case("first", one(inst("a")), operation=first_op)
+    second = Case(
+        "second",
+        one(inst("b")) if second_has_instances else {"us-west-2": Region([])},
+        operation=second_op,
+    )
+    aws = _prepare(first, monkeypatch, caplog, capsys)
+    vm = _legacy(first)
+    getattr(vm, first_op)()
+    aws.case = second
+    getattr(vm, second_op)()
+    old_calls = list(aws.calls)
+    old_names = [*vm.get_deleted, *vm.get_stopped]
+    run1 = _run_cleaner(first, monkeypatch, caplog, capsys)
+    run2 = _run_cleaner(
+        replace(first, regions=second.regions, operation=second_op), monkeypatch, caplog, capsys
+    )
+    assert [*run1.deleted, *run2.deleted] == old_names
+    assert [*run1.calls, *run2.calls] == old_calls

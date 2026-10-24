@@ -94,7 +94,9 @@ def stub_registry(
             return op is operation
 
         def plan(self, _ctx: RunContext) -> Plan:
-            return Plan(tuple(Candidate(i) for i in ids), related=dict(related), by_owner=by_owner)
+            return Plan(
+                tuple(Candidate(i) for i in ids), related=dict(related), by_owner=by_owner
+            )
 
         def apply(self, _plan: Plan, _ctx: RunContext) -> Result:
             return Result(ids, related=dict(related), by_owner=by_owner)

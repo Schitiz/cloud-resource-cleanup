@@ -4,8 +4,7 @@
 
 `VmCleaner` implements the `crc.core.cleaner.Cleaner` contract: `plan()` lists the VMs of the
 configured resource group only, applies the tag and age policy and reads each VM's power state;
-`apply()` deletes (and removes the `<vm>-NIC` NIC) or deallocates the planned VMs. The legacy
-class in `adapter.py` drives the same pieces VM by VM, in the call order of the original code.
+`apply()` deletes (and removes the `<vm>-NIC` NIC) or deallocates the planned VMs.
 """
 
 import logging
@@ -147,23 +146,6 @@ class VmCleaner:
         if state in states:
             return None
         return SKIP_STATE_NOT_ALLOWED
-
-    def process(self, vm_name: str, operation: Operation, tally: Tally, *, dry_run: bool) -> bool:
-        """Status check and action for one VM that passed `decide()`. Any error is logged and
-        swallowed, as on main. Returns True when the VM passed the status check (selected, as
-        in `plan()`), even if the action then failed."""
-        selected = False
-        try:
-            reason = self.state_skip_reason(vm_name, self._settings.instance_states)
-            if reason is None:
-                selected = True
-                self.act(vm_name, operation, tally, dry_run=dry_run)
-            else:
-                _logger.skip(reason)
-        except Exception as e:
-            log_processing_error(vm_name, e)
-            _logger.failed(self._resource_group, vm_name, e)
-        return selected
 
     def act(self, vm_name: str, operation: Operation, tally: Tally, *, dry_run: bool) -> None:
         """Delete (with the NIC) or deallocate one VM and record its name, also in a dry run,

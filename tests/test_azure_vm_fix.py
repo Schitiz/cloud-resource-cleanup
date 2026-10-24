@@ -6,9 +6,10 @@ from typing import Any
 
 import pytest
 
-from crc.azu.vm import VM, VmCleaner, VmSettings
+from crc.azu.vm import VmCleaner, VmSettings
 from crc.core import logger
 from crc.core.cleaner import Operation, RunContext
+from tests.helpers_ad_vm_engine import done_ids, run_vm
 from tests.helpers_azure_vm import NOW, FakeAzure, vm
 
 MUTATING = ("vm_begin_delete", "vm_result", "nic_begin_delete", "nic_result")
@@ -53,13 +54,12 @@ def test_bug_002_lists_only_the_configured_group_and_never_the_subscription() ->
     assert ("vm_begin_delete", "rg", "theirs") not in azure.calls
 
 
-def test_bug_002_adapter_lists_the_configured_group(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_bug_002_engine_lists_the_configured_group(monkeypatch: pytest.MonkeyPatch) -> None:
     azure = FakeAzure([vm("mine", group="rg-x"), vm("theirs", group="rg-y")])
     azure.install(monkeypatch)
-    service = VM("rg-x", True, {"env": ["ci"]}, {}, {"hours": 1}, "", {}, clock=lambda: NOW)
-    service.delete()
+    outcome = run_vm("azure", cleaner_for(azure, group="rg-x"), dry_run=True, now=NOW)
     assert calls(azure, "list") == [("list", "rg-x")]
-    assert service.get_deleted == ["mine"]
+    assert done_ids(outcome) == ["mine"]
 
 
 def test_bug_002_empty_resource_group_fails_closed_before_any_sdk_call() -> None:

@@ -37,10 +37,7 @@ from crc.oci.vm.settings import (
     TagSpec,
     VmSettings,
     log_for,
-    log_summary,
 )
-
-_log_summary = log_summary
 
 __all__ = [
     "DEFAULT_INSTANCE_STATES",
@@ -48,7 +45,6 @@ __all__ = [
     "TagSpec",
     "VmCleaner",
     "VmSettings",
-    "_log_summary",
     "build_vm_cleaner",
 ]
 

@@ -92,7 +92,7 @@ def _vm_cleaner(apis: Mapping[str, Any]) -> VmCleaner:
         return api
 
     settings = VmSettings(filter_tags=FILTER, age=AGE)
-    return VmCleaner(factory, lambda: list(apis), settings)
+    return VmCleaner(factory, lambda: list(apis), settings, engine=True)
 
 
 def _vm(cleaner: VmCleaner, *, dry_run: bool, operation: str = "delete") -> Any:
@@ -122,22 +122,21 @@ def test_vm_engine_reports_regions_actions_skips_and_result(
         operation=operation,
     )
     logger.finish()
-    actions = (
-        []
-        if dry_run
-        else [(logging.INFO, f"ACTION {kind} cloud=oci resource=vm region=r1 id=a name=name-a")]
-    )
-    assert _lines(caplog, "REGION", "ACTION", "SKIPPED", "ERRORS", "FAILED", "RESULT") == [
+    action = (logging.INFO, f"ACTION {kind} cloud=oci resource=vm region=r1 id=a name=name-a")
+    regions = [
         (logging.INFO, "REGION cloud=oci resource=vm region=r1 scanned=4 selected=1 seconds=0"),
         (logging.DEBUG, "REGION cloud=oci resource=vm region=r2 scanned=0 selected=0 seconds=0"),
-        *actions,
+    ]
+    ordered = [action, *regions] if dry_run else [*regions, action]
+    assert _lines(caplog, "REGION", "ACTION", "SKIPPED", "ERRORS", "FAILED", "RESULT") == [
+        *ordered,
         (logging.INFO, "SKIPPED cloud=oci resource=vm reason=filter_mismatch count=1"),
         (logging.INFO, "SKIPPED cloud=oci resource=vm reason=state count=1"),
         (logging.INFO, "SKIPPED cloud=oci resource=vm reason=too_young count=1"),
         (
             logging.INFO,
             f"RESULT cloud=oci resource=vm operation={operation} "
-            f"dry_run={'true' if dry_run else 'false'} selected={0 if dry_run else 1} "
+            f"dry_run={'true' if dry_run else 'false'} selected=1 "
             f"done={done} failed=0 "
             "skipped=3 regions=2 regions_skipped=0 duration_s=7",
         ),

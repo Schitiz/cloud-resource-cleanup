@@ -17,7 +17,7 @@ from crc.azu import _logger
 from crc.azu.disk import AzureDiskCleaner, DiskSettings
 from crc.azu.nic import AzureNicCleaner
 from crc.azu.spot_vm import SpotVM
-from crc.azu.vm import VM, VmCleaner, VmSettings
+from crc.azu.vm import VmCleaner, VmSettings
 from crc.core import logger
 from crc.core.cleaner import Operation, RunContext
 from tests import helpers_azure_disk as hd
@@ -25,6 +25,7 @@ from tests import helpers_azure_ip as hi
 from tests import helpers_azure_nic as hn
 from tests import helpers_azure_spot as hs
 from tests import helpers_azure_vm as hv
+from tests.helpers_ad_vm_engine import run_vm
 from tests.helpers_wc_azu_engine import candidate_ids, engine_run
 
 _PREFIXES = ("RUN START", "REGION", "ACTION", "SKIPPED", "ERRORS", "FAILED", "RESULT")
@@ -248,8 +249,16 @@ def test_nic_dry_run_and_no_double_action_from_plan_and_apply(
 # ----- vm -----------------------------------------------------------------------------------
 
 
-def _vm_adapter(*, dry_run: bool) -> VM:
-    return VM("rg", dry_run, ENV, {}, {"hours": 1}, "", {}, clock=lambda: hv.NOW)
+def _engine_vm(
+    azure: hv.FakeAzure, *, dry_run: bool, operation: Operation = Operation.DELETE
+) -> Any:
+    cleaner = VmCleaner(
+        lambda: azure.compute_client(None, "s"),
+        lambda: azure.network_client(None, "s"),
+        "rg",
+        VmSettings(filter_tags=ENV, age={"hours": 1}),
+    )
+    return run_vm("azure", cleaner, dry_run=dry_run, operation=operation, now=hv.NOW)
 
 
 def test_vm_delete_reports_skips_and_failures(
@@ -266,11 +275,11 @@ def test_vm_delete_reports_skips_and_failures(
     )
     azure.install(monkeypatch)
     _begin("vm", dry_run=False)
-    _vm_adapter(dry_run=False).delete()
+    _engine_vm(azure, dry_run=False)
     logger.finish()
     assert _lines(caplog)[1:] == [
-        "ACTION deleted cloud=azure resource=vm region=rg id=vm-a name=vm-a",
         "REGION cloud=azure resource=vm region=rg scanned=5 selected=1 seconds=S",
+        "ACTION deleted cloud=azure resource=vm region=rg id=vm-a name=vm-a",
         "SKIPPED cloud=azure resource=vm reason=filter_tags count=1",
         "SKIPPED cloud=azure resource=vm reason=state count=1",
         "SKIPPED cloud=azure resource=vm reason=too_young count=1",
@@ -284,14 +293,15 @@ def test_vm_delete_reports_skips_and_failures(
 def test_vm_stop_and_dry_run_kinds(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    hv.FakeAzure([hv.vm("vm-a")]).install(monkeypatch)
+    azure = hv.FakeAzure([hv.vm("vm-a")])
+    azure.install(monkeypatch)
     _begin("vm", dry_run=False)
-    _vm_adapter(dry_run=False).stop()
+    _engine_vm(azure, dry_run=False, operation=Operation.STOP)
     logger.finish()
     assert "ACTION stopped cloud=azure resource=vm region=rg id=vm-a name=vm-a" in _lines(caplog)
     caplog.clear()
     _begin("vm", dry_run=True)
-    _vm_adapter(dry_run=True).stop()
+    _engine_vm(azure, dry_run=True, operation=Operation.STOP)
     logger.finish()
     lines = _lines(caplog)
     assert "ACTION would_stop cloud=azure resource=vm region=rg id=vm-a name=vm-a" in lines
@@ -305,7 +315,7 @@ def test_vm_nic_failure_after_24_attempts_is_listed(
     azure = hv.FakeAzure([hv.vm("vm-a")], scripts={"nic_begin": {"vm-a-NIC": [boom] * 24}})
     azure.install(monkeypatch)
     _begin("vm", dry_run=False)
-    _vm_adapter(dry_run=False).delete()
+    _engine_vm(azure, dry_run=False)
     logger.finish()
     lines = _lines(caplog)
     assert (
@@ -321,7 +331,7 @@ def test_vm_failed_delete_counts_as_selected_without_action(
     azure = hv.FakeAzure([hv.vm("vm-a")], scripts={"vm_begin": {"vm-a": [boom]}})
     azure.install(monkeypatch)
     _begin("vm", dry_run=False)
-    _vm_adapter(dry_run=False).delete()
+    _engine_vm(azure, dry_run=False)
     logger.finish()
     lines = _lines(caplog)
     assert not [x for x in lines if x.startswith("ACTION")]

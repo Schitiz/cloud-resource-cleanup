@@ -161,7 +161,7 @@ def test_bug_158_instances_without_defined_tags_or_metadata_still_match(
 
 def test_bug_158_engine_skips_managed_instances(run_log: FakeRunLog) -> None:
     api = FakeApi([inst("m", metadata={"oke-native-pool-id": "x"}), inst("plain")])
-    cleaner = VmCleaner(lambda region: api, lambda: ["r1"], _ENGINE_SETTINGS)
+    cleaner = VmCleaner(lambda region: api, lambda: ["r1"], _ENGINE_SETTINGS, engine=True)
     outcome = run_vm("oci", cleaner)
     assert api.calls == [("list_instances",), ("terminate_instance", "plain")]
     assert done_ids(outcome) == ["name-plain"]
@@ -225,7 +225,7 @@ def test_bug_162_engine_carries_on_and_names_only_healthy_instances(
     run_log: FakeRunLog,
 ) -> None:
     api = FakeApi([inst("a"), inst("bad", created=None), inst("c")])
-    cleaner = VmCleaner(lambda region: api, lambda: ["r1"], _ENGINE_SETTINGS)
+    cleaner = VmCleaner(lambda region: api, lambda: ["r1"], _ENGINE_SETTINGS, engine=True)
     outcome = run_vm("oci", cleaner)
     assert done_ids(outcome) == ["name-a", "name-c"]
     assert [f[1] for f in run_log.failures] == ["bad"]

@@ -4,8 +4,7 @@
 
 `VmCleaner` implements the `crc.core.cleaner.Cleaner` contract: `plan()` lists the instances
 of every region (`describe_instances`, `describe_network_interfaces`) and filters them,
-`apply()` calls `terminate_instances` or `stop_instances`. It is registered as `aws` / `vm`;
-`crc.aws.vm.VM` (`adapter.py`) is the legacy adapter `crc.py` uses.
+`apply()` calls `terminate_instances` or `stop_instances`. It is registered as `aws` / `vm`.
 """
 
 import dataclasses

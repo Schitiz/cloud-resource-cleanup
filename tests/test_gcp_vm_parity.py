@@ -659,12 +659,17 @@ def test_matches_main(
         assert new.error == old.error
         assert new.stdout == old.stdout
         assert _only(new.calls, *ACTION_CALLS) == []
+        assert _only(new.calls, "instances.list") == _only(old.calls, "instances.list")
         return
     assert old.error is None
     assert (new.deleted, new.stopped, new.count) == (old.deleted, old.stopped, old.count)
     assert new.stdout == old.stdout
     expected = _only(_with_waits(old.calls, case), *ACTION_CALLS, *WAIT_CALLS)
     assert _only(new.calls, *ACTION_CALLS, *WAIT_CALLS) == expected
+    assert _only(new.calls, "instances.list") == _only(old.calls, "instances.list")
+    expected_log_lines = expected_logs(old.logs, BUGS, RULES)
+    assert expected_log_lines[-1][2].startswith("count of items in instance_names_to_")
+    assert Counter(new.logs) == Counter(expected_log_lines[:-1])
 
 
 def _cleaner_context(case: Case) -> RunContext:

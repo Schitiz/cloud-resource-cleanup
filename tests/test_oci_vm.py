@@ -303,7 +303,7 @@ def oci_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _cleaner(api: FakeApi) -> VmCleaner:
     settings = VmSettings(filter_tags=FILTER, age={"hours": 5}, custom_age_tag_key="")
-    return VmCleaner(lambda region: api, lambda: ["r1"], settings)
+    return VmCleaner(lambda region: api, lambda: ["r1"], settings, engine=True)
 
 
 def test_sdk_api_pages_through_every_result_page() -> None:

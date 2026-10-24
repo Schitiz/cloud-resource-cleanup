@@ -620,10 +620,25 @@ def test_engine_matches_main(
         # Allowed change: plan() lists every region before apply() mutates, so a later error
         # stops the run before any mutation (fewer, never more).
         assert [c for c in new.calls if _is_mutation(c)] == []
+        assert [c for c in new.calls if not _is_mutation(c)] == [
+            c for c in old.calls if not _is_mutation(c)
+        ]
         return
     assert new.acted == old.acted
     assert new.count == old.count
+    assert [c for c in new.calls if not _is_mutation(c)] == [
+        c for c in old.calls if not _is_mutation(c)
+    ]
     assert [c for c in new.calls if _is_mutation(c)] == [c for c in old.calls if _is_mutation(c)]
+    old_logs = [
+        log
+        for log in expected_logs(old.logs, BUGS, RULES)
+        if not log[2].startswith("count of items")
+    ]
+    plan_logs = [log for log in old_logs if not _is_apply_log(log) and not _is_summary_log(log)]
+    apply_logs = [log for log in old_logs if _is_apply_log(log)]
+    summary_logs = [log for log in old_logs if _is_summary_log(log)]
+    assert new.logs == plan_logs + apply_logs + summary_logs
 
 
 def _run_cleaner(
@@ -699,6 +714,17 @@ def test_cleaner_protocol_matches_main(
     if old.error is not None:
         # main may already have acted on instances before the error; plan() fails before any
         assert [c for c in new.calls if _is_mutation(c)] == []
+        assert [c for c in new.calls if not _is_mutation(c)] == [
+            c for c in old.calls if not _is_mutation(c)
+        ]
+        old_plan_logs = [
+            log
+            for log in expected_logs(old.logs, BUGS, RULES)
+            if not log[2].startswith("count of items")
+            and not _is_apply_log(log)
+            and not _is_summary_log(log)
+        ]
+        assert new.logs == old_plan_logs
         return
     assert new.acted == old.acted
     assert [c for c in new.calls if not _is_mutation(c)] == [
