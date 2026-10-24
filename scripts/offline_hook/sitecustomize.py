@@ -79,18 +79,18 @@ def _install() -> None:
     from google.cloud import compute_v1
     from googleapiclient import discovery
 
-    boto3.client = Fake  # type: ignore[assignment]
-    boto3.resource = Fake  # type: ignore[assignment]
+    boto3.client = Fake
+    boto3.resource = Fake
     influx.InfluxDBClient = Fake  # type: ignore[misc,assignment]
     slack_sdk.WebClient = Fake  # type: ignore[misc,assignment]
     identity.ClientSecretCredential = Fake  # type: ignore[misc,assignment]
     compute.ComputeManagementClient = Fake  # type: ignore[misc,assignment]
     network.NetworkManagementClient = Fake  # type: ignore[misc,assignment]
-    discovery.build = Fake  # type: ignore[assignment]
+    discovery.build = Fake
     _fake_clients(compute_v1)
     _fake_clients(oci.core)
     _fake_clients(oci.identity)
-    oci.config.validate_config = Fake  # type: ignore[assignment]
+    oci.config.validate_config = Fake
     _deny_sockets()
 
 

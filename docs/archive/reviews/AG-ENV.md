@@ -54,19 +54,32 @@ subprocess environment is rebuilt from `PATH`, `HOME`, `LANG` plus dummy credent
    Azure, OCI and Slack SDKs (pinned in `constraints.txt`). Proposed diff:
 
    ```diff
+   --- a/requirements.txt
+   +++ b/requirements.txt
+   @@ -1,3 +0,0 @@
    -paramiko
    -requests
    -beautifulsoup4
    ```
+   and update the SHA-256 lock in `tests/archtest/frozen_inputs.json` (`ARCH-007`):
+
+   ```diff
+   --- a/tests/archtest/frozen_inputs.json
+   +++ b/tests/archtest/frozen_inputs.json
+   @@ -1,3 +1,3 @@
+    {
+   -  "requirements.txt": "913955ef30813d6241f061f616f8109dc1bcd0ea080c517edfd37096ab87aacd",
+   +  "requirements.txt": "0dd734c4cea0ec95978ac2837de7bc958ed15437aed40fd6755fba003ce49299",
+   ```
    then regenerate `constraints.txt` the same way (fresh 3.11 venv, `pip freeze`).
-2. `requirements.txt` is not hash-locked in this checkout (plain names, no pins); constraints.txt is
-   the lock that matters now.
 
 ## Wave next
 
 Docs (AG-DOCS): `README.md:89` and `AGENTS.md:17` install lines need `-c constraints.txt`;
-`ARCHITECTURE.md` "One exception: `is_old` reads the `MAX_AGE` environment variable" is now false
-(`crc/core` reads no environment; `crc/cli` installs the reader).
+`ARCHITECTURE.md` "One exception: `is_old` reads the `MAX_AGE` environment variable" and
+`tests/archtest/README.md:24` "(no env ban: `crc/core/age.py` reads `MAX_AGE`); `crc/cli` bans `re`
+only" are now false (`crc/core` reads no environment and bans `env` + `clock_ref`; `crc/cli` installs
+the reader and bans `clock_ref`).
 
 Cloud packages: the clock passed as a value (`clock_ref`), reported only (not failing):
 `crc/aws/disk/__init__.py:38`, `crc/aws/spot_instance_requests/runtime.py:21`,
@@ -81,3 +94,65 @@ Smoke covers the 17 pairs of the Jenkins fixture only (no `vpc`, `gcp spot_vm`, 
 ## New bugs
 
 None found.
+
+## Round 1 (Argon)
+
+### Findings Fixed in Review
+
+1. `tests/test_smoke_offline.py:57-66` (`test_hook_fakes_clients_and_denies_sockets`): previously
+   only caught `OSError` on `socket.create_connection(('127.0.0.1', 9))` and checked
+   `result.stdout.startswith("denied")`. Because `ConnectionRefusedError` on closed port 9 is an
+   `OSError`, the test still passed when `_deny_sockets()` was removed in `sitecustomize.py`. Fixed
+   to assert that `socket.create_connection`, `socket.socket().connect` and `socket.getaddrinfo`
+   each raise `OSError` containing `"denied by the offline smoke hook"`; verified the test now fails
+   when `_deny_sockets()` is removed.
+2. `scripts/offline_hook/sitecustomize.py:82,83,89,93`: removed 4 unused `# type: ignore[assignment]`
+   comments on modules already covered by `ignore_missing_imports = true` so `python3 -m mypy scripts`
+   passes with 0 errors.
+3. `tests/archtest/bans.py:16-20,29`: updated the stale comment saying `crc/core` `env` ban waits for
+   Wave B and added `clock_ref` to the allowlist kinds comment.
+4. `docs/archive/reviews/AG-ENV.md:61-62`: corrected `## Owner action` item 2 (which stated
+   `requirements.txt` was not hash-locked) to include the exact `tests/archtest/frozen_inputs.json`
+   SHA-256 diff (`ARCH-007`), and added `tests/archtest/README.md:24` to `## Wave next`.
+
+### Checklist & Gate Verification
+
+1. **Task items complete and verified in code:**
+   - **Reproducible gate:** `pyproject.toml:81-92` adds `ignore_missing_imports = true` overrides for
+     `google`, `google.*`, `azure`, `azure.*`, `msrestazure`, `msrestazure.*`, `msrest`, `msrest.*`;
+     `constraints.txt` pins all 90 resolved packages; `.github/workflows/ci.yml:19-20` and
+     `.cursor/environment.json:2` pass `-c constraints.txt`; unused `paramiko`, `requests`,
+     `beautifulsoup4` proven unused by grep and proposed under `## Owner action` with exact diffs for
+     `requirements.txt` and `tests/archtest/frozen_inputs.json`.
+   - **`make smoke-offline`:** `Makefile:20-21`, `scripts/smoke_offline.py`,
+     `scripts/offline_hook/sitecustomize.py`, and `tests/test_smoke_offline.py` run all 17
+     `(cloud, kind)` pairs from `tests/fixtures/jenkins_commands.txt` in subprocesses with
+     `--dry_run`, SDK clients replaced by `Fake`, and sockets denied (`17/17 pairs passed` in
+     `32.4s`), asserting exit `0`, one `RUN START`, and one `RESULT` line per pair. Unreachable from
+     CLI/Jenkins flags and inert unless `PYTHONPATH` includes `scripts/offline_hook` and
+     `CRC_OFFLINE_SMOKE=1`.
+   - **ARCH-003:** `crc/core/age.py` no longer imports `os`; `crc/cli/context.py`
+     (`install_max_age_source`, called first in `crc/cli/main.py:29` and in `tests/conftest.py`)
+     injects `read_max_age_env`. `tests/archtest/bans.py` bans `env` and `clock_ref` in `crc/core`
+     and `clock_ref` in `crc/cli`, and `cloud_clock_refs()` reports the 12 cloud-package hits listed
+     in `## Wave next`.
+2. **CLI & behaviour parity:** `python3 crc.py --help` verified intact; no CLI flag, Jenkins command,
+   selection, delete, Slack/Influx output or exit code changed.
+3. **Guardrails & mutation testing:** No check or test weakened (`core_env_ban_is_deferred_to_wave_b`
+   replaced by `test_arch003_core_bans_env_and_clock_values` plus 15 new `ARCH-003` self-tests, 5
+   `MAX_AGE` source tests, and 22 offline smoke tests). `safety_lock.json`, `update_safety_lock.py`,
+   the 5 locked safety test files, `tests/legacy/*.txt`, `requirements.txt`, and
+   `frozen_inputs.json` are untouched. Locally broke `crc/core/age.py` (`os.getenv` + `datetime.now`
+   ref), `crc/cli/main.py` (removed `install_max_age_source()`), and
+   `scripts/offline_hook/sitecustomize.py` (removed `_deny_sockets()`) and verified each check/test
+   fired before restoring.
+4. **Scope & size limits:** Only lane-owned files changed (`22` files). All non-test files `<= 250`
+   lines (max `149` in `tests/archtest/bans.py`), all functions `<= 60` lines (max `40` in
+   `crc/cli/main.py:main`), and `README.md` `## Public API` sections in sync (`ARCH-002`, `ARCH-004`).
+5. **Gates:**
+   - `make lint` (`ruff check .`, `mypy`, `lint-imports`): green (`python3 -m mypy scripts` also green).
+   - `make smoke-offline`: `17/17 pairs passed` (`32.4s`).
+   - `make check` after `pip install -r requirements.txt -r requirements-dev.txt`: **44,461 passed in
+     62.27s** (`1m 08.3s` total wall time; `ARCH-008: 44461 tests, floor 44461`).
+
+VERDICT: APPROVE

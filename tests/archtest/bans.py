@@ -13,10 +13,10 @@ _ALL_KINDS = frozenset({"re", "clock", "env", "print", "sys.exit"})
 # `x = datetime.utcnow`) instead of called. crc/core and crc/cli are checked; the cloud packages
 # are only reported (`cloud_clock_refs`, "## Wave next") until their owners clean them up.
 
-# Banned kinds per package. crc/core is pure: no clock, no console output, no exits (its `re`
-# stays legal, crc/core/policy.py owns the regexes; its `env` ban waits for Wave B because
-# crc/core/age.py reads MAX_AGE at call time). crc/cli is the boundary and may read the
-# environment, print, read the clock and exit; it must not compile regexes. crc/notify gets the
+# Banned kinds per package. crc/core is pure: no clock (calls or value references), no
+# environment reads, no console output, no exits (`re` stays legal: crc/core/policy.py owns the
+# regexes). crc/cli is the boundary and may read the environment, print, call the clock and
+# exit; it must not compile regexes or pass the clock around as a value. crc/notify gets the
 # configuration injected: no env, exit or `re`; console output and timestamps are legitimate.
 PACKAGE_BANS: Mapping[str, frozenset[str]] = {
     **dict.fromkeys(CLOUD_PACKAGES, _ALL_KINDS),
@@ -25,8 +25,8 @@ PACKAGE_BANS: Mapping[str, frozenset[str]] = {
     "crc/notify": frozenset({"re", "env", "sys.exit"}),
 }
 
-# Explicit exceptions: repo-relative path -> banned kinds that file may use.
-# Kinds: "re", "clock", "env", "print", "sys.exit". Only the repository owner adds entries.
+# Explicit exceptions: repo-relative path -> banned kinds that file may use
+# ("re", "clock", "clock_ref", "env", "print", "sys.exit"). Only the repository owner adds entries.
 ARCH003_ALLOWLIST: Mapping[str, frozenset[str]] = {
     # Credential loading, owner-approved 2026-10-21: `Base` reads the credentials from the
     # environment when an Azure or OCI cleaner is built, exactly as on main. Reading them in

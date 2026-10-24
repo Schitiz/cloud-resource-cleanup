@@ -58,11 +58,21 @@ def test_hook_fakes_clients_and_denies_sockets() -> None:
     code = (
         "import boto3, socket\n"
         "assert not list(boto3.client('ec2').describe_regions()['Regions'])\n"
-        "try:\n    socket.create_connection(('127.0.0.1', 9))\n"
-        "except OSError as e:\n    print('denied', e)\n"
+        "calls = [\n"
+        "    lambda: socket.create_connection(('127.0.0.1', 9)),\n"
+        "    lambda: socket.socket().connect(('127.0.0.1', 9)),\n"
+        "    lambda: socket.getaddrinfo('127.0.0.1', 80),\n"
+        "]\n"
+        "for fn in calls:\n"
+        "    try:\n"
+        "        fn()\n"
+        "        raise AssertionError('not denied')\n"
+        "    except OSError as e:\n"
+        "        assert 'denied by the offline smoke hook' in str(e), e\n"
+        "print('all-denied')\n"
     )
     result = _python(code, offline_env())
-    assert result.stdout.startswith("denied"), result.stderr
+    assert result.returncode == 0 and result.stdout.strip() == "all-denied", result.stderr
 
 
 def test_production_code_never_references_the_hook() -> None:
