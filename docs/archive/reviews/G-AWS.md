@@ -79,3 +79,34 @@ Reviewed `git diff 5fc34af..HEAD` on branch `gb/aws` against the Lane G-AWS spec
    - `make doctor`: `doctor: ok (python 3.12.3, ruff, mypy, pytest at pinned versions)`
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+Reviewed `git diff 5fc34af..HEAD` (commits `fffe56d`, `ef692c5`) on `gb/aws`. Checked the round 1 fixes first, then ran each check myself. No code changes were needed in round 2.
+
+### Round 1 fixes checked
+
+- **`--age` required even with `custom_age_tag_key`** (`crc/aws/vm/cleaner.py` `build_vm_cleaner`): correct reading of the contract. A real run without a positive `--age` raises `ValueError` naming `--age`. A custom age tag still replaces the age for each tagged instance (`policy.effective_age`). Every real AWS VM run in the 47 production commands passes `--age`, so none of them is affected.
+- **BUG-213 parity marking** (`tests/test_aws_vm_parity.py`): `age-empty-matches-all` delete and stop are real runs again, with `diverges="BUG-213"` and the new outcome asserted. The dry-run twin still equals the oracle.
+- **Jenkins test shim** (`_install_pending_age_routes` in `tests/helpers_ag_cli_jenkins.py`): the shim forwards `--age` for Azure IP, Azure NIC and GCP IP only while BUG-075, BUG-112 or BUG-062 is `open`, so it is a test-only stand-in. I checked it against the real code of the other lanes. I copied `crc/azu`, `crc/cli/routes/azu.py` (from `origin/gb/azu` 45a574f), `crc/gcp` and `crc/cli/routes/gcp.py` (from `origin/gb/gcp` 9b279a4) onto HEAD, installed `gb/azu`'s requirements, and turned the shim off. `tests/test_jenkins_contract.py` gave 142 passed, so the frozen `"age": {"days": 1}` options match what the real routes produce. `gb/azu` marks BUG-075 and BUG-112 `fixed in G-AZU`, and `gb/gcp` marks BUG-062 `fixed in G-GCP`, so the shim turns itself off after the merge.
+- **BUG-084 row and the `pyproject.toml` revert**: confirmed.
+
+### Independent checks
+
+1. **The fixes are real and fail on the base.** With `crc/aws/vm` reset to `5fc34af`, the 27 BUG-213 tests fail (factory raise, dry run plans without mutating, a younger instance is kept on a real run, a custom tag overrides). With `crc/cli`, `crc/core/kinds.py` and `crc/aws/vpc` reset to the base, the 7 BUG-083 tests fail (`--resource vpc` exits 2 with the invalid choice error, and the removal must be listed). On HEAD they all pass.
+2. **Only the listed behaviour changed.** The fixture has exactly 47 `python3 crc.py` lines plus the 3-line header, and the 8 trailing spaces from the given content are kept. All 142 contract checks pass. Every other parity case equals the oracle. The only diverging cases carry BUG-213 (AWS VM) or the BUG-083 removal table. `tests/legacy/*.txt` is untouched.
+3. **Docs, BUGS.md, TODOs and locks.** No `TODO(BUG-213|083|142|283)` or VPC-only bug TODO is left. Every VPC-only row (BUG-012, 083, 085, 086, 089 to 095, 337, 367) reads `removed with --resource vpc`. The fixed ones (084, 087, 088) end in `; code removed with --resource vpc`. The rows still `open` that mention VPC (BUG-021, 371, 385) also cover other kinds, so they stay open. ARCH-012 is green. `safety_lock.json` only drops the lock on the deleted `tests/test_aws_vpc.py::...connectivity_error` under SAF-001. SAF-001 is a general rule and keeps its other locks. No SAF ID covered VPC only (base `CLEANUP_SAFETY.md` mentions `vpc` only in the CLI validation lines), so none is retired. Re-running `update_safety_lock.py` leaves the committed file byte-identical.
+4. **Owned files only.** Every changed file is in the lane's list or is a VPC test or README that had to change with the deletion. `crc/aws/disk/detach.py` changes only the BUG-283 comment. `pyproject.toml`, `crc/cli/routes/gcp.py` and `crc/cli/routes/azu.py` have no diff.
+5. **Sizes.** All touched non-test sources are at most 250 lines and functions at most 60 (ARCH-004 green). Some touched test files are over 250 lines. Tests are exempt, and all but `tests/test_cli_bridge_parity.py` (246 to 258 lines) were already over 250 on the base.
+
+### Notes for the owner (non-blocking)
+
+- `tests/archtest/test_count_floor.txt` was lowered by hand from 44674 to 43152 (now 43164) because the approved VPC test deletion removed about 1,500 tests. Please confirm.
+- After `gb/azu` and `gb/gcp` merge, the shim in `tests/helpers_ag_cli_jenkins.py` (`PENDING_AGE_ROUTES`, `_with_age`, `_install_pending_age_routes`) is dead code. Delete it in the merge wave.
+- To merge `gb/aws` with `gb/azu` you must resolve conflicts in `CLEANUP_SAFETY.md`, `docs/refactor/BUGS.md` and `test_count_floor.txt` by hand. They are separate rows and sections, not conflicting logic.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt && make check` exits 0. Ruff check passed and 369 files are formatted. Mypy: no issues in 368 source files. lint-imports: 5 contracts kept. pytest: **43,163 passed, 1 skipped in 68.31 s** (43,164 collected). ARCH-008: 43164 tests, floor 43164. Total `make check` wall clock: 89 s.
+
+ROUND 2 VERDICT: APPROVE
