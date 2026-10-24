@@ -67,12 +67,14 @@ class AgeGate:
         self._now: datetime.datetime | None = None
         self._created: dict[str, datetime.datetime | None] = {}
         self._error = ""
+        self._loaded = False
 
     def load(self, now: datetime.datetime) -> None:
         """Read the creation times of the resource type: one listing, made once per run."""
         self._now = now
-        if self._created or self._error:
+        if self._loaded:
             return
+        self._loaded = True
         try:
             listing = self._client_factory().resources.list_by_resource_group(
                 self._resource_group,
@@ -81,7 +83,7 @@ class AgeGate:
             )
             for resource in listing:
                 resource_id = getattr(resource, "id", None)
-                if isinstance(resource_id, str):
+                if isinstance(resource_id, str) and resource_id:
                     self._created[resource_id.lower()] = getattr(resource, "created_time", None)
         except Exception as e:  # noqa: BLE001 - fail closed: every resource is kept and the reason recorded
             self._created = {}

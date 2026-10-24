@@ -71,9 +71,10 @@ class AzureIpCleaner:
         skipped: list[Skipped] = []
         self._started = started = _logger.started()
         scanned = 0
+        ips = self.list_ips()
         if self._age_gate is not None:
             self._age_gate.load(context.now)
-        for ip in self.list_ips():
+        for ip in ips:
             scanned += 1
             candidate, reason = self.decide(ip)
             if candidate is not None:

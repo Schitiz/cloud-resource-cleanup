@@ -6,7 +6,6 @@ import pytest
 
 from crc.azu.disk import DEFAULT_DISK_STATES, AzureDiskCleaner, DiskSettings
 from crc.core.cleaner import Operation, Plan, RunContext
-from tests.helpers_azu_age_shim import legacy_age_rules  # noqa: F401 - autouse fixture
 from tests.helpers_azure_disk import NOW, FakeAzure, ago, disk
 from tests.helpers_wc_azu_engine import candidate_ids, engine_run
 
@@ -111,7 +110,7 @@ def test_engine_run_deletes_unattached_disks_only(monkeypatch: pytest.MonkeyPatc
         "filter_tags": {},
         "exception_tags": {},
         "notags": {},
-        "age": {},
+        "age": {"days": 1},
         "custom_age_tag_key": "",
     }
     outcome = engine_run("disk", options, dry_run=False, now=NOW)

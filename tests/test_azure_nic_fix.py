@@ -7,7 +7,6 @@ import pytest
 
 from crc.azu.nic import AzureNicCleaner
 from crc.core.cleaner import Operation, RunContext
-from tests.helpers_azu_age_shim import legacy_age_rules  # noqa: F401 - autouse fixture
 from tests.helpers_azure_nic import NOW, FakeAzure, nic
 from tests.helpers_wc_azu_engine import candidate_ids, engine_run
 
@@ -31,6 +30,7 @@ def _engine(group: str, name_regex: Any, exception_regex: Any = (), *, dry_run: 
         "resource_group": group,
         "name_regex": name_regex,
         "exception_regex": list(exception_regex),
+        "age": None if dry_run else {"days": 1},
     }
     return engine_run("nic", options, dry_run=dry_run, now=NOW)
 

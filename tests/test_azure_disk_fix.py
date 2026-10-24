@@ -9,7 +9,6 @@ import pytest
 from crc.azu.disk import AzureDiskCleaner, DiskSettings
 from crc.core import logger
 from crc.core.cleaner import Operation, RunContext
-from tests.helpers_azu_age_shim import legacy_age_rules  # noqa: F401 - autouse fixture
 from tests.helpers_azure_disk import NOW, FakeAzure, disk
 from tests.helpers_wc_azu_engine import candidate_ids, engine_run
 
@@ -108,7 +107,7 @@ def test_bug_174_engine_continues_and_lists_only_deleted(
         "filter_tags": {},
         "exception_tags": {},
         "notags": {},
-        "age": {},
+        "age": {"days": 1},
         "custom_age_tag_key": "",
     }
     outcome = engine_run("disk", options, dry_run=False, now=NOW)

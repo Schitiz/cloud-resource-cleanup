@@ -6,7 +6,6 @@ import pytest
 
 from crc.azu.ip import AzureIpCleaner
 from crc.core.cleaner import Operation, Plan, RunContext
-from tests.helpers_azu_age_shim import legacy_age_rules  # noqa: F401 - autouse fixture
 from tests.helpers_azure_ip import NOW, FakeAzure, ip
 from tests.helpers_wc_azu_engine import candidate_ids, engine_run
 
@@ -134,6 +133,7 @@ def test_engine_run_with_injected_client(monkeypatch: pytest.MonkeyPatch) -> Non
         "filter_tags": {"env": []},
         "exception_tags": {},
         "notags": {},
+        "age": {"days": 1},
     }
     outcome = engine_run("ip", options, dry_run=False, now=NOW)
     assert candidate_ids(outcome) == ["a"]

@@ -27,7 +27,6 @@ from tests import helpers_azure_spot as hs
 from tests import helpers_azure_vm as hv
 from tests.helpers_ad_spot_engine import run_through_engine
 from tests.helpers_ad_vm_engine import run_vm
-from tests.helpers_azu_age_shim import legacy_age_rules  # noqa: F401 - autouse fixture
 from tests.helpers_wc_azu_engine import candidate_ids, engine_run
 
 _PREFIXES = ("RUN START", "REGION", "ACTION", "SKIPPED", "ERRORS", "FAILED", "RESULT")
@@ -81,7 +80,7 @@ def _disk(*, dry_run: bool = False) -> Any:
         "resource_group": "rg",
         "filter_tags": ENV,
         "exception_tags": None,
-        "age": None,
+        "age": None if dry_run else {"days": 1},
         "custom_age_tag_key": None,
         "notags": None,
     }
@@ -155,6 +154,7 @@ def _engine_ip(*, dry_run: bool) -> None:
         "filter_tags": ENV,
         "exception_tags": {},
         "notags": {},
+        "age": None if dry_run else {"days": 1},
     }
     engine_run("ip", options, dry_run=dry_run, now=hi.NOW)
 
@@ -193,7 +193,12 @@ def test_ip_real_and_dry_run(
 
 
 def _engine_nic(*, dry_run: bool) -> Any:
-    options = {"resource_group": "rg", "name_regex": ["nic"], "exception_regex": None}
+    options = {
+        "resource_group": "rg",
+        "name_regex": ["nic"],
+        "exception_regex": None,
+        "age": None if dry_run else {"days": 1},
+    }
     return engine_run("nic", options, dry_run=dry_run, now=hn.NOW)
 
 

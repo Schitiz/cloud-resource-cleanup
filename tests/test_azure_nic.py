@@ -6,7 +6,6 @@ import pytest
 
 from crc.azu.nic import AzureNicCleaner
 from crc.core.cleaner import Operation, Plan, RunContext
-from tests.helpers_azu_age_shim import legacy_age_rules  # noqa: F401 - autouse fixture
 from tests.helpers_azure_nic import NOW, FakeAzure, nic
 from tests.helpers_wc_azu_engine import candidate_ids, engine_run
 
@@ -168,7 +167,12 @@ def test_supports_only_delete() -> None:
 def test_engine_run_with_injected_client(monkeypatch: pytest.MonkeyPatch) -> None:
     azure = FakeAzure([nic("nic-a"), nic("other")])
     azure.install(monkeypatch)
-    options = {"resource_group": "rg", "name_regex": ["nic"], "exception_regex": []}
+    options = {
+        "resource_group": "rg",
+        "name_regex": ["nic"],
+        "exception_regex": [],
+        "age": {"days": 1},
+    }
     outcome = engine_run("nic", options, dry_run=False, now=NOW)
     assert candidate_ids(outcome) == ["nic-a"]
     assert [section.ids for section in outcome.report.sections] == [("nic-a",)]

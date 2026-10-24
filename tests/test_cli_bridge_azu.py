@@ -36,7 +36,6 @@ from crc.cli.inputs import Targets, read_options
 from crc.cli.routes import NotifyMode, skips
 from crc.cli.runner import CRC
 from crc.core import logger
-from tests.helpers_azu_age_shim import legacy_age_rules  # noqa: F401 - autouse fixture
 from tests.helpers_cl2_azu import FULL, Logs, Scenario, build, oracle_module, run_oracle_pair
 from tests.helpers_cl2_azu_frozen import FIXED, RUN_LOG
 from tests.helpers_cli_azu import KINDS, Kind, case_key
@@ -53,12 +52,14 @@ MODES = [
 
 
 def _flags(kind: Kind, dry_run: bool) -> dict[str, Any]:
+    extra = {"age": {"days": 1}} if kind.resource == "nic" and not dry_run else {}
     return {
         "cloud": "azure",
         "resource": kind.resource,
         "operation_type": kind.operation,
         "dry_run": dry_run,
         "resource_group": "rg",
+        **extra,
         **kind.flags,
     }
 
@@ -173,7 +174,10 @@ def _expected(
     """The routed outcome: `main`'s, with the fixed-bug divergences, and the frozen run log."""
     view = _oracle_view(kind, old)
     run_log = RUN_LOG[(case_key(kind), variant, dry)]
-    expected = {**view, "ordered": list(run_log[0]), "regions": list(run_log[1])}
+    ordered = list(run_log[0])
+    if kind.resource == "nic" and not dry:
+        ordered[0] = ordered[0].replace("dry_run=false ", 'dry_run=false age={"days":1} ')
+    expected = {**view, "ordered": ordered, "regions": list(run_log[1])}
     fixed = FIXED.get((case_key(kind), variant, dry, slack, influx), {})
     for field, value in fixed.items():
         assert value != view[field], f"{field}: not a divergence from main"

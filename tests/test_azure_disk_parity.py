@@ -34,7 +34,6 @@ import pytest
 from crc.azu.disk import AzureDiskCleaner, build_disk_cleaner
 from crc.core.cleaner import Cleaner, Operation, RunContext
 from crc.core.registry import get
-from tests.helpers_azu_age_shim import legacy_age_rules  # noqa: F401 - autouse fixture
 from tests.helpers_azure_disk import NOW, FakeAzure, ago, disk
 from tests.helpers_log_fix import expected_logs
 from tests.helpers_wc_azu_engine import candidate_ids, engine_run
@@ -64,7 +63,7 @@ class Case:
     filter_tags: Any = field(default_factory=dict)
     exception_tags: Any = field(default_factory=dict)
     notags: Any = field(default_factory=dict)
-    age: Any = field(default_factory=dict)
+    age: Any = field(default_factory=lambda: {"days": 1})
     custom_key: Any = ""
     dry_run: bool = False
     resource_group: str = "rg-test"
@@ -161,10 +160,15 @@ CASES = [
         age={"days": 1, "hours": 2},
     ),
     Case("age-int", [disk("a", created=ago(days=3)), disk("b", created=ago(days=1))], age=2),
-    Case("age-empty-matches-all", [disk("a", created=ago(minutes=1))]),
-    Case("age-none-matches-all", [disk("a", created=ago(minutes=1))], age=None),
-    Case("age-zero-matches-all", [disk("a", created=ago(minutes=1))], age=0),
-    Case("age-unknown-key-never-old", [disk("a", created=ago(days=99))], age={"weeks": 1}),
+    Case("age-empty-matches-all", [disk("a", created=ago(minutes=1))], age={}, diverges="BUG-173"),
+    Case("age-none-matches-all", [disk("a", created=ago(minutes=1))], age=None, diverges="BUG-173"),
+    Case("age-zero-matches-all", [disk("a", created=ago(minutes=1))], age=0, diverges="BUG-173"),
+    Case(
+        "age-unknown-key-never-old",
+        [disk("a", created=ago(days=99))],
+        age={"weeks": 1},
+        diverges="BUG-173",
+    ),
     Case(
         "age-max-age-shortens",
         [disk("a", created=ago(days=2))],
@@ -615,6 +619,12 @@ def _begin_deletes(calls: Sequence[tuple[Any, ...]], case: Case, names: Sequence
 
 
 def _assert_diverges(case: Case, old: Outcome, new: Outcome) -> None:
+    if case.diverges == "BUG-173":
+        assert old.error is None, "oracle changed"
+        assert old.deleted == ([] if case.id == "age-unknown-key-never-old" else ["a"])
+        assert new.error is not None and new.error[0] == "ValueError" and "--age" in new.error[1]
+        assert new.deleted == [] and new.calls == [] and new.waited == [] and new.logs == []
+        return
     fixed = DIVERGING[case.id]
     assert case.diverges == "BUG-174"
     assert (old.error[1] if old.error else None) == fixed.old_error, "oracle changed"
@@ -656,9 +666,6 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
     ("exception-wins-over-filter", lambda o: o.deleted == []),
     ("notags-all-keys-skips", lambda o: o.deleted == []),
     ("notags-partial-keeps", lambda o: o.deleted == ["a"]),
-    ("age-empty-matches-all", lambda o: o.deleted == ["a"]),
-    ("age-zero-matches-all", lambda o: o.deleted == ["a"]),
-    ("age-unknown-key-never-old", lambda o: o.deleted == []),
     ("age-days-exact", lambda o: o.deleted == ["a"]),
     ("age-max-age-shortens", lambda o: o.deleted == ["a"]),
     ("custom-age-tag-unparseable-falls-back", lambda o: o.deleted == []),

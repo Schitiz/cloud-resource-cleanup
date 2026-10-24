@@ -3,7 +3,7 @@
 A real run of the Azure disk, IP and NIC cleaners needs a positive `--age`; a dry run does not.
 IP and NIC creation times come from the resource management client (`expand="createdTime"`),
 read once per run and resource type; a resource without one, or any resource when the lookup
-fails, is kept. These tests do not use the `legacy_age_rules` shim.
+fails, is kept.
 """
 
 import datetime
@@ -156,8 +156,7 @@ def test_bug_075_ip_age_gate_deletes_old_and_keeps_young_unknown_and_unlisted(
     assert resources.calls == [
         ("rg", "resourceType eq 'Microsoft.Network/publicIPAddresses'", "createdTime")
     ]
-    reasons = {s.id: s.reason for s in outcome.plan.skipped}
-    assert reasons == {
+    assert {s.id: s.reason for s in outcome.plan.skipped} == {
         "young": "not older than the age threshold",
         "unknown": "no creation time",
         "unlisted": "no creation time",
@@ -218,8 +217,7 @@ def test_bug_112_nic_age_gate_deletes_old_and_keeps_young_unknown_and_unlisted(
     assert resources.calls == [
         ("rg", "resourceType eq 'Microsoft.Network/networkInterfaces'", "createdTime")
     ]
-    reasons = {s.id: s.reason for s in outcome.plan.skipped}
-    assert reasons == {
+    assert {s.id: s.reason for s in outcome.plan.skipped} == {
         "nic-young": "not older than the age threshold",
         "nic-unknown": "no creation time",
         "nic-unlisted": "no creation time",
@@ -237,12 +235,7 @@ def test_bug_112_nic_lookup_failure_keeps_every_nic(monkeypatch: pytest.MonkeyPa
 
 
 def test_bug_173_disk_age_still_gates_a_real_run(monkeypatch: pytest.MonkeyPatch) -> None:
-    azure = DiskAzure(
-        [
-            disk("old", TAGS, created=disk_ago(days=3)),
-            disk("young", TAGS, created=disk_ago(hours=1)),
-        ]
-    )
+    azure = DiskAzure([disk("old", TAGS, disk_ago(days=3)), disk("young", TAGS, disk_ago(hours=1))])
     azure.install(monkeypatch)
     options = {"resource_group": "rg", "filter_tags": FILTER, "age": {"days": 1}}
     assert candidate_ids(engine_run("disk", options, dry_run=False, now=NOW)) == ["old"]
@@ -258,5 +251,4 @@ def test_routes_pass_the_age_option_for_ip_and_nic() -> None:
         exception_tags=None,
         notags=None,
     )
-    assert azu_routes._ip(options)["age"] == {"days": 1}
-    assert azu_routes._nic(options)["age"] == {"days": 1}
+    assert (azu_routes._ip(options)["age"], azu_routes._nic(options)["age"]) == ({"days": 1},) * 2
