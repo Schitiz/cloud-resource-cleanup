@@ -27,7 +27,7 @@ from crc.core import engine
 from crc.core.cleaner import Cleaner, Operation, RunContext
 from crc.core.registry import Registry, get
 from crc.core.selection import Selection
-from crc.gcp.vm import VmCleaner, build_vm_cleaner
+from crc.gcp.vm import VmCleaner, VmSettings, build_vm_cleaner
 from tests.helpers_log_fix import expected_logs
 from tests.log_fix_gcp import RULES
 
@@ -1081,3 +1081,9 @@ def test_bug_358_label_dump_is_debug_not_info(
     assert not [m for m in info if m.startswith(("{", "namespace("))]
     dumps = [m for _, level, m in old.logs if level == logging.INFO]
     assert any(m.startswith(("{", "namespace(")) for m in dumps)
+
+
+def test_default_instance_state_matches_main() -> None:
+    old = _load_oracle().VM
+    settings = VmSettings(PROJECT, None, None, None, DAY, "")
+    assert list(settings.instance_state) == list(old.default_instance_state)
