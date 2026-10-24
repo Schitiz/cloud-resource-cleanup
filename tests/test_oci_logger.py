@@ -12,11 +12,12 @@ from oci.exceptions import ConnectTimeout
 
 from crc.core import logger
 from crc.core.cleaner import Operation, RunContext
-from crc.oci.disk import Disk, DiskCleaner, DiskRuntime, DiskSettings
+from crc.oci.disk import DiskCleaner, DiskSettings
 from crc.oci.spot_vm import SpotVM, SpotVmCleaner, SpotVmRuntime
 from crc.oci.spot_vm.client import RegionClients
 from crc.oci.spot_vm.decide import SpotVmSettings
 from crc.oci.vm import VM, VmCleaner, VmRuntime, VmSettings
+from tests.helpers_wc_oci_disk import run_disk
 
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=datetime.UTC)
 FILTER = {"env": ["ci"]}
@@ -230,16 +231,8 @@ class DiskApi:
             raise self.failing[volume_id]
 
 
-def _disk(apis: Mapping[str, Any], *, dry_run: bool) -> Any:
-    def factory(region: str) -> Any:
-        api = apis[region]
-        if isinstance(api, Exception):
-            raise api
-        return api
-
-    return Disk(
-        dry_run, FILTER, {}, AGE, "", {}, DiskRuntime(factory, lambda: list(apis), lambda: NOW)
-    )
+def _disk(apis: Mapping[str, Any], *, dry_run: bool) -> None:
+    run_disk(apis, dry_run=dry_run, settings=DiskSettings(FILTER, {}, {}, AGE, ""), now=NOW)
 
 
 DISKS = [vol("a"), vol("b", hours=1), vol("c", state="CREATING"), vol("att")]
@@ -248,18 +241,26 @@ DISKS = [vol("a"), vol("b", hours=1), vol("c", state="CREATING"), vol("att")]
 @pytest.mark.parametrize(
     ("dry_run", "kind", "done"), [(False, "deleted", 2), (True, "would_delete", 0)]
 )
-def test_disk_adapter_reports_regions_actions_skips_and_result(
+def test_disk_engine_reports_regions_actions_skips_and_result(
     caplog: pytest.LogCaptureFixture, dry_run: bool, kind: str, done: int
 ) -> None:
     caplog.set_level(logging.DEBUG)
     _begin("disk", dry_run=dry_run)
     api = DiskApi(DISKS, [vol("boot")], attached=["att"])
-    _disk({"r1": api, "r2": _timeout()}, dry_run=dry_run).delete()
+    _disk({"r1": api, "r2": _timeout()}, dry_run=dry_run)
     logger.finish()
-    assert _lines(caplog, "ACTION", "REGION", "SKIPPED", "ERRORS", "RESULT") == [
+    actions = [
         (logging.INFO, f"ACTION {kind} cloud=oci resource=disk region=r1 id=a name=name-a"),
         (logging.INFO, f"ACTION {kind} cloud=oci resource=disk region=r1 id=boot name=name-boot"),
-        (logging.INFO, "REGION cloud=oci resource=disk region=r1 scanned=5 selected=2 seconds=0"),
+    ]
+    region = (
+        logging.INFO,
+        "REGION cloud=oci resource=disk region=r1 scanned=5 selected=2 seconds=0",
+    )
+    # plan() logs REGION before apply() deletes; a dry run logs its ACTION lines in plan().
+    ordered = [region, *actions] if not dry_run else [*actions, region]
+    assert _lines(caplog, "ACTION", "REGION", "SKIPPED", "ERRORS", "RESULT") == [
+        *ordered,
         (logging.INFO, "SKIPPED cloud=oci resource=disk reason=attached count=1"),
         (logging.INFO, "SKIPPED cloud=oci resource=disk reason=state count=1"),
         (logging.INFO, "SKIPPED cloud=oci resource=disk reason=too_young count=1"),
@@ -277,7 +278,7 @@ def test_disk_failed_delete_is_listed_at_the_end(caplog: pytest.LogCaptureFixtur
     caplog.set_level(logging.INFO)
     _begin("disk", dry_run=False)
     api = DiskApi([vol("a"), vol("b")], failing={"a": RuntimeError("busy")})
-    _disk({"r1": api}, dry_run=False).delete()
+    _disk({"r1": api}, dry_run=False)
     logger.finish()
     assert _lines(caplog, "ERRORS", "FAILED", "RESULT") == [
         (logging.ERROR, "ERRORS count=1"),

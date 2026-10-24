@@ -15,8 +15,9 @@ from oci.exceptions import ConnectTimeout, RequestException, ServiceError
 
 from crc.core import logger
 from crc.core.cleaner import Operation, RunContext
-from crc.oci.disk import Disk, DiskCleaner, DiskRuntime, DiskSettings
+from crc.oci.disk import DiskCleaner, DiskSettings
 from crc.oci.disk.api import SdkAttachment, VolumeApi
+from tests.helpers_wc_oci_disk import run_disk
 from tests.test_oci_disk import MUTATING, NOW, FakeApi, att, vol
 
 FILTER = {"env": ["ci"]}
@@ -211,22 +212,14 @@ def test_run_log_counts_one_skipped_region_and_each_kept_volume() -> None:
     assert run._skips == {"attachments_unknown": 3}
 
 
-def test_adapter_keeps_volumes_with_unknown_attachments(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("OCI_PRIVATE_KEY_CONTENT", "not-a-key")
-    monkeypatch.setattr("crc.service.init_logging", lambda *args, **kwargs: None)
-    monkeypatch.delenv("MAX_AGE", raising=False)
+def test_engine_keeps_volumes_with_unknown_attachments() -> None:
     api = FlakyApi(
         volumes=[vol("a")],
         boot_volumes=[vol("b")],
         attachments_error=ConnectTimeout(Exception("x")),
         domains=[],
     )
-    runtime = DiskRuntime(
-        api_factory=lambda region: api, list_regions=lambda: ["r1"], clock=lambda: NOW
-    )
-    disk = Disk(False, FILTER, {}, {"hours": 5}, "", {}, runtime)
-    disk.delete()
-    assert disk.get_deleted == []
+    outcome = run_disk({"r1": api}, dry_run=False, settings=SETTINGS, now=NOW)
+    assert outcome.result is not None
+    assert outcome.result.succeeded == ()
     assert mutations(api) == []

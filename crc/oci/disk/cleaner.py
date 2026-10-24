@@ -3,7 +3,7 @@
 """OCI block volume and boot volume cleaner (`DiskCleaner`).
 
 `plan()` lists the volumes, boot volumes and attachments of every region and decides on them;
-`apply()` calls `delete_volume` / `delete_boot_volume`. The legacy class `Disk` is in `adapter.py`.
+`apply()` calls `delete_volume` / `delete_boot_volume`.
 """
 
 import dataclasses
@@ -38,28 +38,19 @@ from crc.oci.disk.settings import (
     LIST_CONTEXT,
     SKIP_KEYS,
     UNKNOWN_REASONS,
-    Clock,
-    DiskRuntime,
     DiskSettings,
     TagSpec,
     log_summary,
 )
-
-_LIST_CONTEXT = LIST_CONTEXT
-_log_summary = log_summary
 
 __all__ = [
     "IN_USE_ATTACHMENT_STATES",
     "KIND_BOOT_DISK",
     "KIND_DISK",
     "SKIP_KEYS",
-    "_LIST_CONTEXT",
-    "Clock",
     "DiskCleaner",
-    "DiskRuntime",
     "DiskSettings",
     "TagSpec",
-    "_log_summary",
     "build_disk_cleaner",
 ]
 
@@ -81,8 +72,8 @@ class DiskCleaner:
         engine: bool = False,
     ) -> None:
         """`engine` is True for the cleaner `crc.core.engine` builds: a dry-run `plan()` then
-        logs the ACTION lines per region and names its candidates by display name, the names
-        the legacy adapter reported (the engine never calls `apply()` in a dry run)."""
+        logs the ACTION lines per region and names its candidates by display name (the engine
+        never calls `apply()` in a dry run)."""
         self._engine = engine
         self._api_factory = api_factory
         self._list_regions = list_regions
