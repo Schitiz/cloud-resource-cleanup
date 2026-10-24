@@ -22,3 +22,44 @@ Lane F-GATE (gates and dependency hygiene). This lane routes no kinds and delete
 - `crc/cli/README.md` or `README.md` install section: `pip install -r requirements.txt -r requirements-dev.txt -c constraints.txt`; CI has a non-blocking `pip-audit` report job.
 - `crc.py` is type-checked by `tests/test_crc_entry_types.py`, not by `mypy` with no arguments.
 - `pyproject.toml` comment text above `[tool.mypy]` already describes the crc.py check.
+
+## Round 1 (Argon)
+
+Reviewed `git diff f8ed6dd..HEAD` on branch `fw/gate` against the Lane F-GATE specification, the third-round audits (`AGENT-NATIVE-AUDIT-3.md`, `AGENT-NATIVE-AUDIT-3-GPT.md`), and the final wave contract.
+
+### Findings (fixed in round 1)
+
+1. **`tests/archtest/test_arch003_bans.py:217-239`**: Commit `3262bb3` removed three existing boundary/notify self-tests (`test_arch003_selftest_boundary_packages_ban_re`, `test_arch003_selftest_notify_gets_config_injected`, and `test_arch003_selftest_boundary_keeps_its_legitimate_constructs`, 5 parameterized test items) when replacing `test_arch003_cloud_clock_refs_are_reported_not_failed` with the cloud `clock_ref` self-tests. Restored all three self-tests so `crc/cli` and `crc/notify` ban coverage in `test_arch003_bans.py` is not weakened, and raised the test-count floor (`44647` -> `44652`) via `make raise-test-floor`.
+2. **`tests/test_crc_entry_types.py:18,47,53`**: `_type_check` wrote both the valid `crc.py` copy and the intentionally broken copy to the same filename (`workdir / "crc_entry.py"`) while sharing `workdir / "mypy_cache"`. Parameterized the target filename (`crc_entry.py` vs `crc_entry_broken.py`) so the two tests still share the cached `crc.*` dependency graph without overwriting the same target file path in the shared cache.
+3. **`tests/archtest/frozen_inputs.py:13`**: Updated `_REMEDIATION` to name `constraints.txt` alongside `requirements.txt`, matching the updated module docstring and `update_frozen_inputs.py`.
+
+### Checklist Verification
+
+1. **Every lane task item done and verified in code:**
+   - **(1) `constraints.txt` & `ARCH-007`:** `constraints.txt` drops `paramiko`, `beautifulsoup4`, and their orphaned transitive dependencies (`bcrypt`, `pynacl`, `invoke`, `soupsieve`), keeps `requests` (required by `msrest`, `azure-core`, `oci`, `google-api-core`, `pip-audit`; verified `pip check` reports `No broken requirements found` in a fresh isolated venv), and adds `pip-audit==2.10.1` and its dependencies. `tests/archtest/frozen_inputs.py:23-25` locks `constraints.txt` alongside `requirements.txt`, `tests/archtest/frozen_inputs.json` was regenerated via `tests/archtest/update_frozen_inputs.py` (owner-approved in contract), and `tests/archtest/test_arch007_frozen_inputs.py:29,59-64` tests it.
+   - **(2) Empty `legacy_baseline.txt` & type-check `crc.py`:** `tests/archtest/legacy_baseline.txt` contains only a comment (`frozenset()`), `tests/archtest/test_arch001_ratchet.py:38-41,85-96` verifies the empty baseline and that no file can re-enter `extend-exclude`, `pyproject.toml` removes `exclude = ['^crc\.py$']`, and `tests/test_crc_entry_types.py` type-checks `crc.py` under strict project mypy settings (with a negative test proving a type error fails).
+   - **(3) `ARCH-003` cloud clock references:** `crc/aws/spot_instance_requests/runtime.py` drops the unused `SpotRuntime.clock` field, `Clock`, and `_UTC_CLOCK` (`SpotRequestCleaner` already uses `RunContext.now`); `crc/gcp/spot_vm/cleaner.py:164,187` requires `clock: Clock` on `preview_instance` and `apply_instance` (wired to `lambda: context.now` in `plan` and `apply`); `crc/gcp/spot_vm/disks.py:87,98-99,114` changes `disk_ok_to_delete` default from `datetime.datetime.now` to `clock: Clock | None = None` and fails closed (`disk_age_unknown`) if a custom age label is present without an injected clock (preserving the 4-arg call in hash-locked `GcpDeleteOrderTests::test_disk_exception_labels_skip_delete`). `tests/archtest/bans.py:11` adds `"clock_ref"` to `_ALL_KINDS` (banning it across `crc/aws`, `crc/azu`, `crc/gcp`, `crc/oci`) and removes `cloud_clock_refs`. Covered by `tests/archtest/test_arch003_bans.py:191-215` and `tests/test_gate_clock_injection.py`.
+   - **(4) Suite-wide network deny:** `tests/conftest.py:42-97` installs an `autouse=True` `_deny_network` fixture that raises `NetworkDeniedError` on `socket.socket.connect`, `connect_ex`, `sendto`, and `socket.getaddrinfo` for any target other than `AF_UNIX` and localhost/loopback (`localhost`, `127.0.0.0/8`, `::1`, `0.0.0.0`, `""`). `tests/test_network_deny.py` proves all 5 denial paths and both local allowances. All 44,651 non-skipped tests pass without network access.
+   - **(5) `make smoke-offline` in CI & `make doctor`:** `.github/workflows/ci.yml:22-24` runs `make doctor`, `make check`, and `make smoke-offline`. `Makefile:47-48` and `scripts/doctor.py` check the Python version against `pyproject.toml` `requires-python` and `ruff`/`mypy`/`pytest` against `constraints.txt`, printing the exact install command on mismatch (`tests/test_doctor.py`). Neither is added to docs owned by `F-DOCS`; the doc lines for `F-DOCS` are listed above.
+   - **(6) `pip-audit` in CI:** `pip-audit==2.10.1` is pinned in `requirements-dev.txt` and `constraints.txt`, and `.github/workflows/ci.yml:27-41` runs `pip-audit --desc --progress-spinner off` in a non-blocking `audit` job (`continue-on-error: true`).
+2. **CLI & behaviour parity:** `python3 crc.py --help` output is identical to `f8ed6dd`. `crc.py`, `crc/cli/**`, `crc/core/**`, `crc/notify/**`, and `tests/test_jenkins_contract.py` have zero diff against `f8ed6dd`. The only parity test edit (`tests/test_aws_spot_instance_requests_parity.py:821,847`) removes the unused `clock=lambda: NOW` keyword argument from `SpotRuntime(...)` construction; all assertions are unchanged.
+3. **Guardrails & local sabotage verification:** `tests/legacy/*.txt`, `tests/archtest/safety_lock.json`, all 69 hash-locked safety test functions, `requirements.txt`, `CLEANUP_SAFETY.md`, and `docs/refactor/BUGS.md` are untouched. Locally broke three new checks without committing and confirmed each fired before restoring:
+   - Re-adding `clock: Clock = datetime.datetime.now` in `crc/gcp/spot_vm/disks.py` failed `test_arch003_bans.py` with `ARCH-003: crc/gcp/spot_vm/disks.py:114 uses banned clock_ref`.
+   - Appending a line to `constraints.txt` failed `test_arch007_frozen_inputs.py` with `ARCH-007: constraints.txt changed`.
+   - Adding `"crc.py"` to `extend-exclude` in `pyproject.toml` failed `test_arch001_ratchet.py` with `ARCH-001: ruff extend-exclude gained entries not in legacy_baseline.txt: ['crc.py']`.
+4. **Owned files:** All 31 changed files belong to `F-GATE` (`crc/aws/spot_instance_requests/cleaner.py` and `crc/aws/spot_instance_requests/README.md` only drop the dead `Clock` re-export and `clock` field mention from `SpotRuntime` in `runtime.py`, and are disjoint from `origin/fw/docs` and `origin/fw/kind`). `tests/archtest/doc_links.py`, `tests/archtest/test_arch011_doc_links.py`, and `tests/archtest/README.md` are untouched.
+5. **Size limits & README Public API sync:** Every touched non-test file is `<= 250` lines (max: `crc/gcp/spot_vm/cleaner.py` at 244 lines, `crc/aws/spot_instance_requests/cleaner.py` at 195 lines, `crc/gcp/spot_vm/disks.py` at 164 lines, `tests/archtest/bans.py` at 159 lines, `scripts/doctor.py` at 97 lines) and every function is `<= 60` lines (`ARCH-004` green). Package `README.md` `Public API` sections are in sync (`ARCH-002` green).
+6. **Gates:**
+   - `pip install -r requirements.txt -r requirements-dev.txt -c constraints.txt && make check`:
+     - `ruff check .`: All checks passed
+     - `ruff format --check .`: 376 files already formatted
+     - `mypy`: Success: no issues found in 375 source files
+     - `lint-imports`: 5 contracts kept, 0 broken
+     - `pytest -q -n auto`: **44,651 passed, 1 skipped in 57.34s** (44,652 collected, floor 44,652; +55 from `f8ed6dd`)
+     - `python3 -m tests.archtest.test_count check`: `ARCH-008: 44652 tests, floor 44652`
+     - Total `make check` runtime: **1m03.9s** wall clock
+   - `make doctor`: `doctor: ok (python 3.12.3, ruff, mypy, pytest at pinned versions)`
+   - `make smoke-offline`: `17/17 pairs passed`
+
+VERDICT: APPROVE
+

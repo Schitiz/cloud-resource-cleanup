@@ -15,8 +15,8 @@ from mypy import api
 from tests.archtest._common import REPO_ROOT
 
 
-def _type_check(source: str, workdir: Path) -> tuple[str, int]:
-    entry = workdir / "crc_entry.py"
+def _type_check(source: str, workdir: Path, filename: str = "crc_entry.py") -> tuple[str, int]:
+    entry = workdir / filename
     entry.write_text(source, encoding="utf-8")
     old = os.environ.get("MYPYPATH")
     os.environ["MYPYPATH"] = str(REPO_ROOT)
@@ -45,12 +45,14 @@ def workdir(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 def test_crc_py_passes_strict_mypy(workdir: Path) -> None:
     source = (REPO_ROOT / "crc.py").read_text(encoding="utf-8")
-    stdout, status = _type_check(source, workdir)
+    stdout, status = _type_check(source, workdir, "crc_entry.py")
     assert status == 0, stdout
 
 
 def test_crc_py_type_check_fires_on_a_type_error(workdir: Path) -> None:
     source = (REPO_ROOT / "crc.py").read_text(encoding="utf-8")
-    stdout, status = _type_check(source + "\nBROKEN: int = 'text'\n", workdir)
+    stdout, status = _type_check(
+        source + "\nBROKEN: int = 'text'\n", workdir, "crc_entry_broken.py"
+    )
     assert status == 1
-    assert "BROKEN" in stdout or "crc_entry.py" in stdout
+    assert "BROKEN" in stdout or "crc_entry_broken.py" in stdout

@@ -10,7 +10,7 @@ RULE = "ARCH-007"
 MANIFEST_PATH = Path(__file__).resolve().parent / "frozen_inputs.json"
 _REMEDIATION = (
     "These inputs are frozen: `tests/legacy/*.txt` are the main-branch oracles the parity "
-    "tests compare against, and `requirements.txt` may not gain dependencies (AGENTS.md "
+    "tests compare against, and `requirements.txt` and `constraints.txt` may not change (AGENTS.md "
     "rules 3 and 7). Restore the file with `git checkout -- <path>` and change the code or the "
     "test instead. Never run `tests/archtest/update_frozen_inputs.py` and never edit "
     "`frozen_inputs.json`: both are owner-only. If a frozen input must change, stop and hand "

@@ -213,3 +213,27 @@ def test_arch003_selftest_cloud_package_may_take_a_clock_parameter(tmp_path: Pat
     )
     _write(tmp_path, source, "crc/gcp/new_mod.py")
     assert check_bans(tmp_path, frozenset(), {}) == []
+
+
+@pytest.mark.parametrize("package", ["crc/cli", "crc/notify"])
+def test_arch003_selftest_boundary_packages_ban_re(tmp_path: Path, package: str) -> None:
+    _write(tmp_path, "import re\n", f"{package}/new_mod.py")
+    assert len(check_bans(tmp_path, frozenset())) == 1
+
+
+@pytest.mark.parametrize(
+    "snippet", ["import os\n\nx = os.getenv('A')\n", "import sys\n\nsys.exit(1)\n"]
+)
+def test_arch003_selftest_notify_gets_config_injected(tmp_path: Path, snippet: str) -> None:
+    _write(tmp_path, snippet, "crc/notify/new_mod.py")
+    assert len(check_bans(tmp_path, frozenset())) == 1
+
+
+def test_arch003_selftest_boundary_keeps_its_legitimate_constructs(tmp_path: Path) -> None:
+    source = (
+        "import os\nimport sys\nimport time\n\n"
+        "x = os.environ['A']\nprint(time.time())\nsys.exit(1)\n"
+    )
+    _write(tmp_path, source, "crc/cli/new_mod.py")
+    _write(tmp_path, "import time\n\nprint(time.time())\n", "crc/notify/new_mod.py")
+    assert check_bans(tmp_path, frozenset()) == []
