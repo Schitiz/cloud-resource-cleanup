@@ -9,7 +9,6 @@ from tests.archtest.bans import (
     ARCH003_ALLOWLIST,
     PACKAGE_BANS,
     check_bans,
-    cloud_clock_refs,
 )
 
 BAD_SNIPPETS = {
@@ -189,35 +188,28 @@ def test_arch003_selftest_cli_may_call_the_clock(tmp_path: Path) -> None:
     assert check_bans(tmp_path, frozenset()) == []
 
 
-def test_arch003_cloud_clock_refs_are_reported_not_failed(tmp_path: Path) -> None:
-    _write(tmp_path, CLOCK_REF_BAD["time-value"], "crc/gcp/new_mod.py")
-    _write(tmp_path, "import datetime\n\nx = datetime.datetime.now()\n", "crc/aws/call_mod.py")
-    assert check_bans(tmp_path, frozenset(), {}) != []  # the call is still a failure
-    assert cloud_clock_refs(tmp_path, frozenset()) == ["crc/gcp/new_mod.py:3"]
-    only_ref = tmp_path / "crc/aws/call_mod.py"
-    only_ref.unlink()
-    assert check_bans(tmp_path, frozenset()) == []
+def test_arch003_cloud_packages_ban_the_clock_as_a_value() -> None:
+    for package in ("crc/aws", "crc/azu", "crc/gcp", "crc/oci"):
+        assert {"clock", "clock_ref"} <= PACKAGE_BANS[package]
 
 
-@pytest.mark.parametrize("package", ["crc/cli", "crc/notify"])
-def test_arch003_selftest_boundary_packages_ban_re(tmp_path: Path, package: str) -> None:
-    _write(tmp_path, "import re\n", f"{package}/new_mod.py")
-    assert len(check_bans(tmp_path, frozenset())) == 1
+@pytest.mark.parametrize("package", ["aws", "azu", "gcp", "oci"])
+@pytest.mark.parametrize("snippet", list(CLOCK_REF_BAD.values()), ids=list(CLOCK_REF_BAD))
+def test_arch003_selftest_cloud_package_fails_on_a_clock_value(
+    tmp_path: Path, package: str, snippet: str
+) -> None:
+    _write(tmp_path, snippet, f"crc/{package}/new_mod.py")
+    messages = check_bans(tmp_path, frozenset(), {})
+    assert messages
+    assert all(m.startswith(f"ARCH-003: crc/{package}/new_mod.py:") for m in messages)
+    assert any("`clock_ref`" in m for m in messages)
 
 
-@pytest.mark.parametrize(
-    "snippet", ["import os\n\nx = os.getenv('A')\n", "import sys\n\nsys.exit(1)\n"]
-)
-def test_arch003_selftest_notify_gets_config_injected(tmp_path: Path, snippet: str) -> None:
-    _write(tmp_path, snippet, "crc/notify/new_mod.py")
-    assert len(check_bans(tmp_path, frozenset())) == 1
-
-
-def test_arch003_selftest_boundary_keeps_its_legitimate_constructs(tmp_path: Path) -> None:
+def test_arch003_selftest_cloud_package_may_take_a_clock_parameter(tmp_path: Path) -> None:
     source = (
-        "import os\nimport sys\nimport time\n\n"
-        "x = os.environ['A']\nprint(time.time())\nsys.exit(1)\n"
+        "import datetime\nfrom collections.abc import Callable\n\n"
+        "Clock = Callable[[], datetime.datetime]\n\n\n"
+        "def age(clock: Clock) -> datetime.datetime:\n    return clock()\n"
     )
-    _write(tmp_path, source, "crc/cli/new_mod.py")
-    _write(tmp_path, "import time\n\nprint(time.time())\n", "crc/notify/new_mod.py")
-    assert check_bans(tmp_path, frozenset()) == []
+    _write(tmp_path, source, "crc/gcp/new_mod.py")
+    assert check_bans(tmp_path, frozenset(), {}) == []

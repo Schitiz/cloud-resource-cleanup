@@ -69,7 +69,6 @@ def _runtime(cleaner: Any, case: Case, aws: FakeAws) -> Any:
     return SpotRuntime(
         client_factory=cleaner.runtime.client_factory,
         list_regions=lambda: list(case.regions),
-        clock=lambda: NOW,
         waiter=Waiter(aws.sleep, aws.monotonic),
     )
 

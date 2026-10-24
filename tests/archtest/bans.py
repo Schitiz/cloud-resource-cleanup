@@ -8,10 +8,9 @@ from tests.archtest._common import non_legacy_files, parse_module, relpath, viol
 
 RULE = "ARCH-003"
 CLOUD_PACKAGES = ("crc/aws", "crc/azu", "crc/gcp", "crc/oci")
-_ALL_KINDS = frozenset({"re", "clock", "env", "print", "sys.exit"})
+_ALL_KINDS = frozenset({"re", "clock", "clock_ref", "env", "print", "sys.exit"})
 # `clock_ref`: the wall clock passed as a value (`default_factory=datetime.now`, `now=time.time`,
-# `x = datetime.utcnow`) instead of called. crc/core and crc/cli are checked; the cloud packages
-# are only reported (`cloud_clock_refs`, "## Wave next") until their owners clean them up.
+# `x = datetime.utcnow`) instead of called. crc/core, crc/cli and the cloud packages are checked.
 
 # Banned kinds per package. crc/core is pure: no clock (calls or value references), no
 # environment reads, no console output, no exits (`re` stays legal: crc/core/policy.py owns the
@@ -140,17 +139,6 @@ def find_bans(tree: ast.Module) -> list[tuple[int, str]]:
             if kind is not None:
                 found.append((getattr(node, "lineno", 0), kind))
     return sorted(found)
-
-
-def cloud_clock_refs(root: Path, legacy: frozenset[str]) -> list[str]:
-    """`path:line` of every clock-as-a-value in the cloud packages (reported, not failed)."""
-    hits: list[str] = []
-    for package in CLOUD_PACKAGES:
-        for path in non_legacy_files(root, legacy, package):
-            for line, kind in find_bans(parse_module(path)):
-                if kind == "clock_ref":
-                    hits.append(f"{relpath(root, path)}:{line}")
-    return hits
 
 
 def check_bans(

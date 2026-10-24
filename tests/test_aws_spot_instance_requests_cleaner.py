@@ -41,7 +41,6 @@ def _setup(
     cleaner.runtime = SpotRuntime(
         client_factory=cleaner.runtime.client_factory,
         list_regions=lambda: list(case.regions),
-        clock=lambda: NOW,
         waiter=Waiter(aws.sleep, aws.monotonic),
     )
     return aws, cleaner, ctx

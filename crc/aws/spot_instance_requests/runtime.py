@@ -2,10 +2,7 @@
 
 """Injected collaborators of the spot cleaner and the settings read from the run options."""
 
-import datetime
-from collections.abc import Callable
 from dataclasses import dataclass, field
-from functools import partial
 from typing import Any
 
 from crc.aws.spot_instance_requests.client import (
@@ -17,17 +14,13 @@ from crc.aws.spot_instance_requests.client import (
 from crc.aws.spot_instance_requests.model import SpotSettings, Waiter
 from crc.core import age as core_age
 
-Clock = Callable[[], datetime.datetime]
-_UTC_CLOCK = partial(datetime.datetime.now, datetime.UTC)
-
 
 @dataclass(frozen=True, slots=True)
 class SpotRuntime:
-    """Injected collaborators: SDK client factory, region lister, clock and wait."""
+    """Injected collaborators: SDK client factory, region lister and wait. `now` is `RunContext.now`."""
 
     client_factory: ClientFactory = boto3_client
     list_regions: RegionLister = all_regions
-    clock: Clock = _UTC_CLOCK
     waiter: Waiter = field(default_factory=Waiter)
 
 

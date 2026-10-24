@@ -818,7 +818,7 @@ def _run_engine(case: Case, mp: pytest.MonkeyPatch, caplog: pytest.LogCaptureFix
     def factory(c: RunContext) -> Cleaner:
         cleaner = build_spot_request_cleaner(c)
         assert isinstance(cleaner, SpotRequestCleaner)
-        cleaner.runtime = SpotRuntime(clock=lambda: NOW, waiter=Waiter(aws.sleep, aws.monotonic))
+        cleaner.runtime = SpotRuntime(waiter=Waiter(aws.sleep, aws.monotonic))
         return cleaner
 
     try:
@@ -844,7 +844,7 @@ def _run_cleaner(case: Case, mp: pytest.MonkeyPatch, caplog: pytest.LogCaptureFi
         cleaner = registry.get("aws", "spot_instance_requests")(ctx)
         cleaner._clients = {}  # type: ignore[attr-defined]
         cleaner.runtime = SpotRuntime(  # type: ignore[attr-defined]
-            clock=lambda: NOW, waiter=Waiter(aws.sleep, aws.monotonic)
+            waiter=Waiter(aws.sleep, aws.monotonic)
         )
         plan = cleaner.plan(ctx)
         if case.dry_run:
