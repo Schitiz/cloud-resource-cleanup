@@ -5,7 +5,7 @@
 OCI compute instance cleaner (`--cloud oci --resource vm`). `VmCleaner` is a registered `Cleaner`
 (`@register("oci", "vm")`): `plan()` lists the instances of every region and decides on each one,
 `apply()` terminates (`delete`) or stops (`stop`) the selected instances. `crc/cli/routes/oci.py`
-routes the pair through `crc.core.engine`. `VM` is the class `crc/cli/scan.py` uses to list instances.
+routes the pair through `crc.core.engine`. `VM` is a legacy adapter no production code uses (the scan does not call it); only tests do.
 
 Modules, split by responsibility:
 
@@ -27,7 +27,7 @@ Modules, split by responsibility:
 - `VmCleaner`: the Cleaner (supports delete and stop, read-only plan, mutating apply, plus decide and act); built by the registry factory with the engine flag, see Safety Invariants.
 - `build_vm_cleaner()`: registry factory behind @register("oci", "vm"); reads filter_tags, exception_tags, notags, age, custom_age_tag_key and (delete only; stop always uses RUNNING) instance_state from RunContext.options.
 - `VmRuntime`: frozen dataclass with the injected API factory, region lister and clock (now) of `VM`; unset parts come from Base.
-- `VM`: class the instance scan in the CLI calls (delete(), stop(), get_deleted, get_stopped, delete_count, stopped_count, instance_names_to_delete, instance_names_to_stop); subclasses Service and Base; decides and acts instance by instance.
+- `VM`: legacy adapter class no production code uses (delete(), stop(), get_deleted, get_stopped, delete_count, stopped_count, instance_names_to_delete, instance_names_to_stop); subclasses Service and Base; decides and acts instance by instance.
 - `log_summary()`: the closing log lines of a VM run (settings module); the "nothing to do" warning looks at both name lists.
 - `log_for()`: `log_summary()` for a run that only fills one of the two lists.
 
@@ -36,7 +36,7 @@ Modules, split by responsibility:
 - Authoritative text: `CLEANUP_SAFETY.md`. Applicable IDs: SAF-006 to SAF-013 (age gates, shared by all clouds).
 - `plan()` only lists and decides (ARCH-005); `apply()` is the only caller of `terminate_instance` / `stop_instance`.
 - Only instances in an allowed state (`RUNNING` by default) are candidates; `filter_tags` needs every key.
-- An empty age matches every instance (SAF-006) and `MAX_AGE` can shorten the age (SAF-010); the age of an instance with a custom age tag fails open to `--age` (SAF-009, `BUG-004`).
+- An empty age matches every instance (SAF-006) and `MAX_AGE` can shorten the age (SAF-010); a present but bad custom age tag keeps the instance (`get_retention_age` returns `KEEP_AGE`, counted as skip `bad_age_tag`; SAF-009, `BUG-004` fixed).
 - OKE node-pool and instance-pool members are never terminated or stopped (`BUG-158`, same guard as `crc/oci/spot_vm`, `policy.oci_is_managed_or_oke_node`: an `oke` / `instancepool` / `instance_pool` / `instance-pool` marker, case-insensitive, in any freeform tag `key:value`, defined tag `namespace:key:value` or metadata entry). It runs right after the state check, also when `filter_tags` is empty; the skip reason is `managed`.
 - An unexpected error while evaluating one instance (missing or naive `time_created`, malformed `MAX_AGE`; `BUG-162`) is logged at ERROR, recorded as a run-log failure and the instance is kept; the loop goes on with the next instance and region (skip reason `evaluation failed`, in `plan().skipped` only). The run no longer aborts.
 - A failed terminate or stop is logged and skipped, never raised; list and region errors are not isolated per instance (connectivity errors skip the region, other errors propagate).
@@ -50,4 +50,4 @@ Modules, split by responsibility:
 2. Tag, age and state decisions call `crc.core.policy` / `crc.core.age`; no `re`, no wall-clock read in the cleaner (the clock is injected), no `os.environ`, no `print` (ARCH-003).
 3. Every SDK call goes through `ComputeApi` in `client.py`; add a method to the Protocol only for a call the cleaner really makes.
 4. `plan()` stays read-only: every mutating call belongs in `apply()` / `act()`.
-5. Record every new bug or quirk in `docs/refactor/BUGS.md` with its `main` file:line.
+5. Record every new bug or quirk in `docs/refactor/BUGS.md` (a new row cites the current `file:line` in `crc/`).

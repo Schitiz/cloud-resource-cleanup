@@ -2,7 +2,7 @@
 
 ## Purpose
 
-AWS EC2 VM cleaner. `VmCleaner` is a registered `Cleaner` (`@register("aws", "vm")`): `plan()` lists the running instances of every region (`describe_instances`, `describe_network_interfaces`) and applies the tag and age policy; `apply()` calls `terminate_instances` or `stop_instances`. `crc/cli` runs it through `crc.core.engine`; `VM` and `find_instances_with_tag()` serve the `--scan_tag` scan (`crc/cli/scan.py`).
+AWS EC2 VM cleaner. `VmCleaner` is a registered `Cleaner` (`@register("aws", "vm")`): `plan()` lists the running instances of every region (`describe_instances`, `describe_network_interfaces`) and applies the tag and age policy; `apply()` calls `terminate_instances` or `stop_instances`. `crc/cli` runs it through `crc.core.engine`; `scan_tag()` serves the `--scan_tag` scan (`crc/cli/scan.py`); the `VM` adapter class is no longer used by production.
 
 Modules, one per responsibility:
 
@@ -16,7 +16,7 @@ Modules, one per responsibility:
 
 ## Public API
 
-- `VM`: class the scan uses (delete(), stop(), get_deleted, get_stopped, delete_count, stopped_count, find_instances_with_tag(), instance_names_to_delete, instance_names_to_stop); runs the cleaner region by region; tests replace its runtime attribute with fakes.
+- `VM`: legacy adapter class, no longer used by production (kept for its tests until the adapters are deleted) (delete(), stop(), get_deleted, get_stopped, delete_count, stopped_count, find_instances_with_tag(), instance_names_to_delete, instance_names_to_stop); runs the cleaner region by region; tests replace its runtime attribute with fakes.
 - `VmRuntime`: frozen dataclass with the injected client factory, region lister, clock (now, UTC), scan client factory and session factory of VM.
 - `VmCleaner`: the Cleaner (supports, read-only plan, mutating apply, plus build_filters, filter_instances, apply_region and should_skip; the decisions are delegated to InstanceJudge).
 - `InstanceJudge`: (judge.py) read-only decision per instance: should_skip, filter_instances.
@@ -36,6 +36,7 @@ Modules, one per responsibility:
 - `VmScanClient`: Protocol of the EC2 client surface of the tag scan (get_paginator, exceptions).
 - `VmSession`: Protocol of the boto3 session call of the tag scan (get_available_regions).
 - `instance_name()`: value of the first Name tag of an instance, or None.
+- `scan_tag()`: (scan.py) find_instances_with_tag with the default boto3 session, clients and region lister; what the scan_tag flag calls for AWS.
 - `find_instances_with_tag()`: read-only scan of instances carrying a tag in every region.
 - `ClientFactory`, `RegionLister`, `ScanClientFactory`, `SessionFactory`, `Filters`: type aliases of the injected factories and of the describe_instances filter list.
 - `SERVICE_NAME`, `DEFAULT_REGION`, `DEFAULT_STATE`: constants (the service ec2, the region us-west-2 of the region lookup, and the default instance state running).
@@ -43,7 +44,7 @@ Modules, one per responsibility:
 ## Safety Invariants
 
 - `plan()` only calls `describe_instances` and `describe_network_interfaces`; `terminate_instances` and `stop_instances` are called from `apply()` / `apply_region()` (and `VM.delete()` / `VM.stop()` through them) only and never in a dry run.
-- The age gate is the attach time of the first network interface against `--age` or the fail-open custom age tag (`core.age.is_old`, `policy.effective_age`); an empty age matches every instance and `MAX_AGE` can shorten it (SAF-006 to SAF-010, BUG-004, BUG-213).
+- The age gate is the attach time of the first network interface against `--age` or the fail-closed custom age tag (`get_retention_age`; a present but bad tag keeps the instance, BUG-004) (`core.age.is_old`, `policy.effective_age`); an empty age matches every instance and `MAX_AGE` can shorten it (SAF-006 to SAF-010, BUG-004, BUG-213).
 - Fail closed: any error while judging one instance is logged and keeps it; exception tags (any key) and notags skip an instance; an instance without a `Tags` key or `Name` tag is kept. Termination and stop errors are isolated per instance.
 - Region errors: a `describe_instances` connectivity error skips the region (SAF-001); `describe_regions` falls back to the static list on a connectivity error only and every other error propagates (SAF-004).
 - `plan()` lists every region before `apply()` mutates; `VM.delete()` interleaves list and delete per region.

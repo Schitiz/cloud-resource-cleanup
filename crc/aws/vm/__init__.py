@@ -27,6 +27,7 @@ from crc.aws.vm.scan import (
     SessionFactory,
     find_instances_with_tag,
     instance_name,
+    scan_tag,
 )
 
 __all__ = [
@@ -55,5 +56,6 @@ __all__ = [
     "log_summary",
     "note_dry_run",
     "note_region",
+    "scan_tag",
     "skip_region",
 ]

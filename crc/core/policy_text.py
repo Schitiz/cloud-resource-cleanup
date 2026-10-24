@@ -8,10 +8,8 @@ __all__ = [
     "exception_regex_match_matches",
     "exception_regex_search_matches",
     "filter_substring_matches",
-    "gcp_ip_exception_excludes",
     "name_regex_search_matches",
     "nic_name_excluded",
-    "nic_name_included",
     "state_in",
     "state_is_substring_of_any",
     "status_contains_any_allowed",
@@ -39,19 +37,6 @@ def exception_regex_match_matches(patterns: Sequence[str], text: str) -> bool:
 def filter_substring_matches(patterns: Sequence[str], text: str) -> bool:
     """GCP IP filter_regex: plain substring, any. Empty list matches. Not a regex."""
     return not patterns or any(p in text for p in patterns)
-
-
-def gcp_ip_exception_excludes(patterns: Sequence[str], text: str) -> bool:
-    """GCP IP exception_regex as implemented: True (exclude) when patterns are set and NONE
-    is a substring of the name. Inverted relative to the flag's name; preserved as is.
-    """
-    return bool(patterns) and not any(p in text for p in patterns)
-
-
-def nic_name_included(patterns: Sequence[str], text: str) -> bool:
-    """Azure NIC name_regex: plain substring, any. Empty list gives False (nothing is
-    included; the cleaner returns early before listing)."""
-    return any(p in text for p in patterns)
 
 
 def nic_name_excluded(patterns: Sequence[str], text: str) -> bool:

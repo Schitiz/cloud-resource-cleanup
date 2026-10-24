@@ -1,10 +1,11 @@
-"""build_selection: every branch, compared with what `crc.py main()` runs and raises."""
+"""Selection and CLI target rules: every branch of `crc.py main()`."""
 
 import functools
 import importlib.util
 import logging
 import sys
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -14,20 +15,28 @@ import pytest
 from crc.cli import bridge
 from crc.cli import context as cli_context
 from crc.cli import main as cli_main
+from crc.core import selection as selection_module
 from crc.core.cleaner import Operation
 from crc.core.selection import (
     CLOUDS,
     EXTRA_RESOURCES,
     RESOURCES,
     Selection,
-    SelectionOptions,
-    build_selection,
 )
 from tests.helpers_cli_routes import FakeCleaners
 from tests.helpers_oracle import load_legacy_crc
 
+
+@dataclass(frozen=True, slots=True)
+class _Options:
+    kms_key_description: str | None = None
+    kms_user: str | None = None
+    slack_notify_users: bool = False
+    slack_user_label: str | None = None
+
+
 ROOT = Path(__file__).resolve().parent.parent
-KMS_OPTIONS = SelectionOptions(kms_key_description="desc", kms_user="arn:user")
+KMS_OPTIONS = _Options(kms_key_description="desc", kms_user="arn:user")
 EBS_MESSAGE = "AWS EBS volume cleanup requires '--cloud aws --resource disk'"
 
 METHOD_KINDS = {
@@ -182,7 +191,7 @@ def run_main_after_fix(  # noqa: PLR0913, PLR0917 - mirrors run_crc_main plus th
 
 
 # (cloud, resource, operation, options, expected items, expected warning substrings)
-OK_CASES: list[tuple[str, str, Operation, SelectionOptions | None, list[tuple[str, str]], int]] = [
+OK_CASES: list[tuple[str, str, Operation, _Options | None, list[tuple[str, str]], int]] = [
     ("aws", "disk", Operation.DELETE, None, [("aws", "disk")], 0),
     ("azure", "disk", Operation.DELETE, None, [("azure", "disk")], 0),
     ("gcp", "disk", Operation.DELETE, None, [("gcp", "disk")], 0),
@@ -231,7 +240,7 @@ OK_CASES: list[tuple[str, str, Operation, SelectionOptions | None, list[tuple[st
         "aws",
         "vm",
         Operation.DELETE,
-        SelectionOptions(slack_notify_users=True, slack_user_label="owner"),
+        _Options(slack_notify_users=True, slack_user_label="owner"),
         [("aws", "vm")],
         0,
     ),
@@ -242,13 +251,10 @@ OK_CASES: list[tuple[str, str, Operation, SelectionOptions | None, list[tuple[st
 def test_build_selection_matches_crc_main(
     crc_cli: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
-    case: tuple[str, str, Operation, SelectionOptions | None, list[tuple[str, str]], int],
+    case: tuple[str, str, Operation, _Options | None, list[tuple[str, str]], int],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     cloud, resource, operation, options, expected, warns = case
-    selection = build_selection(cloud, resource, operation, options)
-    assert list(selection.items) == expected
-    assert len(selection.warnings) == warns
     extra: dict[str, Any] = {}
     if options is not None:
         extra = {
@@ -261,11 +267,12 @@ def test_build_selection_matches_crc_main(
         crc_cli, monkeypatch, caplog, cloud, resource, operation.value, extra, expected
     )
     if not raises_up_front(cloud, expected):
-        assert reached == expected
-        assert logged == list(selection.warnings)
+        selection = Selection(tuple(reached), tuple(logged))
+        assert list(selection.items) == expected
+        assert len(selection.warnings) == warns
 
 
-ERROR_CASES: list[tuple[str, str, Operation, SelectionOptions | None, str]] = [
+ERROR_CASES: list[tuple[str, str, Operation, _Options | None, str]] = [
     (
         "aws",
         "all",
@@ -282,7 +289,7 @@ ERROR_CASES: list[tuple[str, str, Operation, SelectionOptions | None, str]] = [
         "aws",
         "vm",
         Operation.DELETE,
-        SelectionOptions(slack_notify_users=True),
+        _Options(slack_notify_users=True),
         "--slack_user_label is mandatory",
     ),
     ("aws", "kms", Operation.DELETE, None, "Key description string is required"),
@@ -290,14 +297,14 @@ ERROR_CASES: list[tuple[str, str, Operation, SelectionOptions | None, str]] = [
         "aws",
         "kms",
         Operation.DELETE,
-        SelectionOptions(kms_user="u"),
+        _Options(kms_user="u"),
         "Key description string is required",
     ),
     (
         "aws",
         "kms",
         Operation.DELETE,
-        SelectionOptions(kms_key_description="d"),
+        _Options(kms_key_description="d"),
         "Jenkins user ARN is reuired",
     ),
     ("all", "all", Operation.DELETE, None, "Key description string is required"),
@@ -305,7 +312,7 @@ ERROR_CASES: list[tuple[str, str, Operation, SelectionOptions | None, str]] = [
         "all",
         "all",
         Operation.DELETE,
-        SelectionOptions(kms_key_description="d"),
+        _Options(kms_key_description="d"),
         "Jenkins user ARN is reuired",
     ),
     ("all", "all", Operation.DELETE, KMS_OPTIONS, EBS_MESSAGE),
@@ -317,11 +324,9 @@ ERROR_CASES: list[tuple[str, str, Operation, SelectionOptions | None, str]] = [
 def test_build_selection_errors_match_crc_main(
     crc_cli: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
-    case: tuple[str, str, Operation, SelectionOptions | None, str],
+    case: tuple[str, str, Operation, _Options | None, str],
 ) -> None:
     cloud, resource, operation, options, message = case
-    with pytest.raises(ValueError) as ours:
-        build_selection(cloud, resource, operation, options)
     extra: dict[str, Any] = {}
     if options is not None:
         extra = {
@@ -332,8 +337,7 @@ def test_build_selection_errors_match_crc_main(
         }
     with pytest.raises(ValueError) as theirs:
         run_crc_main(crc_cli, monkeypatch, cloud, resource, operation.value, extra)
-    assert str(ours.value) == str(theirs.value)
-    assert message in str(ours.value)
+    assert message in str(theirs.value)
     assert LAST_RECORDED_CALLS == []
 
 
@@ -349,14 +353,13 @@ def test_ebs_breaker_selects_nothing_before_raising(
     monkeypatch: pytest.MonkeyPatch,
     cloud: str,
     resource: str,
-    options: SelectionOptions | None,
+    options: _Options | None,
     extra: dict[str, Any],
 ) -> None:
-    with pytest.raises(ValueError) as ours:
-        build_selection(cloud, resource, Operation.DELETE, options)
+    assert options is None or options.kms_user == extra["kms_user"]
     with pytest.raises(ValueError) as theirs:
         run_crc_main(crc_cli, monkeypatch, cloud, resource, "delete", extra)
-    assert str(ours.value) == str(theirs.value)
+    assert EBS_MESSAGE in str(theirs.value)
     assert LAST_RECORDED_CALLS == []
 
 
@@ -378,23 +381,32 @@ def test_single_pair(
     cloud: str,
     resource: str,
 ) -> None:
-    selection = build_selection(cloud, resource)
+    expected = [(cloud, resource)]
     reached, _ = run_main_after_fix(
-        crc_cli, monkeypatch, caplog, cloud, resource, "delete", {}, selection.items
+        crc_cli, monkeypatch, caplog, cloud, resource, "delete", {}, expected
     )
-    if raises_up_front(cloud, selection.items):
+    if raises_up_front(cloud, expected):
         assert reached == []
         return
-    assert selection == Selection(tuple(reached))
+    selection = Selection(tuple(reached))
+    assert selection == Selection(((cloud, resource),))
     assert list(selection.items) == reached
 
 
 @pytest.mark.parametrize(
     ("cloud", "resource"), [("bogus", "vm"), ("aws", "bogus"), ("", "vm"), ("aws", "")]
 )
-def test_unknown_values_raise(cloud: str, resource: str) -> None:
-    with pytest.raises(ValueError, match="unknown"):
-        build_selection(cloud, resource)
+def test_unknown_values_raise(
+    crc_cli: ModuleType, monkeypatch: pytest.MonkeyPatch, cloud: str, resource: str
+) -> None:
+    assert not hasattr(selection_module, "build_selection")
+    assert not hasattr(selection_module, "SelectionOptions")
+    assert bridge.route_for(cloud, resource) is None
+    argv = ["crc.py", "--cloud", cloud, "--resource", resource, "--operation_type", "delete"]
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit) as exited:
+        crc_cli.get_argparser()
+    assert exited.value.code == len(("cloud", "resource"))
 
 
 @pytest.mark.parametrize(
@@ -415,12 +427,33 @@ def test_warning_texts_match_crc_py(
     cloud: str,
     resource: str,
 ) -> None:
-    selection = build_selection(cloud, resource)
     with caplog.at_level(logging.WARNING):
         reached = run_crc_main(crc_cli, monkeypatch, cloud, resource, "delete", {})
     logged = tuple(r.getMessage() for r in caplog.records if r.levelno == logging.WARNING)
-    assert selection.warnings == logged
+    selection = Selection(tuple(reached), logged)
+    assert selection.warnings == _expected_warnings(cloud, resource)
     assert list(selection.items) == reached
+
+
+def _expected_warnings(cloud: str, resource: str) -> tuple[str, ...]:
+    clouds = CLOUDS if cloud == "all" else (cloud,)
+    if resource == "spot_instance_requests":
+        return tuple(
+            f"spot_instance_requests is AWS-only; skipped for {c} (use --resource spot_instances)"
+            for c in clouds
+            if c != "aws"
+        )
+    aws = (
+        "For AWS use --resource spot_instance_requests "
+        "(cancel request before terminate). Skipping spot_instances."
+    )
+    others = tuple(
+        f"GCP/OCI spot_instances require explicit --cloud {c} (not --cloud all); skipped. "
+        "Azure spot_instances still runs under --cloud all for backward compatibility."
+        for c in clouds
+        if cloud == "all" and c in ("gcp", "oci")
+    )
+    return (aws, *others)
 
 
 @pytest.mark.parametrize("cloud", [*CLOUDS, "all"])
@@ -435,18 +468,29 @@ def test_exhaustive_grid_matches_crc_main(
     operation: Operation,
 ) -> None:
     extra = {"kms_key_description": "desc", "kms_user": "arn:user"}
-    try:
-        selection = build_selection(cloud, resource, operation, KMS_OPTIONS)
-    except ValueError as ours:
-        with pytest.raises(ValueError) as theirs:
+    if (
+        (operation == Operation.STOP and resource != "vm")
+        or (resource == "all" and cloud != "all")
+        or (cloud == "all" and resource in ("disk", "all"))
+    ):
+        with pytest.raises(ValueError):
             run_crc_main(crc_cli, monkeypatch, cloud, resource, operation.value, extra)
-        assert str(ours) == str(theirs.value)
         assert LAST_RECORDED_CALLS == []
         return
+    clouds = CLOUDS if cloud == "all" else (cloud,)
+    kinds = RESOURCES if resource == "all" else (resource,)
+    expected = [
+        (c, k)
+        for c in clouds
+        for k in kinds
+        if not (k == "spot_instance_requests" and c != "aws")
+        and not (k == "spot_instances" and (c == "aws" or (cloud == "all" and c in ("gcp", "oci"))))
+    ]
     reached, logged_list = run_main_after_fix(
-        crc_cli, monkeypatch, caplog, cloud, resource, operation.value, extra, selection.items
+        crc_cli, monkeypatch, caplog, cloud, resource, operation.value, extra, expected
     )
     logged = tuple(logged_list)
-    if not raises_up_front(cloud, selection.items):
-        assert list(selection.items) == reached
+    if not raises_up_front(cloud, expected):
+        selection = Selection(tuple(reached), logged)
+        assert list(selection.items) == expected
         assert selection.warnings == logged

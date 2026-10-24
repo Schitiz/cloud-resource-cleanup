@@ -58,8 +58,6 @@ key must be present). Functions named for a module are exact copies of that modu
 - `exception_regex_search_matches()`: regex search, any pattern, empty list is False (AWS disk, keypair).
 - `exception_regex_match_matches()`: regex match anchored at the start, any pattern (GCP disk).
 - `filter_substring_matches()`: plain substring any, empty list matches (the GCP IP name filter; the IP cleaner applies its exception filter itself).
-- `gcp_ip_exception_excludes()`: dead helper (BUG-370): the old inverted GCP IP exception test, called by no cleaner and only exercised by the policy tests; BUG-001 is fixed.
-- `nic_name_included()`: dead helper (BUG-370): the Azure NIC name substring test, called by no cleaner (the NIC cleaner compiles and matches its patterns itself).
 - `nic_name_excluded()`: Azure NIC exception filter, plain substring any; used by the NIC cleaner.
 - `compile_patterns()`: compile regexes up front, ValueError on a bad pattern (AWS disk).
 - `state_in()`: exact state membership.
@@ -122,11 +120,9 @@ Report (module report.py). Pure model and text builders; sending stays in the no
 - `SNAPSHOT`: label of snapshots.
 - `SPOT_INSTANCE_REQUEST`: label of AWS spot requests and their instances.
 
-Selection (module selection.py). The cloud and resource rules of the CLI.
+Selection (module selection.py). The selection model of the engine and the cloud and resource order constants of the CLI.
 
-- `build_selection()`: expand cloud, resource and operation into the ordered (cloud, kind) pairs plus warnings; raises the CLI ValueError messages (stop only for vm, --resource all needs --cloud all, --slack_user_label, KMS options, the AWS EBS opt-in breaker).
 - `Selection`: the ordered pairs (items) and the warning texts of skipped pairs (warnings).
-- `SelectionOptions`: KMS description and user, slack_notify_users and slack_user_label validated with the selection.
 - `CLOUDS`: the --cloud all order.
 - `RESOURCES`: the --resource all order (spot resources and vpc are not part of it).
 - `EXTRA_RESOURCES`: resources selectable by name only (vpc, spot_instance_requests, spot_instances).
@@ -173,8 +169,6 @@ decides what a cleaner selects or deletes.
   cleaners and swallows a notifier error only when the notifier is `fail_open` (Influx; Slack
   catches its failed sends per message itself). Pass notifiers Slack first, then Influx
   (`build_notifiers` in `crc/cli/bridge.py`). An operation the cleaner does not support raises `ValueError`.
-- `build_selection()` raises the AWS EBS breaker before returning any pair, so no other AWS
-  resource is selected; call it after the CLI input validators to keep error order.
 - Registering the same cloud and kind twice raises; lookups of unknown names raise with the
   known names. No import-time cloud calls, no other global state than the default registry.
 - Policy keeps the quirks of the catalogue that are not yet fixed (Elastic IP notags that never
