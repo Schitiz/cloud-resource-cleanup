@@ -33,5 +33,5 @@ def is_old(settings: VmSettings, vm: SdkVm, clock: Clock) -> bool:
         cast(dict[str, str], vm.tags), settings.custom_age_tag_key
     )
     if retention_age:
-        logging.info(f"Updating age for vm: {vm.name}")
+        logging.info("Updating age for vm: %s", vm.name)
     return core_age.is_old(policy.effective_age(retention_age, settings.age), now, created)

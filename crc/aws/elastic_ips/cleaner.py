@@ -132,7 +132,7 @@ class ElasticIpCleaner:
             except Exception as e:
                 run.fail(candidate.region, candidate.id, e)
                 raise
-            logging.info(f"Deleted IP: {candidate.id}")
+            logging.info("Deleted IP: %s", candidate.id)
             run.action("deleted", candidate.region, candidate.id, candidate.name)
         return [candidate.id for candidate in candidates]
 

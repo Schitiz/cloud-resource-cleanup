@@ -130,7 +130,7 @@ class VpcCleaner:
             filters.extend(
                 {"Name": f"tag:{key}", "Values": value} for key, value in self._filter_tags.items()
             )
-        logging.info(f"Filters created: {filters}")
+        logging.info("Filters created: %s", filters)
         return filters
 
     def list_vpcs(self, ec2: Ec2Resource, vpc_filter: Sequence[Mapping[str, Any]]) -> list[Vpc]:
@@ -219,7 +219,7 @@ class VpcCleaner:
         Returns True when the VPC was deleted."""
         if has_instances(vpc):
             logger.current().skip("has_instances")
-            logging.debug(f"Keeping VPC {vpc.id}: instances in its subnets")
+            logging.debug("Keeping VPC %s: instances in its subnets", vpc.id)
             return False
         try:
             tear_down(client, ec2, vpc)

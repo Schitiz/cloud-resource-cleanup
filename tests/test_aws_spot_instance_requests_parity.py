@@ -280,7 +280,7 @@ CASES: list[Case] = [
     ),
     Case(
         "naive-create-time-error-logged",
-        one(std(requests=[{**req(), "CreateTime": datetime.datetime(2020, 1, 1)}])),
+        one(std(requests=[{**req(), "CreateTime": datetime.datetime(2020, 1, 1)}])),  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
     ),
     Case(
         "missing-create-time-error-logged",
@@ -792,7 +792,7 @@ def _run_class(
         obj.delete()
         deleted, volumes = list(obj.get_deleted), list(obj.volumes_to_delete)
         assert obj.delete_count == len(deleted) + len(volumes)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     return Outcome(aws.calls, deleted, volumes, _logs(caplog), error)
 
@@ -829,7 +829,7 @@ def _run_engine(case: Case, mp: pytest.MonkeyPatch, caplog: pytest.LogCaptureFix
         else:
             deleted = list(outcome.result.succeeded)
             volumes = list(outcome.result.related.get(DISK, ()))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     return Outcome(aws.calls, deleted, volumes, _logs(caplog), error)
 
@@ -854,7 +854,7 @@ def _run_cleaner(case: Case, mp: pytest.MonkeyPatch, caplog: pytest.LogCaptureFi
             result = cleaner.apply(plan, ctx)
             deleted = list(result.succeeded)
             volumes = list(result.related.get(DISK, ()))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     return Outcome(aws.calls, deleted, volumes, _logs(caplog), error)
 

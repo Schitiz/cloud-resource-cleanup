@@ -297,7 +297,7 @@ def execute(main: Callable[[], None], case: Case, fakes: Fakes) -> Outcome:
                     result = ("returned",)
                 except SystemExit as exit_:
                     result = ("exit", exit_.code)
-                except Exception as error:
+                except Exception as error:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
                     result = ("error", type(error), str(error))
         finally:
             sys.argv = saved_argv

@@ -22,7 +22,7 @@ from crc.core import logger
 from crc.service import Service
 from tests.helpers_cli_routes import FakeCleaners
 
-_FIELDS = {name: None for name in Options.__dataclass_fields__}
+_FIELDS = dict.fromkeys(Options.__dataclass_fields__)
 
 
 def _options(**values: Any) -> Options:

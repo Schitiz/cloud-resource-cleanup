@@ -365,7 +365,7 @@ def _run(
     error: tuple[str, str] | None = None
     try:
         cleaner.delete()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     deleted = list(cleaner.get_deleted)
     logs = _records(caplog)
@@ -399,7 +399,7 @@ def _run_engine(
     deleted: list[str] = []
     try:
         deleted = candidate_ids(engine_run("nic", _options(case), dry_run=case.dry_run, now=NOW))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     return Outcome(
         azure.calls, deleted, len(deleted), _records(caplog), [], capsys.readouterr().out, error
@@ -472,7 +472,7 @@ def _run_cleaner(
             deleted = [c.id for c in plan.candidates]
         else:
             deleted = list(cleaner.apply(plan, ctx).succeeded)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     return Outcome(
         azure.calls, deleted, len(deleted), _records(caplog), [], capsys.readouterr().out, error

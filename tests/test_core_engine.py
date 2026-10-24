@@ -16,7 +16,7 @@ from crc.core.report import Report
 from crc.core.selection import RESOURCES, Selection
 from tests.helpers_oracle import load_legacy_crc
 
-NOW = datetime.datetime(2026, 1, 1)
+NOW = datetime.datetime(2026, 1, 1)  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
 
 
 @pytest.fixture

@@ -32,7 +32,7 @@ from tests.log_fix_oci import RULES
 BUGS = {"BUG-358"}
 EVALUATION_ERROR = "Error occurred while evaluating instance "
 ORACLE = Path(__file__).parent / "legacy" / "oci_vm.txt"
-NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)
+NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
 NOW_UTC = NOW.astimezone(datetime.UTC)
 HOME = "us-sanjose-1"
 OPERATIONS = ("delete", "stop")
@@ -540,7 +540,7 @@ def _run(
     error: tuple[str, str] | None = None
     try:
         _invoke(vm, case, operation)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     if operation == "stop":
         acted, count = list(vm.get_stopped), vm.stopped_count
@@ -675,7 +675,7 @@ def _run_cleaner(
             if outcome.result is None
             else list(outcome.result.succeeded)
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     logs = [(r.name, r.levelno, r.getMessage()) for r in caplog.records]
     return Outcome(world.calls, acted, len(acted), logs, capsys.readouterr().out, error)
@@ -749,7 +749,7 @@ def _sequence(case: Case) -> tuple[list[Any], list[Any], Any]:
         vm.delete()
         vm.stop()
         vm.delete()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     return list(vm.get_deleted), list(vm.get_stopped), error
 

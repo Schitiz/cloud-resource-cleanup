@@ -25,7 +25,7 @@ def read_tags(tags: Any) -> dict[str, Any]:
     tag_map: dict[str, Any] = {}
     for entry in tags:
         if "Key" not in entry:
-            logging.debug(f"Ignoring a tag entry without Key: {dict(entry)}")
+            logging.debug("Ignoring a tag entry without Key: %s", dict(entry))
             continue
         tag_map[entry["Key"]] = entry.get("Value", "")
     return tag_map
@@ -46,7 +46,7 @@ def is_protected(
         tag_map = read_tags(tags)
     for key, values in exception_tags.items():
         if policy.exception_tags_any(tag_map, {key: values}):
-            logging.debug(f"Snap {snap_id} has tag {key}")
+            logging.debug("Snap %s has tag %s", snap_id, key)
             return True
     return False
 

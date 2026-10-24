@@ -18,4 +18,5 @@ jobs:
             requirements-dev.txt
             constraints.txt
       - run: pip install -r requirements.txt -r requirements-dev.txt -c constraints.txt
+      - run: python -m ruff format --check .
       - run: make check

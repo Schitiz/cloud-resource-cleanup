@@ -33,10 +33,10 @@ _RESERVED = "RESERVED"
 def _log_summary(deleted: Sequence[str], *, dry_run: bool) -> None:
     items = list(deleted)
     if not dry_run:
-        logging.warning(f"number of GCP IPs deleted: {len(items)}")
-        logging.warning(f"List of GCP IPs deleted: {items}")
+        logging.warning("number of GCP IPs deleted: %s", len(items))
+        logging.warning("List of GCP IPs deleted: %s", items)
     else:
-        logging.warning(f"List of GCP IPs (Total: {len(items)}) which will be deleted: {items}")
+        logging.warning("List of GCP IPs (Total: %s) which will be deleted: %s", len(items), items)
 
 
 class IpCleaner:
@@ -143,14 +143,14 @@ class IpCleaner:
         try:
             self._client.delete_address(self._project_id, region, candidate.id).result()
         except (GoogleAPIError, GoogleAuthError, OSError) as e:
-            logging.error(f"Error occurred while deleting IP address {candidate.id}: {e}")
+            logging.error("Error occurred while deleting IP address %s: %s", candidate.id, e)
             logger.current().fail(region, candidate.id, e)
             self.failures.append(Failure(id=candidate.id, error=str(e)))
             return False
         except Exception as e:
             logger.current().fail(region, candidate.id, e)
             raise
-        logging.info(f"Deleting IP address: {candidate.id}")
+        logging.info("Deleting IP address: %s", candidate.id)
         return True
 
     def _matches_filter(self, name: str) -> bool:

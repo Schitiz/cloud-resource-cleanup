@@ -169,7 +169,7 @@ def test_bug_158_engine_skips_managed_instances(run_log: FakeRunLog) -> None:
 
 BROKEN = [
     ("missing-created-time", {"created": None}),
-    ("naive-created-time", {"created": datetime.datetime(2026, 1, 1)}),
+    ("naive-created-time", {"created": datetime.datetime(2026, 1, 1)}),  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
 ]
 
 

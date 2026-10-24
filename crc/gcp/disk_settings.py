@@ -68,9 +68,9 @@ def _log_summary(deleted: Deleted, *, dry_run: bool) -> None:
     if not deleted:
         logging.warning("No GCP disk to delete.")
     if not dry_run:
-        logging.warning(f"number of GCP disks deleted: {len(deleted)}")
-        logging.warning(f"List of GCP disk deleted: {deleted}")
+        logging.warning("number of GCP disks deleted: %s", len(deleted))
+        logging.warning("List of GCP disk deleted: %s", deleted)
     else:
         logging.warning(
-            f"List of GCP disk (Total: {len(deleted)}) which will be deleted: {deleted}"
+            "List of GCP disk (Total: %s) which will be deleted: %s", len(deleted), deleted
         )

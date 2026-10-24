@@ -28,7 +28,7 @@ from tests.test_aws_vpc_parity import (
     full,
 )
 
-NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)
+NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
 FILTER = {"env": ["test"]}
 ATTEMPTS = 5
 

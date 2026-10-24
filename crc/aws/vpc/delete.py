@@ -34,19 +34,19 @@ def delete_vpc_with_retries(
     for attempt in range(1, _DELETE_RETRIES + 1):
         try:
             client.delete_vpc(VpcId=vpc.id)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - per-VPC isolation, non-dependency errors recorded, dependency errors retried
             logging.error(e)
             if not _is_dependency_violation(e):
-                logging.error(f"Failed deleting VPC {vpc.id}: not a DependencyViolation, skipped")
+                logging.error("Failed deleting VPC %s: not a DependencyViolation, skipped", vpc.id)
                 run.fail(region, vpc.id, e)
                 return False
             last_error = e
             if attempt < _DELETE_RETRIES:
-                logging.error(f"Failed deleting VPC {vpc.id}. Retrying...")
+                logging.error("Failed deleting VPC %s. Retrying...", vpc.id)
                 sleep(_DELETE_RETRY_SLEEP_SEC)
         else:
             run.action("deleted", region, vpc.id)
             return True
-    logging.error(f"Failed to Delete VPC {vpc.id} after {_DELETE_RETRIES} retries")
+    logging.error("Failed to Delete VPC %s after %s retries", vpc.id, _DELETE_RETRIES)
     run.fail(region, vpc.id, last_error or "delete_vpc failed")
     return False

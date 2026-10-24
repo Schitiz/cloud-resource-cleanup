@@ -221,7 +221,7 @@ CASES = [
     case("age-exactly-floor", one(vol("a", 1), vol("b", 0.99999), vol("c", 1.00001))),
     case("age-future-create-time", one(vol("a", -3))),
     case("create-time-missing", one(vol("a", None), vol("b"))),
-    case("create-time-naive", one(vol("a", None, CreateTime=datetime.datetime(2020, 1, 1)))),
+    case("create-time-naive", one(vol("a", None, CreateTime=datetime.datetime(2020, 1, 1)))),  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
     case("create-time-string", one(vol("a", None, CreateTime="2020-01-01"))),
     case(
         "create-time-other-timezone",
@@ -712,7 +712,7 @@ CASES = [
     ),
     case(
         "volume-error-isolated",
-        one(vol("a"), vol("b", None, CreateTime=datetime.datetime(2020, 1, 1)), vol("c")),
+        one(vol("a"), vol("b", None, CreateTime=datetime.datetime(2020, 1, 1)), vol("c")),  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
     ),
     case("volume-error-tags-not-dicts", one(vol("a", tag_list=["oops"]), vol("c"))),
     case(
@@ -958,7 +958,7 @@ def _run(
     try:
         obj = build(case)
         obj.delete()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     logs = _logs(caplog)
     if obj is not None:
@@ -992,7 +992,7 @@ def _run_engine(
             deleted = [c.id for c in outcome.plan.candidates]
         else:
             deleted = list(outcome.result.succeeded)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     return Outcome(aws.calls, deleted, len(deleted), _logs(caplog), capsys.readouterr().out, error)
 
@@ -1019,7 +1019,7 @@ def _run_cleaner(
             deleted = [c.id for c in plan.candidates]
         else:
             deleted = list(cleaner.apply(plan, ctx).succeeded)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     return Outcome(aws.calls, deleted, len(deleted), _logs(caplog), capsys.readouterr().out, error)
 

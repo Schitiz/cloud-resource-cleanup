@@ -443,16 +443,16 @@ class FrozenDatetime(datetime):
         (None, "-"),
         ("", "-"),
         ("not a date", "-"),
-        (datetime(2026, 1, 10, 12, 0, 0), "00s"),
-        (datetime(2026, 1, 10, 12, 0, 1), "0s"),
-        (datetime(2026, 1, 10, 11, 59, 55), "05s"),
-        (datetime(2026, 1, 10, 11, 0, 0), "01h 00s"),
-        (datetime(2026, 1, 10, 11, 0, 5), "59m 55s"),
-        (datetime(2026, 1, 7, 7, 47, 55), "3d 04h 12m 05s"),
-        (datetime(2026, 1, 9, 12, 0, 0), "1d 00s"),
+        (datetime(2026, 1, 10, 12, 0, 0), "00s"),  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
+        (datetime(2026, 1, 10, 12, 0, 1), "0s"),  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
+        (datetime(2026, 1, 10, 11, 59, 55), "05s"),  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
+        (datetime(2026, 1, 10, 11, 0, 0), "01h 00s"),  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
+        (datetime(2026, 1, 10, 11, 0, 5), "59m 55s"),  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
+        (datetime(2026, 1, 7, 7, 47, 55), "3d 04h 12m 05s"),  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
+        (datetime(2026, 1, 9, 12, 0, 0), "1d 00s"),  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
         ("2026-01-09T12:00:00+00:00", "1d 00s"),
         ("2026-01-09T12:00:00", "1d 00s"),
-        (datetime(2026, 1, 9, 12, 0, 5), "23h 59m 55s"),
+        (datetime(2026, 1, 9, 12, 0, 5), "23h 59m 55s"),  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
         (NOW - timedelta(days=2, seconds=30), "2d 00h 30s"),
     ],
 )

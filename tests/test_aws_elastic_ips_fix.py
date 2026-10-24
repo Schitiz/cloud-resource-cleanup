@@ -10,7 +10,7 @@ from crc.aws.elastic_ips import ElasticIpCleaner
 from crc.core.cleaner import Operation, RunContext
 from tests.helpers_wc_aws1_engine import deleted_ids, run_cleaner
 
-NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)
+NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
 
 
 def address(ip: str, **tags: str) -> dict[str, Any]:

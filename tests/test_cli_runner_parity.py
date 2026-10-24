@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from crc.cli.runner import CRC as NewCRC
+from crc.cli.runner import CRC as NEW_CRC
 from tests.helpers_cl2_crc import FULL, Case, Scenario, execute
 from tests.helpers_oracle import load_legacy_crc
 
@@ -35,6 +35,6 @@ def test_constructor_matches_main(
         scenario,
     )
     old = execute(oracle.CRC, [oracle], case)
-    new = execute(NewCRC, [], case)
+    new = execute(NEW_CRC, [], case)
     for key in old:
         assert new[key] == old[key], f"{case.name}: {key} differs"

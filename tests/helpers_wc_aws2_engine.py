@@ -46,7 +46,7 @@ def run_through_engine(
     registry.register(cloud, kind)(build)
     try:
         (outcome,) = engine.run(Selection(((cloud, kind),)), ctx, registry)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         return EngineRun([], (type(e).__name__, str(e)), built[0] if built else None)
     ids = (
         [c.id for c in outcome.plan.candidates]

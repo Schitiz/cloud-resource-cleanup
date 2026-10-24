@@ -118,7 +118,7 @@ def run_sweep(
                 logger.current().skip("sweep_gates")
                 continue
             act(volume_id)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - SAF-034 per-volume isolation, failure logged and recorded
             logging.error(
                 "Region %s: error sweeping tagged leftover volume %s: %s", region, volume_id, e
             )

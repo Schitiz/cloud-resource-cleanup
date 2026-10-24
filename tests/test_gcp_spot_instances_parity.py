@@ -749,7 +749,7 @@ def _run(
             deleted = list(spot.get_deleted)
             disks = list(spot.get_deleted_disks)
             count = spot.delete_count
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     return Outcome(gcp.calls, deleted, disks, count, _logs(caplog), capsys.readouterr().out, error)
 
@@ -823,7 +823,7 @@ def _run_engine(
         else:
             deleted = list(outcome.result.succeeded)
             disks = list(outcome.result.related.get("Disk", ()))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     return Outcome(
         gcp.calls, deleted, disks, len(deleted), _logs(caplog), capsys.readouterr().out, error
@@ -851,7 +851,7 @@ def _run_cleaner(
             result = cleaner.apply(plan, ctx)
             deleted = list(result.succeeded)
             disks = list(result.related.get("Disk", ()))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     return Outcome(
         gcp.calls, deleted, disks, len(deleted), _logs(caplog), capsys.readouterr().out, error

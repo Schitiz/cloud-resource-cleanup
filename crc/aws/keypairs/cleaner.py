@@ -135,7 +135,7 @@ class KeyPairCleaner:
                 except Exception as e:
                     run.fail(candidate.region, candidate.id, e)
                     raise
-                logging.info(f"Deleted keypair: {candidate.id} with response: {response}")
+                logging.info("Deleted keypair: %s with response: %s", candidate.id, response)
                 run.action("deleted", candidate.region, candidate.id, candidate.name)
             deleted.append(candidate.id)
 
@@ -147,11 +147,11 @@ class KeyPairCleaner:
         if matches_name and not matches_exception:
             if core_age.is_old(self._age or {}, now, created):
                 return None
-            logging.debug(f"Keypair {name} is not old enough to be deleted.")
+            logging.debug("Keypair %s is not old enough to be deleted.", name)
             logger.current().skip("too_young")
             return "not older than age"
         if matches_exception:
-            logging.debug(f"Keypair {name} is in exception_regex {self._exception_regex}.")
+            logging.debug("Keypair %s is in exception_regex %s.", name, self._exception_regex)
             logger.current().skip("exception_regex")
             return "matches exception_regex"
         logger.current().skip("name_regex_mismatch")

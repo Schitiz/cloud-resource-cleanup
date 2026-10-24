@@ -36,7 +36,7 @@ def list_matches(
         )
         logger.current().fail(region, "-", e)
         return None
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - per-region isolation, failure logged and recorded, region skipped
         logging.error("Region %s: describe_spot_instance_requests failed: %s", region, e)
         logger.current().fail(region, "-", e)
         return None
@@ -50,7 +50,7 @@ def guarded_sweep(region: str, sweep: Callable[[], None]) -> None:
     """Run a region sweep; an error is logged and does not stop the run."""
     try:
         sweep()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - SAF-034 sweep isolation, failure logged and recorded
         logging.error("Region %s: failed sweeping tagged leftover volumes: %s", region, e)
         logger.current().fail(region, "-", e)
 
@@ -59,6 +59,6 @@ def guarded_cleanup(region: str, request_id: str, action: Callable[[], None]) ->
     """Run the cleanup of one request; an error is logged and does not stop the run."""
     try:
         action()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - per-resource isolation, failure logged and recorded, resource kept
         logging.error("Region %s: failed cleaning spot request %s: %s", region, request_id, e)
         logger.current().fail(region, request_id, e)

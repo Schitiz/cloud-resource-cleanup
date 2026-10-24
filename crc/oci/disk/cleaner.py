@@ -164,7 +164,7 @@ class DiskCleaner:
         return attachments.attached_boot_volume_ids(api, region, self._keep_all)
 
     def _keep_all(self, region: str, kind: str, error: BaseException) -> None:
-        logging.warning(f"Region {region}: keeping every {kind}: {UNKNOWN_REASONS[kind]}")
+        logging.warning("Region %s: keeping every %s: %s", region, kind, UNKNOWN_REASONS[kind])
         if region not in self._unknown_regions:
             self._unknown_regions.add(region)
             _logger.region_skipped(region, error)
@@ -205,10 +205,10 @@ class DiskCleaner:
                     api.delete_boot_volume(candidate.id)
                 else:
                     api.delete_volume(candidate.id)
-                logging.info(f"Deleting {kind} {candidate.name}")
+                logging.info("Deleting %s %s", kind, candidate.name)
             deleted.append(candidate.name)
-        except Exception as e:
-            logging.error(f"Error occurred while deleting {kind} {candidate.name}: {e}")
+        except Exception as e:  # noqa: BLE001 - per-resource isolation, failure logged and recorded, resource kept
+            logging.error("Error occurred while deleting %s %s: %s", kind, candidate.name, e)
             _logger.record_failure(candidate.region, candidate.id, e)
             return Failure(id=candidate.name, error=str(e))
         _logger.record_action(

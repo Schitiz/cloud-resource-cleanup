@@ -245,7 +245,9 @@ CASES = [
     Case("max-age-with-empty-age-unused", [vm("a", hours=0)], age={}, max_age="{'days': 5}"),
     Case("time-created-none", [vm("a", created=None)], fails_in_plan=True),
     Case(
-        "time-created-naive", [vm("a", created=datetime.datetime(2026, 1, 1))], fails_in_plan=True
+        "time-created-naive",
+        [vm("a", created=datetime.datetime(2026, 1, 1))],  # noqa: DTZ001 - naive fixture time kept
+        fails_in_plan=True,
     ),
     Case(
         "time-created-skipped-not-read",
@@ -481,7 +483,7 @@ def _run(
             service.delete()
         else:
             service.delete(case.instance_state)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     logs = _records(caplog)
     stdout = capsys.readouterr().out
@@ -564,7 +566,7 @@ def _run_cleaner(
             related = result.related
         deleted, stopped = (names, []) if operation is Operation.DELETE else ([], names)
         nics = list(related.get("NIC", ()))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     return Outcome(
         _oracle_shape(azure.calls, case.resource_group or "env-rg"),

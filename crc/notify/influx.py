@@ -83,5 +83,5 @@ class InfluxNotifier:
             )
 
             write_api.write(bucket=self.settings.influxdb_bucket, record=point)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - a failing notification sink must not abort the run
             print(f"Unable to push data to influxDB: {e}")

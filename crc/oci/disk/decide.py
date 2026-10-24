@@ -52,7 +52,7 @@ def is_old(settings: DiskSettings, volume: SdkVolume, now: datetime.datetime) ->
         cast(dict[str, str], tags), settings.custom_age_tag_key
     )
     if retention_age:
-        logging.info(f"Updating age for volume: {volume.display_name}")
+        logging.info("Updating age for volume: %s", volume.display_name)
     return core_age.is_old(policy.effective_age(retention_age, settings.age), current, created_time)
 
 

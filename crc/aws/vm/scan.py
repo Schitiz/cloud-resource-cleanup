@@ -59,9 +59,9 @@ def _scan_region(
     except CONNECTIVITY_ERRORS as e:
         log_skipped_region(region, "describe_instances (scan tag)", e)
     except client.exceptions.ClientError as ce:
-        logging.warning(f"[aws:{region}] ClientError while describing instances: {ce}")
-    except Exception as e:
-        logging.warning(f"[aws:{region}] error while describing instances: {e}")
+        logging.warning("[aws:%s] ClientError while describing instances: %s", region, ce)
+    except Exception as e:  # noqa: BLE001 - scan-tag read-only path, a region error is logged and the scan continues
+        logging.warning("[aws:%s] error while describing instances: %s", region, e)
 
 
 def _regions(session_factory: SessionFactory, list_regions: RegionLister) -> Sequence[str]:
@@ -69,7 +69,7 @@ def _regions(session_factory: SessionFactory, list_regions: RegionLister) -> Seq
         regions = session_factory().get_available_regions(SERVICE_NAME)
         if not regions:
             regions = list_regions()
-    except Exception:
+    except Exception:  # noqa: BLE001 - read-only scan, falls back to the injected region lister
         regions = list_regions()
     return regions
 
@@ -89,8 +89,8 @@ def find_instances_with_tag(
     for region in _regions(session_factory, list_regions):
         try:
             client = client_factory(region)
-        except Exception as e:
-            logging.warning(f"[aws:{region}] failed to create client: {e}")
+        except Exception as e:  # noqa: BLE001 - read-only scan, a region without a client is logged and skipped
+            logging.warning("[aws:%s] failed to create client: %s", region, e)
             continue
         filters = [{"Name": f"tag:{tag_key}", "Values": [tag_value]}]
         _scan_region(client, region, filters, results)

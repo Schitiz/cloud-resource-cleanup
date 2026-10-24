@@ -32,7 +32,7 @@ BUGS = {"BUG-358"}
 OWNERSHIP_READ = "list_volume_attachments_of_volume"
 LATE = datetime.datetime(2026, 12, 31, tzinfo=datetime.UTC)
 ORACLE = Path(__file__).parent / "legacy" / "oci_spot_vm.txt"
-NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)
+NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
 NOW_UTC = NOW.astimezone(datetime.UTC)
 HOME = "us-sanjose-1"
 MUTATING = ("terminate_instance", "delete_volume")
@@ -733,7 +733,7 @@ def _run(
     try:
         spot_vm = build(case, world)
         spot_vm.delete()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     acted = None if spot_vm is None else list(spot_vm.get_deleted)
     volumes = None if spot_vm is None else list(spot_vm.get_deleted_volumes)
@@ -776,7 +776,7 @@ def _run_cleaner(
         else:
             acted = list(outcome.result.succeeded)
         volumes = list(done.related["Disk"])
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     logs = [(r.name, r.levelno, r.getMessage()) for r in caplog.records]
     return Outcome(world.calls, acted, volumes, logs, capsys.readouterr().out, error)

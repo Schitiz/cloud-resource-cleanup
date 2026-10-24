@@ -38,7 +38,7 @@ DIVERGES = {
     "no-availability-domains": ("BUG-098", ["a"]),
 }
 ORACLE = Path(__file__).parent / "legacy" / "oci_disk.txt"
-NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)
+NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
 NOW_UTC = NOW.astimezone(datetime.UTC)
 HOME = "us-sanjose-1"
 AD = "AD-1"
@@ -605,7 +605,7 @@ def _run(
     error: tuple[str, str] | None = None
     try:
         cleaner.delete()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     deleted = list(cleaner.get_deleted)
     count = cleaner.count
@@ -654,7 +654,7 @@ def _run_engine(
             if outcome.result is None
             else list(outcome.result.succeeded)
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     logs = [(r.name, r.levelno, r.getMessage()) for r in caplog.records]
     return Outcome(world.calls, deleted, len(deleted), logs, capsys.readouterr().out, error)
@@ -677,7 +677,7 @@ def _run_cleaner(
             deleted = [c.name for c in plan.candidates]
         else:
             deleted = list(cleaner.apply(plan, context).succeeded)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     logs = [(r.name, r.levelno, r.getMessage()) for r in caplog.records]
     return Outcome(world.calls, deleted, len(deleted), logs, capsys.readouterr().out, error)

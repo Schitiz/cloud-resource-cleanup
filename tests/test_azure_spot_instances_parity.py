@@ -361,7 +361,7 @@ def _setup(
     vms = list(case.vms)
     if case.id == "age-naive-time-created-raises":
         vms = [vm("s1", age=None)]
-        vms[0].time_created = datetime.datetime(2026, 2, 1)
+        vms[0].time_created = datetime.datetime(2026, 2, 1)  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
     azure = FakeAzure(
         vms,
         list_error=case.list_error,
@@ -387,7 +387,7 @@ def _run(
     error: tuple[str, str] | None = None
     try:
         cleaner.delete()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     return Outcome(
         azure.calls,
@@ -438,7 +438,7 @@ def _run_engine(
             deleted, related = [c.id for c in outcome.plan.candidates], outcome.plan.related
         else:
             deleted, related = list(outcome.result.succeeded), outcome.result.related
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     return Outcome(
         azure.calls,
@@ -470,7 +470,7 @@ def _run_cleaner(
         else:
             result = cleaner.apply(plan, ctx)
             deleted, related = list(result.succeeded), result.related
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     return Outcome(
         azure.calls,

@@ -45,7 +45,7 @@ def human_readable_timedelta(start_time: datetime | str | None) -> str:
     if isinstance(start_time, str):
         try:
             start_dt = dateutil.parser.isoparse(start_time)
-        except Exception:
+        except Exception:  # noqa: BLE001 - display-only start time, falls back to a dash
             return "-"
     else:
         start_dt = start_time
@@ -106,7 +106,7 @@ def send_slack_message(
             err = ""
             try:
                 err = e.response.get("error")
-            except Exception:
+            except Exception:  # noqa: BLE001 - retry loop, error text falls back to str(e)
                 err = str(e)
             logger.warning(
                 "Slack API error posting to %s: %s (attempt %d/%d)",

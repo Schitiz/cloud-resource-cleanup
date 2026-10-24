@@ -105,7 +105,7 @@ class AzureSpotVmCleaner:
             try:
                 leftovers = detached_disk_refs(candidate.name, slots, self._config.resource_group)
                 self.remover.remove_vm(candidate.name, leftovers, removed)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - SAF-005 per-VM isolation, failure logged and recorded
                 logging.error("Error deleting Spot VM %s: %s", candidate.name, e)
                 _logger.failed(self._config.resource_group, candidate.id, e)
                 failed.append(Failure(id=candidate.id, error=str(e)))
@@ -128,7 +128,7 @@ class AzureSpotVmCleaner:
                     previewed.disks.append(f"{resource_group}/{disk_name}")
             self._network_factory()
             previewed.nics.append(f"{candidate.name}-NIC")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - per-VM isolation in the dry-run preview, failure logged and recorded
             logging.error("Error deleting Spot VM %s: %s", candidate.name, e)
             _logger.failed(self._config.resource_group, candidate.name, e)
 
@@ -153,7 +153,7 @@ class AzureSpotVmCleaner:
             )
             if instance_view.statuses and len(instance_view.statuses) > 1:
                 return str(instance_view.statuses[1].display_status or "")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - status read failure logged, empty status keeps the VM
             logging.error("Failed to get instance view for %s: %s", vm_name, e)
         return ""
 
@@ -216,7 +216,7 @@ class AzureSpotVmCleaner:
     def _power_state(self, vm: Any) -> str | None:
         try:
             return self.power_status(vm.name)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - status read failure logged, unknown power state keeps the VM
             logging.error("Error getting status for Spot VM %s: %s", vm.name, e)
             return None
 

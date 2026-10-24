@@ -8,7 +8,7 @@ from crc.core.cleaner import Cleaner, Operation, RunContext
 from crc.core.registry import Registry
 from crc.core.selection import Selection
 
-NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)
+NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
 
 
 def run_engine(

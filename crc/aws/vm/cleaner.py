@@ -105,7 +105,7 @@ class VmCleaner:
         if settings.filter_tags:
             for key, value in settings.filter_tags.items():
                 filters.append({"Name": f"tag:{key}", "Values": value})
-        logging.info(f"Filters created: {filters}")
+        logging.info("Filters created: %s", filters)
         return filters
 
     def plan(self, context: RunContext) -> Plan:
@@ -182,8 +182,8 @@ class VmCleaner:
                 logger.current().action(
                     ACTED[operation, False], candidate.region, candidate.id, candidate.name
                 )
-            except Exception as e:
-                logging.error(f"{_ERROR_TEXT[operation]} {candidate.id}: {e}")
+            except Exception as e:  # noqa: BLE001 - per-resource isolation, failure logged and recorded, resource kept
+                logging.error("%s %s: %s", _ERROR_TEXT[operation], candidate.id, e)
                 logger.current().fail(candidate.region, candidate.id, e)
                 failures.append(Failure(id=candidate.id, error=str(e)))
         for name in names:

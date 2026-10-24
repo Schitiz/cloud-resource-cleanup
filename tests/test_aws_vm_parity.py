@@ -420,7 +420,7 @@ class FakeEc2:
         attach = (
             NOW - datetime.timedelta(hours=hours)
             if hours is not None
-            else datetime.datetime(2020, 1, 1)
+            else datetime.datetime(2020, 1, 1)  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
         )
         return {"NetworkInterfaces": [{"Attachment": {"AttachTime": attach}}]}
 
@@ -546,7 +546,7 @@ def _run(
             vm.delete()
         else:
             vm.delete(case.instance_state)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     logs = _logs(caplog)
     stdout = capsys.readouterr().out
@@ -595,7 +595,7 @@ def _run_cleaner(
                 names = [c.id for c in plan.candidates]
             else:
                 names = list(cleaner.apply(plan, ctx).succeeded)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     logs = _logs(caplog)
     return Outcome(aws.calls, names, len(names), logs, capsys.readouterr().out, error)
@@ -887,7 +887,7 @@ def _scan_run(
     caplog.clear()
     try:
         result: Any = call_scan()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         result = (type(e).__name__, str(e))
     return result, aws.calls, _logs(caplog)
 
@@ -958,7 +958,7 @@ def test_helpers_match_main(
         caplog.clear()
         try:
             return ("ok", fn(), _logs(caplog))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
             return (type(e).__name__, str(e), _logs(caplog))
 
     assert outcome(lambda: instance_name(tags)) == outcome(lambda: old._get_instance_name(tags))
@@ -999,7 +999,7 @@ def test_get_filtered_instances_matches_main(
         caplog.clear()
         try:
             result: Any = ("ok", vm._get_filtered_instances(ec2, details))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
             result = (type(e).__name__, str(e))
         return result, aws.calls, _logs(caplog)
 
@@ -1026,7 +1026,7 @@ def test_get_filtered_instances_matches_main(
         try:
             found, _ = cleaner.filter_instances(ec2, details, "", NOW)
             result: Any = ("ok", ([c.id for c in found], [c.name for c in found]))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
             result = (type(e).__name__, str(e))
         return result, aws.calls, _logs(caplog)
 

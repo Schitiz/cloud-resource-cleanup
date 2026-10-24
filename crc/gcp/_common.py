@@ -33,13 +33,13 @@ def is_old_enough(
 ) -> bool:
     """Whether `item` is at least as old as its custom age label, else `default_age`. `timestamp`
     is the creation (VM) or last detach (disk) time; an int `default_age` is a number of days."""
-    stamp = datetime.datetime.strptime(timestamp, TIME_FORMAT)
+    stamp = datetime.datetime.strptime(timestamp, TIME_FORMAT)  # noqa: DTZ007 - TIME_FORMAT ends in %z, so the result is aware
     now = clock().astimezone(stamp.tzinfo)
     logging.debug(item.labels)
     retention_age = core_age.get_retention_age(
         cast(dict[str, str], item.labels), custom_age_tag_key
     )
     if retention_age:
-        logging.info(f"Updating age for {kind}: {item.name}")
+        logging.info("Updating age for %s: %s", kind, item.name)
     age = policy.effective_age(retention_age, cast(core_age.AgeSpec, default_age))
     return core_age.is_old(age, now, stamp)

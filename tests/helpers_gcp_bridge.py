@@ -238,7 +238,7 @@ def run_pair(  # noqa: PLR0913 - the case, the data and the three switches
                 dispatch._run_pair(crc, "gcp", kind, options, targets)
             else:
                 run_oracle(kind, options, crc_args)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = f"{type(e).__name__}: {e}"
     stdout = "\n".join(line for line in out.getvalue().splitlines() if "loglevel" not in line)
     return Outcome(

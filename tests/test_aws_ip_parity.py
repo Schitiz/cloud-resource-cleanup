@@ -30,7 +30,7 @@ from crc.core.selection import Selection
 from tests.helpers_wc_aws1_engine import deleted_ids, run_cleaner
 
 ORACLE = Path(__file__).parent / "legacy" / "aws_elastic_ips.txt"
-NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)
+NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
 TWO = 2
 
 
@@ -399,7 +399,7 @@ def _run(
     error: tuple[str, str] | None = None
     try:
         cleaner.delete()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     deleted = list(cleaner.get_deleted)
     count = cleaner.count
@@ -571,7 +571,7 @@ def _run_cleaner(
     try:
         (outcome,) = engine.run(Selection((("aws", "ip"),)), ctx, registry)
         deleted = deleted_ids(outcome)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     logs = [(r.name, r.levelno, r.getMessage()) for r in caplog.records]
     return Outcome(aws.calls, deleted, len(deleted), logs, capsys.readouterr().out, error)
@@ -761,7 +761,7 @@ _BUG_011_SKIP: Mapping[tuple[int, int], tuple[str, Any]] = {
 def _skip_outcome(decide: Callable[[Any], bool], tag_list: Any) -> tuple[str, Any]:
     try:
         return ("ok", decide(tag_list))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         return (type(e).__name__, str(e))
 
 

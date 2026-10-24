@@ -16,7 +16,7 @@ from crc.core.cleaner import Operation, RunContext
 from crc.gcp.ip import AddressView, IpCleaner, OperationView
 from tests.helpers_wc_gcp_engine import deleted_ids, run_engine
 
-NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)
+NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
 PROJECT = "proj-1"
 THREE = 3
 

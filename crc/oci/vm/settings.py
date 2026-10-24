@@ -46,26 +46,28 @@ def log_summary(
     """The closing lines of main. Both name lists are passed because main's "nothing to do"
     warning looks at the two of them, whichever operation runs."""
     if not deleted and not stopped:
-        logging.warning(f"No OCI instances to {operation}.")
+        logging.warning("No OCI instances to %s.", operation)
 
     if operation is Operation.DELETE:
         if not dry_run:
-            logging.info(f"number of OCI instances deleted: {len(deleted)}")
-            logging.warning(f"List of OCI instances deleted: {list(deleted)}")
+            logging.info("number of OCI instances deleted: %s", len(deleted))
+            logging.warning("List of OCI instances deleted: %s", list(deleted))
         else:
             logging.warning(
-                f"List of OCI instances (Total: {len(deleted)}) "
-                f"which will be deleted: {list(deleted)}"
+                "List of OCI instances (Total: %s) which will be deleted: %s",
+                len(deleted),
+                list(deleted),
             )
 
     if operation is Operation.STOP:
         if not dry_run:
-            logging.info(f"number of OCI instances stopped: {len(stopped)}")
-            logging.warning(f"List of OCI instances stopped: {list(stopped)}")
+            logging.info("number of OCI instances stopped: %s", len(stopped))
+            logging.warning("List of OCI instances stopped: %s", list(stopped))
         else:
             logging.warning(
-                f"List of OCI instances (Total: {len(stopped)}) "
-                f"which will be stopped: {list(stopped)}"
+                "List of OCI instances (Total: %s) which will be stopped: %s",
+                len(stopped),
+                list(stopped),
             )
 
 

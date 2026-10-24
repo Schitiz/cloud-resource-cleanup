@@ -27,7 +27,7 @@ import pytest
 
 from crc.cli import bridge, dispatch
 from crc.cli.inputs import Targets, read_options
-from crc.cli.runner import CRC as NewCRC
+from crc.cli.runner import CRC as NEW_CRC
 from crc.oci._base import COMPARTMENT_ID
 from crc.oci.spot_vm.client import RegionClients
 from tests.helpers_cl2_oci import install_sdk, paginate
@@ -241,9 +241,9 @@ def _run_patched(run: Run, oracle_module: ModuleType, mp: pytest.MonkeyPatch) ->
     result: Any = ("ok",)
     with _capture() as collector, redirect_stdout(out):
         try:
-            crc = build(NewCRC if run.routed else oracle_module.CRC, case, logs)
+            crc = build(NEW_CRC if run.routed else oracle_module.CRC, case, logs)
             _act(run, crc, options, targets)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
             result = ("error", type(exc).__name__, str(exc))
     if run.routed:
         run_lines = [f"{lvl} {t}" for n, lvl, t in collector.lines if n == "crc.run"]

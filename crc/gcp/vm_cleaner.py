@@ -77,7 +77,7 @@ class VmCleaner:
         scan = ZoneScan(zone)
         try:
             instances = iter(self._client.list_instances(self._settings.project_id, zone))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - BUG-186 listing failure keeps every instance of the zone
             self._listing_failed(zone, e)
             return
         while True:
@@ -85,7 +85,7 @@ class VmCleaner:
                 instance = next(instances)
             except StopIteration:
                 break
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - BUG-186 listing failure keeps every instance of the zone
                 self._listing_failed(zone, e)
                 return
             scan.scanned += 1
@@ -97,7 +97,7 @@ class VmCleaner:
 
     @staticmethod
     def _listing_failed(zone: str, error: Exception) -> None:
-        logging.error(f"Zone {zone}: failed listing GCP instances: {error}")
+        logging.error("Zone %s: failed listing GCP instances: %s", zone, error)
         logger.current().region_skipped(zone, error)
         logger.current().fail(zone, "-", error)
 
@@ -114,9 +114,9 @@ class VmCleaner:
                 state=instance.status,
                 tags=policy.normalize_tags(instance.labels),
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - per-instance isolation, failure logged and recorded, instance kept
             name = getattr(instance, "name", None) or "?"
-            logging.error(f"Error occurred while evaluating instance {name}: {e}")
+            logging.error("Error occurred while evaluating instance %s: %s", name, e)
             logger.current().fail(zone, name, e)
             return None
 
@@ -139,8 +139,10 @@ class VmCleaner:
             if not dry_run:
                 self._act(candidate, operation)
             recorded.append(candidate.id)
-        except Exception as e:
-            logging.error(f"Error occurred while {operation.value} instance {candidate.id}: {e}")
+        except Exception as e:  # noqa: BLE001 - per-resource isolation, failure logged and recorded, resource kept
+            logging.error(
+                "Error occurred while %s instance %s: %s", operation.value, candidate.id, e
+            )
             logger.current().fail(candidate.region, candidate.id, e)
             return False
         log_action(operation.value, candidate, dry_run=dry_run)
@@ -150,10 +152,10 @@ class VmCleaner:
         project_id = self._settings.project_id
         if operation is Operation.DELETE:
             result = self._client.delete_instance(project_id, candidate.region, candidate.id)
-            logging.info(f"Deleting instance {candidate.id}")
+            logging.info("Deleting instance %s", candidate.id)
         else:
             result = self._client.stop_instance(project_id, candidate.region, candidate.id)
-            logging.info(f"Stopping instance {candidate.id}")
+            logging.info("Stopping instance %s", candidate.id)
         self._wait_operation(candidate.region, result)
 
     def _wait_operation(self, zone: str, result: object) -> None:
@@ -171,7 +173,7 @@ class VmCleaner:
                 if state.get("error"):
                     raise RuntimeError(f"zone operation {name} failed: {state['error']}")
                 return
-            logging.debug(f"Waiting for GCP zone operation {zone}/{name} (status={status})")
+            logging.debug("Waiting for GCP zone operation %s/%s (status=%s)", zone, name, status)
             time.sleep(settings.poll_sec)
         raise RuntimeError(f"zone operation {name} not done after {settings.wait_sec}s")
 

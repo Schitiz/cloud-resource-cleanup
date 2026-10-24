@@ -98,7 +98,7 @@ def execute_scan(crc_class: Any, case: Case) -> Recorded:
             crc = build(crc_class, case, logs)
             attributes = sorted((k, repr(v)) for k, v in vars(crc).items() if "client" not in k)
             result = ("ok", repr(case.act(crc)))
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
             result = ("error", type(exc).__name__, str(exc))
     return {
         "result": result,

@@ -28,7 +28,7 @@ class SlackPoster:
                 self.client.chat_postMessage(channel="#" + self.channel, text=text, link_names=True)
             else:
                 self.client.chat_postMessage(channel="#" + self.channel, text=text)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - a failing notification sink must not abort the run
             print(f"Failed to send message '{text}' to Slack channel '{self.channel}': {e}")
 
     def lookup_user_by_email(self, email: str) -> Any:
@@ -92,5 +92,5 @@ class SlackPoster:
         channel_id = response["channel"]["id"]
         try:
             self.client.chat_postMessage(channel=channel_id, text=text, link_names=True)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - a failing notification sink must not abort the run
             print(f"Failed to send message '{text}' to Slack channel '{channel_id}': {e}")

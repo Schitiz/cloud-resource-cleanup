@@ -69,7 +69,7 @@ def has_matching_filter_label(instance: InstanceView, settings: SpotSettings) ->
 def is_old_instance(instance: InstanceView, settings: SpotSettings, clock: Clock) -> bool:
     """At least as old as the custom age label or else `age`. An invalid custom age label
     keeps the instance (fail closed)."""
-    created = datetime.datetime.strptime(instance.creation_timestamp, TIME_FORMAT)
+    created = datetime.datetime.strptime(instance.creation_timestamp, TIME_FORMAT)  # noqa: DTZ007 - TIME_FORMAT ends in %z, so the result is aware
     now = clock().astimezone(created.tzinfo)
     try:
         retention_age = core_age.validated_retention_age(

@@ -115,12 +115,12 @@ class AzureDiskCleaner:
         try:
             if not dry_run:
                 self._client_factory().disks.begin_delete(self._resource_group, disk_name).result()
-                logging.info("Deleted disk: " + disk_name)
+                logging.info("Deleted disk: " + disk_name)  # noqa: G003 - BUG-174: a None name must raise TypeError here, as before
             if record:
                 kind = "would_delete" if dry_run else "deleted"
                 _logger.acted(kind, self._resource_group, disk_name)
-        except Exception as e:
-            logging.error(f"Error occurred while deleting disk {disk_name}: {e}")
+        except Exception as e:  # noqa: BLE001 - per-resource isolation, failure logged and recorded, resource kept
+            logging.error("Error occurred while deleting disk %s: %s", disk_name, e)
             _logger.failed(self._resource_group, str(disk_name), e)
             return str(e)
         return None
@@ -160,7 +160,7 @@ class AzureDiskCleaner:
             disk.tags or {}, settings.custom_age_tag_key or ""
         )
         if retention_age:
-            logging.info(f"Updating age for disk: {disk.name}")
+            logging.info("Updating age for disk: %s", disk.name)
         current = now.astimezone(disk.time_created.tzinfo)
         age = policy.effective_age(retention_age, settings.age or {})
         return core_age.is_old(age, current, disk.time_created)

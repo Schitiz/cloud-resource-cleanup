@@ -132,8 +132,10 @@ class VmCleaner:
         failure and the instance is kept; the caller carries on with the next one."""
         try:
             reason = self._skip_reason(instance, clock)
-        except Exception as e:
-            logging.error(f"Error occurred while evaluating instance {instance.display_name}: {e}")
+        except Exception as e:  # noqa: BLE001 - BUG-162 per-instance isolation, failure recorded, instance kept
+            logging.error(
+                "Error occurred while evaluating instance %s: %s", instance.display_name, e
+            )
             _logger.record_failure(region, instance.id, e)
             return Skipped(id=instance.id, reason=EVALUATION_FAILED, name=instance.display_name)
         if reason is not None:
@@ -163,13 +165,13 @@ class VmCleaner:
             if not dry_run:
                 if operation is Operation.DELETE:
                     api.terminate_instance(candidate.id)
-                    logging.info(f"Deleting instance {candidate.name}")
+                    logging.info("Deleting instance %s", candidate.name)
                 else:
                     api.stop_instance(candidate.id)
-                    logging.info(f"Stopping instance {candidate.name}")
+                    logging.info("Stopping instance %s", candidate.name)
             done.append(candidate.name)
-        except Exception as e:
-            logging.error(f"Error occurred while {operation} instance {candidate.name}: {e}")
+        except Exception as e:  # noqa: BLE001 - per-resource isolation, failure logged and recorded, resource kept
+            logging.error("Error occurred while %s instance %s: %s", operation, candidate.name, e)
             _logger.record_failure(candidate.region, candidate.id, e)
             return Failure(id=candidate.name, error=str(e))
         self._record(candidate, operation, dry_run=dry_run)
@@ -214,7 +216,7 @@ class VmCleaner:
             cast(dict[str, str], tags), self._settings.custom_age_tag_key
         )
         if retention_age:
-            logging.info(f"Updating age for instance: {instance.display_name}")
+            logging.info("Updating age for instance: %s", instance.display_name)
         return core_age.is_old(
             policy.effective_age(retention_age, self._settings.age), now, created_time
         )

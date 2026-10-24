@@ -39,28 +39,30 @@ class Tally:
 
 def _log_deleted(tally: Tally, *, dry_run: bool) -> None:
     if not dry_run:
-        logging.warning(f"number of Azure instances deleted: {len(tally.deleted)}")
-        logging.warning(f"List of Azure instances deleted: {tally.deleted}")
-        logging.warning(f"number of Azure nics deleted: {len(tally.nics)}")
-        logging.warning(f"List of Azure nics deleted: {tally.nics}")
+        logging.warning("number of Azure instances deleted: %s", len(tally.deleted))
+        logging.warning("List of Azure instances deleted: %s", tally.deleted)
+        logging.warning("number of Azure nics deleted: %s", len(tally.nics))
+        logging.warning("List of Azure nics deleted: %s", tally.nics)
     else:
         logging.warning(
-            f"List of Azure instances (Total: {len(tally.deleted)}) "
-            f"which will be deleted: {tally.deleted}"
+            "List of Azure instances (Total: %s) which will be deleted: %s",
+            len(tally.deleted),
+            tally.deleted,
         )
         logging.warning(
-            f"List of Azure nics (Total: {len(tally.nics)}) which will be deleted: {tally.nics}"
+            "List of Azure nics (Total: %s) which will be deleted: %s", len(tally.nics), tally.nics
         )
 
 
 def _log_stopped(tally: Tally, *, dry_run: bool) -> None:
     if not dry_run:
-        logging.warning(f"number of Azure instances stopped: {len(tally.stopped)}")
-        logging.warning(f"List of Azure instances stopped: {tally.stopped}")
+        logging.warning("number of Azure instances stopped: %s", len(tally.stopped))
+        logging.warning("List of Azure instances stopped: %s", tally.stopped)
     else:
         logging.warning(
-            f"List of Azure instances (Total: {len(tally.stopped)}) "
-            f"which will be stopped: {tally.stopped}"
+            "List of Azure instances (Total: %s) which will be stopped: %s",
+            len(tally.stopped),
+            tally.stopped,
         )
 
 
@@ -68,7 +70,7 @@ def log_summary(operation: Operation, tally: Tally, *, dry_run: bool) -> None:
     """The closing lines of main. The "nothing to do" warning looks at both name lists,
     whichever operation runs."""
     if not tally.deleted and not tally.stopped:
-        logging.warning(f"No Azure instances to {operation}.")
+        logging.warning("No Azure instances to %s.", operation)
     if operation is Operation.DELETE:
         _log_deleted(tally, dry_run=dry_run)
     if operation is Operation.STOP:

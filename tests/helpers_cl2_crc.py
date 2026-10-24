@@ -216,7 +216,7 @@ def execute(crc_class: Any, modules: list[ModuleType], case: Case) -> Recorded:
             crc = build(crc_class, case, logs)
             attributes = sorted((k, repr(v)) for k, v in vars(crc).items() if "client" not in k)
             result = ("ok", repr(case.act(crc)))
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
             result = ("error", type(exc).__name__, str(exc))
     return {
         "result": result,
@@ -471,7 +471,7 @@ def run_routed(
             assert route is not None
             targets = Targets(cloud, cloud == "aws" and op.kind == "disk", [cloud], [op.kind])
             bridge.run_routed(crc, cloud, op.kind, options, targets, route)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
             result = ("error", type(exc).__name__, str(exc))
     recorded = {
         "result": result,

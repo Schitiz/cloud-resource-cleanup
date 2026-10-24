@@ -483,7 +483,7 @@ def _vpc(aws: FakeAws, *, dry_run: bool) -> _Engine:
         None,
         None,
     )
-    return _Engine("vpc", cleaner, dry_run=dry_run, now=datetime.datetime(2026, 3, 1, 12))
+    return _Engine("vpc", cleaner, dry_run=dry_run, now=datetime.datetime(2026, 3, 1, 12))  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
 
 
 def test_vpc_dry_run_and_real_run_lines(run_lines: Any) -> None:
@@ -545,7 +545,7 @@ def test_vpc_cleaner_plan_apply_and_skipped_region(run_lines: Any) -> None:
         dry_run=False,
         operation=Operation.DELETE,
         options={},
-        now=datetime.datetime(2026, 3, 1, 12, 0, 0),
+        now=datetime.datetime(2026, 3, 1, 12, 0, 0),  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
     )
     cleaner.apply(cleaner.plan(context), context)
     out = lines()

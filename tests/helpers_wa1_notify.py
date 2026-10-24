@@ -80,7 +80,7 @@ def execute_current(case: Case, act: Callable[[CRC], Any]) -> Recorded:
     with pytest.MonkeyPatch.context(), redirect_stdout(out):
         try:
             result = ("ok", repr(act(CRC(case, logs))))
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
             result = ("error", type(exc).__name__, str(exc))
     return {
         "result": result,

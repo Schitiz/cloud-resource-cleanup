@@ -142,7 +142,7 @@ def _terminate_call(
         )
         logger.current().fail(env.region, instance_id, e)
         return False
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - SAF-033 ambiguous failure re-checks the instance state and keeps it unless proven gone
         return _terminate_ambiguous(env, client, match, instance_id, e)
 
 

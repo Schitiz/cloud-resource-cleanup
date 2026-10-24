@@ -90,7 +90,7 @@ class Remover:
                 return False
             self._log_tag_read_failure(resource_group, disk_name, e)
             return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - a tag read failure protects the disk (fail closed)
             self._log_tag_read_failure(resource_group, disk_name, e)
             return True
         return self._disk_tags_protect(disk, resource_group, disk_name)
@@ -147,7 +147,7 @@ class Remover:
                 return
             logging.error("Failed to delete disk %s: %s", label, e)
             _logger.failed(resource_group, label, e)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - per-disk isolation, failure logged and recorded
             logging.error("Failed to delete disk %s: %s", label, e)
             _logger.failed(resource_group, label, e)
 

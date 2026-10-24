@@ -83,7 +83,7 @@ def _run(
     except SystemExit as exc:
         captured = capsys.readouterr()
         return ("exit", exc.code, captured.out, captured.err)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         captured = capsys.readouterr()
         return ("raised", type(exc), str(exc), captured.out, captured.err)
     captured = capsys.readouterr()
@@ -524,7 +524,7 @@ def test_help_lists_every_flag(
     assert "--kms_pending_window" in outcome[2]
 
 
-class _Built(Exception):
+class _BuiltError(Exception):
     def __init__(self, parser: argparse.ArgumentParser) -> None:
         super().__init__()
         self.parser = parser
@@ -534,10 +534,10 @@ def _built_parser(
     parse: Callable[[], dict[str, Any]], monkeypatch: pytest.MonkeyPatch
 ) -> argparse.ArgumentParser:
     def stop(self: argparse.ArgumentParser, *_: Any, **__: Any) -> None:
-        raise _Built(self)
+        raise _BuiltError(self)
 
     monkeypatch.setattr(argparse.ArgumentParser, "parse_args", stop)
-    with pytest.raises(_Built) as built:
+    with pytest.raises(_BuiltError) as built:
         parse()
     monkeypatch.undo()
     return built.value.parser
@@ -777,7 +777,7 @@ NAMES = ["age", "filter_tags", "Value of x with key y", "", "n%s"]
 def _outcome(call: Callable[[], Any]) -> tuple[Any, ...]:
     try:
         value = call()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         return ("raised", type(exc), str(exc))
     return ("returned", value)
 

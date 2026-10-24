@@ -88,7 +88,7 @@ def run(
     with contextlib.redirect_stdout(stdout):
         try:
             call(instance)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
             error = (type(e).__name__, str(e))
     return slack.mock_calls, normalise(influx), stdout.getvalue(), error
 
@@ -531,7 +531,7 @@ def run_slack_notifier(
     with contextlib.redirect_stdout(stdout):
         try:
             SlackNotifier(slack, channel).send(report, context)  # type: ignore[arg-type]
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
             error = (type(e).__name__, str(e))
     return slack.mock_calls, stdout.getvalue(), error
 
@@ -784,7 +784,7 @@ def test_engine_with_notifiers_matches_legacy_on_disk_owner_pings(
     with contextlib.redirect_stdout(stdout):
         try:
             run_engine(Selection((("gcp", "disk"),)), ctx, registry, notifiers)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
             error = (type(e).__name__, str(e))
     assert (slack.mock_calls, normalise(influx), stdout.getvalue(), error) == old
     assert routed_run("gcp", "disk", by_owner=OWNERS, setup=setup) == old

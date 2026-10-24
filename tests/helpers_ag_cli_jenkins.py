@@ -129,7 +129,7 @@ def run_command(command: Command, monkeypatch: pytest.MonkeyPatch) -> Observed:
         seen.exit_code = 0
     except SystemExit as exit_:
         seen.exit_code = exit_.code if exit_.code is not None else 0
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         seen.error = f"{type(error).__name__}: {error}"
     seen.runs = list(fakes.runs)
     seen.operations = [c.operation.value for c in fakes.contexts]

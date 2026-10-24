@@ -726,7 +726,7 @@ def _run(
     error: tuple[str, str] | None = None
     try:
         cleaner.delete()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     deleted = _plain(cleaner.get_deleted)
     count = cleaner.count
@@ -777,7 +777,7 @@ def _run_cleaner(
         else:
             by_owner, ids = outcome.result.by_owner, list(outcome.result.succeeded)
         deleted = _plain(by_owner) if case.slack else ids
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     count = len(deleted)
     return _outcome(gcp, deleted, count, caplog, capsys, error)

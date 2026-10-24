@@ -24,7 +24,7 @@ from crc.cli import bridge, dispatch
 from crc.cli.constants import CLOUDS
 from crc.cli.inputs import Targets
 from crc.cli.routes import skips
-from crc.cli.runner import CRC as NewCRC
+from crc.cli.runner import CRC as NEW_CRC
 from crc.notify.influx import InfluxNotifier
 from tests.helpers_cl2_crc import (
     ADAPTERS,
@@ -152,7 +152,7 @@ def compare_notify(oracle_module: ModuleType, case: Case, name: str) -> Recorded
     """`CRC.notify_*` of main against the routed pair, Slack only (the method sent no Influx)."""
     old = execute(oracle_module.CRC, [oracle_module], case)
     if name in DIRECT_ACTIONS:
-        new = execute(NewCRC, [], Case(case.name, case.cloud, DIRECT_ACTIONS[name], case.scenario))
+        new = execute(NEW_CRC, [], Case(case.name, case.cloud, DIRECT_ACTIONS[name], case.scenario))
         for key in old:
             assert new[key] == old[key], f"{case.name}: {key} differs"
         return old
@@ -180,11 +180,11 @@ def compare(oracle_module: ModuleType, case: Case) -> Recorded:
         return compare_notify(oracle_module, case, case.routed.removeprefix("notify:"))
     spec = ROUTED.get(case.routed or "")
     if spec is None:
-        # Only the CRC context object itself (get_msg) may run on NewCRC; the constructor
+        # Only the CRC context object itself (get_msg) may run on NEW_CRC; the constructor
         # and `scan_instances_with_tag` cases live in `test_cli_runner_parity.py` and
         # `test_cli_scan_parity.py`.
         assert case.routed is None, f"{case.name}: no routed spec"
-        new = execute(NewCRC, [], case)
+        new = execute(NEW_CRC, [], case)
         for key in old:
             assert new[key] == old[key], f"{case.name}: {key} differs"
         return old
@@ -436,7 +436,7 @@ def test_direct_method_matches_main(oracle: ModuleType, case: Case) -> None:
 
 def _unrepresentable_disk_run(case: Case, cloud: str, disk_value: Any) -> Recorded:
     """Run the routed options check and notifiers for a non-list/non-dict/None-valued disk shape."""
-    routed_Check, _ = run_routed(
+    routed_check, _ = run_routed(
         Case(case.name, cloud, case.act, Scenario(dict(FULL), slack="off", influx="off")),
         cloud,
         Op("disk", flags=DISK_FLAGS),
@@ -450,8 +450,8 @@ def _unrepresentable_disk_run(case: Case, cloud: str, disk_value: Any) -> Record
         if c.influxdb_client:
             _influx_notifier(c).write(c.cloud, "Disk", disk_value)
 
-    outcome = execute(NewCRC, [], Case(case.name, cloud, act, case.scenario))
-    return {**outcome, "adapters": routed_Check["adapters"]}
+    outcome = execute(NEW_CRC, [], Case(case.name, cloud, act, case.scenario))
+    return {**outcome, "adapters": routed_check["adapters"]}
 
 
 @pytest.mark.parametrize("disk_value", DISK_VALUES, ids=[repr(v) for v in DISK_VALUES])

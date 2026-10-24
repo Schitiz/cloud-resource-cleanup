@@ -28,8 +28,8 @@ def log_delete_summary(
     items = list(deleted)
     if dry_run:
         logging.warning(
-            f"List of Azure {noun} (Total: {len(items)}) which will be deleted: {items}"
+            "List of Azure %s (Total: %s) which will be deleted: %s", noun, len(items), items
         )
     else:
-        logging.warning(f"{number_word} of Azure {noun} deleted: {len(items)}")
-        logging.warning(f"List of Azure {noun} deleted: {items}")
+        logging.warning("%s of Azure %s deleted: %s", number_word, noun, len(items))
+        logging.warning("List of Azure %s deleted: %s", noun, items)

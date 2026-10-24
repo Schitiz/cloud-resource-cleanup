@@ -91,7 +91,7 @@ def parse_literal(value: str, key: str) -> Any:
     try:
         return ast.literal_eval(value)
     except (ValueError, SyntaxError) as e:
-        logging.error(f"Error parsing '{key}' tag value '{value}': {e}")
+        logging.error("Error parsing '%s' tag value '%s': %s", key, value, e)
         return None
 
 
@@ -125,7 +125,7 @@ def get_retention_age(tags: dict[str, str] | list[dict[str, str]], key: str) -> 
         logging.debug("No tags provided to search for custom_age_tag_key.")
         return None
 
-    logging.debug(f"Searching for custom_age_tag_key: {key}")
+    logging.debug("Searching for custom_age_tag_key: %s", key)
     try:
         value = _find_tag_value(tags, key)
         if value is not None and not isinstance(value, str):
@@ -134,12 +134,12 @@ def get_retention_age(tags: dict[str, str] | list[dict[str, str]], key: str) -> 
         checked = _checked_retention_age(tags, key, logging.DEBUG)
         if checked is None:
             return None
-        logging.info(f"Found '{key}' tag: {value}")
+        logging.info("Found '%s' tag: %s", key, value)
         return checked[1]
     except ValueError:
         logger.current().skip("bad_age_tag")
         return dict(KEEP_AGE)
-    except Exception as e:
-        logging.error(f"Error retrieving '{key}' tag: {e}")
+    except Exception as e:  # noqa: BLE001 - unreadable age tag yields no retention age (fail closed: the caller keeps the resource)
+        logging.error("Error retrieving '%s' tag: %s", key, e)
 
     return None

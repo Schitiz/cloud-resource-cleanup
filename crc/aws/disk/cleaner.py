@@ -136,7 +136,7 @@ class DiskCleaner:
                     failure = self._delete_volume(client, candidate)
                 except CONNECTIVITY_ERRORS:
                     raise
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 - SAF-003 per-volume isolation, failure logged and recorded
                     self._volume_error(_CONSIDER_FAILED, region, candidate.extra.get("VolumeId"), e)
                     continue
                 if failure is None:
@@ -162,7 +162,7 @@ class DiskCleaner:
                         found.append(volume)
                 except CONNECTIVITY_ERRORS:
                     raise
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 - SAF-003 per-volume isolation, volume skipped and recorded
                     self._volume_error(_SKIP_FAILED, region, volume.get("VolumeId"), e)
         return found
 
@@ -187,7 +187,7 @@ class DiskCleaner:
             label = volume_label(region, volume)
         except CONNECTIVITY_ERRORS:
             raise
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - SAF-003 per-volume isolation, volume skipped and recorded
             self._volume_error(_CONSIDER_FAILED, region, volume.get("VolumeId"), e)
             return None
         return Candidate(

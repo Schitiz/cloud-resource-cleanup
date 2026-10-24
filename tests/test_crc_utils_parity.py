@@ -74,7 +74,7 @@ def _run(
     capsys.readouterr()
     try:
         init(*args, **kwargs)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e).replace(str(base), "<base>"))
     out = capsys.readouterr().out
     added = [h for h in root.handlers if h not in before]

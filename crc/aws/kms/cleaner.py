@@ -103,17 +103,17 @@ class KmsCleaner:
     def plan_keys(self, client: KmsClient, keys: Sequence[Mapping[str, Any]], clock: Clock) -> Plan:
         """Decide every key. Any error on one key skips that key (a bare `except:` on `main`);
         a skipped key is never selected (BUG-055)."""
-        logging.info(f"Total keys found = {len(keys)}")
+        logging.info("Total keys found = %s", len(keys))
         started = _regionlog.start()
         active: list[str] = []
         for key in keys:
             try:
                 self._select_key(client, key["KeyId"], active, clock)
-            except BaseException as e:
-                logging.debug(f"KEY SKIPPED {key['KeyId']}")
+            except BaseException as e:  # noqa: BLE001 - per-key isolation, an unreadable key is skipped (fail closed)
+                logging.debug("KEY SKIPPED %s", key["KeyId"])
                 logger.current().skip(NOT_OURS if isinstance(e, NotOursError) else UNREADABLE)
         _regionlog.region_done(DEFAULT_REGION, len(keys), len(active), started)
-        logging.info(f"total number of active Jenkins keys = {len(active)}")
+        logging.info("total number of active Jenkins keys = %s", len(active))
         candidates = tuple(
             Candidate(id=key_id, name=key_id, region=DEFAULT_REGION) for key_id in active
         )
@@ -130,7 +130,7 @@ class KmsCleaner:
             except Exception as e:
                 run.fail(DEFAULT_REGION, cmk_id, e)
                 raise
-            logging.info(f"CMK - {cmk_id} Deleted from AWS console")
+            logging.info("CMK - %s Deleted from AWS console", cmk_id)
             run.action("deleted", DEFAULT_REGION, cmk_id)
 
     def should_skip(self, tags: Sequence[Mapping[str, Any]]) -> bool:
@@ -153,7 +153,7 @@ class KmsCleaner:
             policy.normalize_tags(response_tags), self._settings.custom_age_tag_key
         )
         if retention_age:
-            logging.info(f"Updating age for Key: {key_id}")
+            logging.info("Updating age for Key: %s", key_id)
         if (
             key_state == "Enabled"
             and self._settings.kms_key_description in key_des
@@ -174,7 +174,7 @@ class KmsCleaner:
             except (KeyError, TypeError) as e:
                 raise NotOursError from e
             if user_arn == self._settings.kms_user:
-                logging.info(f"Key {key_id} found with user {user_arn}")
+                logging.info("Key %s found with user %s", key_id, user_arn)
                 found.append(key_id)
         active.extend(found)
 

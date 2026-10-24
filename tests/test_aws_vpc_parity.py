@@ -31,7 +31,7 @@ from crc.core.registry import get
 from tests.helpers_wc_aws2_engine import run_through_engine
 
 ORACLE = Path(__file__).parent / "legacy" / "aws_vpc.txt"
-NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)
+NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
 MUTATING = {
     "associate_with_vpc",
     "detach_internet_gateway",
@@ -687,7 +687,7 @@ def _run(
     error: tuple[str, str] | None = None
     try:
         cleaner.delete()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     deleted = list(cleaner.get_deleted)
     count = cleaner.delete_count
@@ -1147,7 +1147,7 @@ SKIP_SPECS: Sequence[tuple[Any, Any]] = [
 def _skip_outcome(should_skip: Callable[[Any], bool], tags: Any) -> tuple[str, Any]:
     try:
         return ("ok", should_skip(tags))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         return (type(e).__name__, str(e))
 
 

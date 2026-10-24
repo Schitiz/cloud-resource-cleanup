@@ -113,7 +113,7 @@ class AzureIpCleaner:
             resource_group_name=self._resource_group,
             public_ip_address_name=candidate.id,
         )
-        logging.info(f"Deleted IP address: {candidate.id}")
+        logging.info("Deleted IP address: %s", candidate.id)
         _logger.acted("deleted", self._resource_group, candidate.id)
 
     def decide(self, ip: Any) -> tuple[Candidate | None, str]:

@@ -95,8 +95,8 @@ class InstanceJudge:
                 return screened
             name, tags = screened
             return self._judge(client, inst, (name, region), tags, now)
-        except Exception as e:
-            logging.error(f"Error occurred while processing {name} instance: {e}")
+        except Exception as e:  # noqa: BLE001 - per-instance isolation, instance skipped and recorded
+            logging.error("Error occurred while processing %s instance: %s", name, e)
             logger.current().fail(region or None, _safe_id(inst) or "-", e)
             return Skipped(id=_safe_id(inst), reason=f"error: {e}")
 
@@ -108,7 +108,7 @@ class InstanceJudge:
             return Skipped(id=_safe_id(inst), reason="exception tag or notags")
         name = vm_scan.instance_name(tags)
         if not name:
-            logging.error(f"{name} instance doesn't have Name Tag. Skipping it")
+            logging.error("%s instance doesn't have Name Tag. Skipping it", name)
             return Skipped(id=_safe_id(inst), reason="no Name tag")
         return name, tags
 
@@ -128,12 +128,12 @@ class InstanceJudge:
             tags, self._settings.custom_age_tag_key
         )
         if retention_age:
-            logging.info(f"Updating age for instance_id: {instance_id}")
+            logging.info("Updating age for instance_id: %s", instance_id)
         age = policy.effective_age(retention_age, self._settings.age)
         if not core_age.is_old(age, now.astimezone(attached.tzinfo), attached):
             return Skipped(id=instance_id, name=name, reason="younger than age")
         logging.info(
-            f"Instance {name} with ID {instance_id} added to list of instances to be cleaned up."
+            "Instance %s with ID %s added to list of instances to be cleaned up.", name, instance_id
         )
         return Candidate(
             id=instance_id,

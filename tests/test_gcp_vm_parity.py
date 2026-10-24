@@ -618,7 +618,7 @@ def _run(
             vm.delete()
         else:
             vm.delete(case.state)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, re.sub(r"0x[0-9a-f]+", "0x0", str(e)))
     count = vm.stopped_count if case.op == "stop" else vm.delete_count
     return Outcome(
@@ -710,7 +710,7 @@ def _run_cleaner(
             if outcome.result is None
             else list(outcome.result.succeeded)
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, re.sub(r"0x[0-9a-f]+", "0x0", str(e)))
     deleted, stopped = ([], names) if case.op == "stop" else (names, [])
     return Outcome(

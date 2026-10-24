@@ -21,7 +21,7 @@ import pytest
 from crc.cli import bridge
 from crc.cli.inputs import Targets, read_options
 from crc.cli.routes import NotifyMode
-from crc.cli.runner import CRC as NewCRC
+from crc.cli.runner import CRC as NEW_CRC
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext
 from crc.core.registry import Registry
 from tests.helpers_cl2_aws import (
@@ -195,7 +195,7 @@ def _run(case: Case, run: Callable[[Case, Logs], None]) -> dict[str, Any]:
     with redirect_stdout(out):
         try:
             run(case, logs)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
             result = ("error", type(exc).__name__, str(exc))
     return {"result": result, "slack": logs.slack, "influx": logs.influx, "stdout": out.getvalue()}
 
@@ -224,7 +224,7 @@ def _bridged(
         assert route is not None
         options = read_options(_flags(kind, bool(case.scenario.dry_run)))
         targets = Targets("aws", kind.name == "disk", ["aws"], [kind.name])
-        bridge.run_routed(build(NewCRC, case, logs), "aws", kind.name, options, targets, route)
+        bridge.run_routed(build(NEW_CRC, case, logs), "aws", kind.name, options, targets, route)
 
     return run
 
@@ -300,7 +300,7 @@ def test_extra_notifiers_run_after_slack_and_influx() -> None:
 
     base = bridge.TABLES["aws"]["ip"]
     route = type(base)(base.options, extra_notifiers=lambda crc: [Extra()])
-    crc = NewCRC("aws", False, None, object(), object(), slack_channel="c", influxdb_conn={})
+    crc = NEW_CRC("aws", False, None, object(), object(), slack_channel="c", influxdb_conn={})
     assert [n.name for n in bridge.build_notifiers(crc, route)] == ["slack", "influx", "extra"]
 
 
@@ -346,7 +346,7 @@ def test_real_vm_cleaner_through_bridge_matches_oracle_report_names_and_ids(
         now = datetime(2026, 3, 1, 12, tzinfo=UTC)
         clock = type("D", (), {"now": staticmethod(lambda tz=None: now)})
         monkeypatch.setattr(bridge, "datetime", clock)
-        bridge.run_routed(build(NewCRC, case, logs), "aws", "vm", options, targets, route)
+        bridge.run_routed(build(NEW_CRC, case, logs), "aws", "vm", options, targets, route)
 
     new = _run(case, run_real_vm)
     assert new == old

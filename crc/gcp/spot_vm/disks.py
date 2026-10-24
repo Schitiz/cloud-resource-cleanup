@@ -96,7 +96,7 @@ def _custom_age_keeps(
     if not retention_age:
         return None
     try:
-        created = datetime.datetime.strptime(str(disk.get("creationTimestamp")), TIME_FORMAT)
+        created = datetime.datetime.strptime(str(disk.get("creationTimestamp")), TIME_FORMAT)  # noqa: DTZ007 - TIME_FORMAT ends in %z, so the result is aware
         now = clock().astimezone(created.tzinfo)
         old = core_age.is_old(retention_age, now, created)
     except (ValueError, TypeError):
@@ -117,7 +117,7 @@ def disk_ok_to_delete(
     project, scope, location, name, label = _target(settings, ref, fallback_zone)
     try:
         disk = client.get_disk(project, scope, location, name)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - SAF-039 a failed disk read keeps the disk
         logging.error("Failed to get leftover disk %s for label check (skipping): %s", label, e)
         logger.current().fail(location, label, e)
         return False
@@ -155,7 +155,7 @@ def remove_leftover_disk(
             logger.current().fail(location, label, "disk delete operation failed or incomplete")
             return None
         logging.info("Deleted leftover Spot VM disk %s", label)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - per-disk isolation, failure logged and recorded
         logging.error("Failed to delete leftover disk %s: %s", label, e)
         logger.current().fail(location, label, e)
         return None

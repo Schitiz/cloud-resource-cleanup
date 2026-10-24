@@ -180,7 +180,7 @@ CASES = [
     Case("created-none-error", [disk("a"), disk("b", created=None)], error_phase="plan"),
     Case(
         "created-naive-error",
-        [disk("a", created=datetime.datetime(2026, 1, 1))],
+        [disk("a", created=datetime.datetime(2026, 1, 1))],  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
         age={"days": 1},
         error_phase="plan",
     ),
@@ -377,7 +377,7 @@ def _run(
     error: tuple[str, str] | None = None
     try:
         cleaner.delete()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     deleted = list(cleaner.get_deleted)
     logs = _records(caplog)
@@ -415,7 +415,7 @@ def _run_engine(
     try:
         outcome = engine_run("disk", _options(case), dry_run=case.dry_run, now=NOW)
         deleted = candidate_ids(outcome)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     return Outcome(
         azure.calls,
@@ -471,7 +471,7 @@ def _run_cleaner(
             deleted = [c.id for c in plan.candidates]
         else:
             deleted = list(cleaner.apply(plan, ctx).succeeded)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     return Outcome(
         azure.calls,

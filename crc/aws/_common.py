@@ -42,7 +42,9 @@ def log_deleted_summary(label: str, deleted: Sequence[str], *, dry_run: bool) ->
     """The summary lines `main` logs for `label` ("keypairs", "Elastic IPs", "KMS")."""
     items = list(deleted)
     if not dry_run:
-        logging.warning(f"number of AWS {label} deleted: {len(items)}")
-        logging.warning(f"List of AWS {label} deleted: {items}")
+        logging.warning("number of AWS %s deleted: %s", label, len(items))
+        logging.warning("List of AWS %s deleted: %s", label, items)
     else:
-        logging.warning(f"List of AWS {label} (Total: {len(items)}) which will be deleted: {items}")
+        logging.warning(
+            "List of AWS %s (Total: %s) which will be deleted: %s", label, len(items), items
+        )

@@ -164,7 +164,7 @@ def abbreviation_problems(new: argparse.ArgumentParser, old: argparse.ArgumentPa
     return problems
 
 
-class _Built(Exception):
+class _BuiltError(Exception):
     def __init__(self, parser: argparse.ArgumentParser) -> None:
         super().__init__()
         self.parser = parser
@@ -176,12 +176,12 @@ def oracle_parser() -> argparse.ArgumentParser:
     original = argparse.ArgumentParser.parse_args
 
     def stop(self: argparse.ArgumentParser, *_: Any, **__: Any) -> Any:
-        raise _Built(self)
+        raise _BuiltError(self)
 
     argparse.ArgumentParser.parse_args = stop  # type: ignore[method-assign]
     try:
         load_legacy_crc("ag_cli_oracle_parser").get_argparser()
-    except _Built as built:
+    except _BuiltError as built:
         return built.parser
     finally:
         argparse.ArgumentParser.parse_args = original  # type: ignore[method-assign]

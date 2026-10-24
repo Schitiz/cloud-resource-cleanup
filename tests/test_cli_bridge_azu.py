@@ -115,7 +115,7 @@ def _run(
                 else:
                     crc = _crc(oracle_module().CRC, scenario, logs, options)
                     run_oracle_pair(crc, kind.resource, options)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
                 result = ("error", type(exc).__name__, str(exc))
     finally:
         root.removeHandler(handler)

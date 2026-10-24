@@ -162,19 +162,19 @@ class AzureNicCleaner:
                     self._client_factory().network_interfaces.begin_delete(
                         self._resource_group, nic_name
                     ).result()
-                    logging.info(f"Deleted NIC: {nic_name}")
+                    logging.info("Deleted NIC: %s", nic_name)
                 if record:
                     kind = "would_delete" if dry_run else "deleted"
                     _logger.acted(kind, self._resource_group, nic_name)
                 return None
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - per-NIC isolation, last error kept and recorded after the retries
                 failure_count -= 1
                 last_error = str(e)
                 last_exception = e
-                logging.error(f"Error occurred while deleting NIC {nic_name}: {e}")
+                logging.error("Error occurred while deleting NIC %s: %s", nic_name, e)
                 if failure_count:
-                    logging.info(f"Retrying deletion of NIC {nic_name}")
-        logging.error(f"Failed to delete the NIC - {nic_name}")
+                    logging.info("Retrying deletion of NIC %s", nic_name)
+        logging.error("Failed to delete the NIC - %s", nic_name)
         _logger.failed(self._resource_group, nic_name, last_exception or last_error)
         return last_error
 

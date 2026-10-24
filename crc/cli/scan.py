@@ -76,7 +76,7 @@ def _console_url(cloud: Any, project_id: Any, hit: Any, region: Any, name: Any, 
             resource_id = hit.get("id") or hit.get("resource_id")
             if resource_id:
                 console_url = f"https://portal.azure.com/#resource{resource_id}"
-    except Exception:
+    except Exception:  # noqa: BLE001 - read-only scan, a console URL is optional
         console_url = None
     return console_url
 
@@ -108,7 +108,7 @@ def _find_hits(crc: Any, cloud: Any, tag_key: str, tag_value: str) -> Any:
     except NotImplementedError as e:
         print(f"[{cloud}] scan not implemented: {e}")
         return []
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - read-only scan, an error is printed and the scan returns no hits
         print(f"[{cloud}] error scanning: {e}")
         return []
 
@@ -133,7 +133,7 @@ def _report_items(cloud: Any, items: list[dict[str, Any]], context: RunContext, 
                 context.dry_run,
             )
             print(f"[{cloud}] Sent Slack notification to {slack_channel} ({len(items)} items).")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - a failing notification sink must not abort the run
             print(f"[{cloud}] Failed to send Slack notification: {e}")
             _print_items(items)
     else:

@@ -16,7 +16,7 @@ import pytest
 from crc.cli import bridge
 from crc.cli.inputs import Options, Targets, read_options
 from crc.cli.routes import NotifyMode, Route, skips
-from crc.cli.runner import CRC as NewCRC
+from crc.cli.runner import CRC as NEW_CRC
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext
 from crc.core.registry import Registry
 from tests import helpers_ag_cli_added as added_table
@@ -82,7 +82,7 @@ def _run(case: Case, run: Any) -> dict[str, Any]:
     with redirect_stdout(out):
         try:
             run(case, logs)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
             result = ("error", type(exc).__name__, str(exc))
     return {"result": result, "slack": logs.slack, "influx": logs.influx, "stdout": out.getvalue()}
 
@@ -105,7 +105,7 @@ def _bridged(monkeypatch: pytest.MonkeyPatch, seen: list[RunContext], ids: list[
         )
         monkeypatch.setattr(bridge, "init_run_logging", lambda: None)
         monkeypatch.setattr(bridge, "build_registry", lambda: registry)
-        crc = build(NewCRC, case, logs)
+        crc = build(NEW_CRC, case, logs)
         route = bridge.route_for("aws", "keypair")
         assert route is not None
         options = _options(bool(case.scenario.dry_run))
@@ -156,7 +156,7 @@ def test_bridge_reaches_the_cleaner_with_the_flags(monkeypatch: pytest.MonkeyPat
     )
     monkeypatch.setattr("crc.service.init_logging", lambda *args: init_calls.append(args))
     monkeypatch.setattr(bridge, "build_registry", lambda: registry)
-    crc = NewCRC("aws", False, None, None, None)
+    crc = NEW_CRC("aws", False, None, None, None)
     route = bridge.route_for("aws", "keypair")
     assert route is not None
     bridge.run_routed(
@@ -229,9 +229,9 @@ def test_unlisted_or_missing_route_fails_route_table_check(
 def test_notifiers_follow_the_clients_and_the_notify_flag() -> None:
     route = bridge.route_for("aws", "keypair")
     assert route is not None
-    silent = NewCRC("aws", False, None, None, None)
+    silent = NEW_CRC("aws", False, None, None, None)
     assert bridge.build_notifiers(silent, route) == []
-    both = NewCRC("aws", False, None, object(), object(), slack_channel="c", influxdb_conn={})
+    both = NEW_CRC("aws", False, None, object(), object(), slack_channel="c", influxdb_conn={})
     assert [n.name for n in bridge.build_notifiers(both, route)] == ["slack", "influx"]
     quiet = Route(route.options, notify=NotifyMode.NONE)
     assert bridge.build_notifiers(both, quiet) == []

@@ -17,10 +17,13 @@ variable and JSON-style value (`--age '{"days": 1}'`) must keep working.
 pip install -r requirements.txt -r requirements-dev.txt   # once; Python 3.11 (CI) or newer
 make check-fast            # lint + tests minus the three slow CLI parity files, about 25 s
 make check                 # everything CI runs, about 60 s; green before every commit
-make lint                  # ruff, mypy, lint-imports only
+make lint                  # ruff check, ruff format --check, mypy, lint-imports only
 make test-file F=tests/test_x.py     # one file while iterating
 make raise-test-floor      # after adding tests, raises the floor (never lowers it); never edit the file by hand
 ```
+
+Ruff rule set (`pyproject.toml`): E F W I B UP FURB SIM PERF C901 PLR RUF DTZ BLE G LOG C4 RET N, plus `ruff format`;
+a broad `except Exception` needs `# noqa: BLE001 - <reason>`.
 
 Timings measured on a 4-core VM with warm caches: `make check-fast` 24 s (about 14,060 tests),
 `make check` 61 s (44,421 tests; the three slow parity files hold about 30,000 of them).

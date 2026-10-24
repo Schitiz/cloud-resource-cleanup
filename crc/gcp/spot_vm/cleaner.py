@@ -83,7 +83,7 @@ class SpotVMCleaner:
     def _list(self, zone: str) -> list[InstanceView] | None:
         try:
             return list(self._client.list_instances(self._settings.project_id, zone))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - per-region isolation, failure logged and recorded, region skipped
             logging.error("Zone %s: failed listing GCP instances: %s", zone, e)
             logger.current().region_skipped(zone, e)
             return None
@@ -120,7 +120,7 @@ class SpotVMCleaner:
                 tags=dict(getattr(instance, "labels", None) or {}),
                 extra={LEFTOVER_DISKS: tuple(leftover)},
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - per-instance isolation, failure logged and recorded, instance kept
             _log_failure(getattr(instance, "name", "?"), e, zone)
             return None
 
@@ -175,7 +175,7 @@ class SpotVMCleaner:
                 for ref in _leftover(candidate)
                 if disk_ok_to_delete(self._client, settings, ref, candidate.region, clock)
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - per-instance isolation, failure logged and recorded, disks kept
             _log_failure(candidate.name, e, candidate.region)
 
     def apply_instance(
@@ -203,7 +203,7 @@ class SpotVMCleaner:
                 label = remove_leftover_disk(self._client, settings, ref, zone, dry_run=dry_run)
                 if label is not None:
                     disks.append(label)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - per-instance isolation, failure logged and recorded
             _log_failure(candidate.name, e, zone)
 
     def _delete_and_wait(self, candidate: Candidate) -> bool:

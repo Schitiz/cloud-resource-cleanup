@@ -106,7 +106,7 @@ class VmCleaner:
         for candidate in plan.candidates:
             try:
                 self.act(candidate.id, context.operation, tally, dry_run=False)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - per-resource isolation, failure logged and recorded, resource kept
                 log_processing_error(candidate.id, e)
                 _logger.failed(self._resource_group, candidate.id, e)
                 failed.append(Failure(id=candidate.id, error=str(e)))
@@ -173,7 +173,7 @@ class VmCleaner:
     def _with_status(self, candidate: Candidate) -> Candidate | Skipped:
         try:
             reason = self.state_skip_reason(candidate.id, self._settings.instance_states)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - state read failure recorded, VM skipped (fail closed)
             log_processing_error(candidate.id, e)
             _logger.failed(self._resource_group, candidate.id, e)
             return Skipped(id=candidate.id, reason="status unavailable")

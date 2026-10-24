@@ -45,15 +45,15 @@ def log_summary(
     """The closing warnings of a run, as on main (`deleted` and `stopped` are both checked
     for the empty message, the one of `operation` is listed)."""
     if not deleted and not stopped:
-        logging.warning(f"No AWS instances to {operation.value}.")
+        logging.warning("No AWS instances to %s.", operation.value)
     names = list(deleted if operation is Operation.DELETE else stopped)
     verb = "deleted" if operation is Operation.DELETE else "stopped"
     if not dry_run:
-        logging.warning(f"number of AWS instances {verb}: {len(names)}")
-        logging.warning(f"List of AWS instances {verb}: {names}")
+        logging.warning("number of AWS instances %s: %s", verb, len(names))
+        logging.warning("List of AWS instances %s: %s", verb, names)
     else:
         logging.warning(
-            f"List of AWS instances (Total: {len(names)}) which will be {verb}: {names}"
+            "List of AWS instances (Total: %s) which will be %s: %s", len(names), verb, names
         )
 
 

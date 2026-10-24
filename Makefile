@@ -13,6 +13,7 @@ check-fast: lint
 
 lint:
 	$(PYTHON) -m ruff check .
+	$(PYTHON) -m ruff format --check .
 	$(PYTHON) -m mypy
 	$(LINT_IMPORTS)
 

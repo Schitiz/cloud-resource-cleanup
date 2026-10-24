@@ -13,7 +13,7 @@ from crc.core.cleaner import Candidate, Operation, Plan, RunContext
 from crc.core.registry import Registry, get
 from crc.core.selection import Selection
 
-NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)
+NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
 NOW_UTC = NOW.astimezone(datetime.UTC)
 
 

@@ -134,7 +134,7 @@ def routed_run(  # noqa: PLR0913 - one keyword per axis the parity tests vary
     with contextlib.redirect_stdout(stdout):
         try:
             run_engine(Selection(((cloud, kind),)), context, registry, notifiers)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
             error = (type(e).__name__, str(e))
     slack_calls = slack_client.mock_calls if slack_client is not None else []
     influx_calls = normalise(influx_client) if influx_client is not None else []
@@ -173,6 +173,6 @@ def routed_call(
     with contextlib.redirect_stdout(stdout):
         try:
             call(notifiers, crc)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
             error = (type(e).__name__, str(e))
     return slack.mock_calls, normalise(influx), stdout.getvalue(), error

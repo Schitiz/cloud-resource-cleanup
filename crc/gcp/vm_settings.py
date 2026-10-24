@@ -34,13 +34,13 @@ def _log_summary(
 ) -> None:
     """The closing log lines of `main`; the empty check looks at both lists."""
     if not deleted and not stopped:
-        logging.warning(f"No GCP instances to {operation.value}.")
+        logging.warning("No GCP instances to %s.", operation.value)
     past = "deleted" if operation is Operation.DELETE else "stopped"
     names = deleted if operation is Operation.DELETE else stopped
     if not dry_run:
-        logging.info(f"number of GCP instances {past}: {len(names)}")
-        logging.warning(f"List of GCP instances {past}: {names}")
+        logging.info("number of GCP instances %s: %s", past, len(names))
+        logging.warning("List of GCP instances %s: %s", past, names)
     else:
         logging.warning(
-            f"List of GCP instances (Total: {len(names)}) which will be {past}: {names}"
+            "List of GCP instances (Total: %s) which will be %s: %s", len(names), past, names
         )

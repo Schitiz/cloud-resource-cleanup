@@ -106,8 +106,8 @@ class DiskCleaner:
                     continue
                 scan.selected += 1
                 yield candidate
-        except Exception as e:
-            logging.error(f"Error occurred while listing disks of zone {zone}: {e}")
+        except Exception as e:  # noqa: BLE001 - per-zone isolation, listing failure logged and recorded, zone skipped
+            logging.error("Error occurred while listing disks of zone %s: %s", zone, e)
             logger.current().fail(zone, f"zone {zone}", e)
         scan.finish()
 
@@ -122,9 +122,9 @@ class DiskCleaner:
             return Candidate(
                 id=disk.name, name=disk.name, region=zone, tags=policy.normalize_tags(disk.labels)
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - per-disk isolation, failure logged and recorded, disk kept
             name = str(getattr(disk, "name", ""))
-            logging.error(f"Error occurred while evaluating disk {name}: {e}")
+            logging.error("Error occurred while evaluating disk %s: %s", name, e)
             logger.current().fail(zone, name, e)
             return None
 
@@ -151,12 +151,12 @@ class DiskCleaner:
         try:
             if not dry_run:
                 operation = self._client.delete_disk(self._settings.project_id, zone, candidate.id)
-                logging.info(f"Deleting disk {candidate.id}")
+                logging.info("Deleting disk %s", candidate.id)
                 if not self._delete_completed(zone, candidate, operation):
                     return False
             _record(deleted, self._settings, candidate.id, candidate.tags)
-        except Exception as e:
-            logging.error(f"Error occurred while deleting disk {candidate.id}: {e}")
+        except Exception as e:  # noqa: BLE001 - per-resource isolation, failure logged and recorded, resource kept
+            logging.error("Error occurred while deleting disk %s: %s", candidate.id, e)
             logger.current().fail(zone, candidate.id, e)
             return False
         log_action("delete", candidate, dry_run=dry_run)
@@ -180,7 +180,7 @@ class DiskCleaner:
         )
         if name and wait_operation(cast(GcpSpotClient, self._client), spot, "zone", zone, name):
             return True
-        logging.error(f"Disk delete failed or incomplete for {candidate.id}")
+        logging.error("Disk delete failed or incomplete for %s", candidate.id)
         logger.current().fail(zone, candidate.id, "disk delete failed or incomplete")
         return False
 

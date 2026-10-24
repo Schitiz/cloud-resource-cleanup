@@ -84,7 +84,7 @@ class _ReportThenRaise:
     def plan(self, context: RunContext) -> Plan:
         try:
             return self.inner.plan(context)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - error stored, run_routed re-raises it after the notifiers ran
             self.error = e
             return Plan(candidates=tuple(Candidate(id=i) for i in self._partial()))
 
@@ -93,7 +93,7 @@ class _ReportThenRaise:
             return Result()
         try:
             return self.inner.apply(plan, context)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - error stored, run_routed re-raises it after the notifiers ran
             self.error = e
             return Result(succeeded=tuple(self._partial()))
 

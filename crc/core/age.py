@@ -74,7 +74,7 @@ def _apply_max_age_override(age: AgeSpec) -> AgeSpec:
         max_age: Any = ast.literal_eval(max_age_raw)
         if get_min_age(age, max_age) == max_age:
             logging.info(
-                f"Overwriting resource age: Setting age to the maximum threshold of {max_age}."
+                "Overwriting resource age: Setting age to the maximum threshold of %s.", max_age
             )
             return cast(AgeSpec, max_age)
     return age
@@ -82,7 +82,11 @@ def _apply_max_age_override(age: AgeSpec) -> AgeSpec:
 
 def _log_older(amount: float, unit: str, threshold: float) -> None:
     logging.debug(
-        f"The resource is {amount} {unit} old and older than the threshold of {threshold} {unit}."
+        "The resource is %s %s old and older than the threshold of %s %s.",
+        amount,
+        unit,
+        threshold,
+        unit,
     )
 
 
@@ -136,7 +140,7 @@ def is_old(
 
     age = _apply_max_age_override(age)
 
-    logging.debug(f"Validating resource age with threshold: {age}")
+    logging.debug("Validating resource age with threshold: %s", age)
     if _meets_threshold(age, current_time - creation_time):
         return True
     logging.debug("The resource is not older than the threshold specified in the age argument")

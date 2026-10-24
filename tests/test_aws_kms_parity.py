@@ -661,7 +661,7 @@ def _run(
     error: tuple[str, str] | None = None
     try:
         cleaner.delete()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     return _outcome(aws, caplog, capsys, list(cleaner.get_deleted), error)
 
@@ -744,7 +744,7 @@ def _run_cleaner(
             "age": case.age,
             "custom_age_tag_key": case.age_tag,
         },
-        now=datetime.datetime.now(),
+        now=datetime.datetime.now(),  # noqa: DTZ005 - naive fixture time kept: an aware value is not provably identical
     )
     registry = Registry()
     registry.register("aws", "kms")(build_kms_cleaner)
@@ -753,7 +753,7 @@ def _run_cleaner(
     try:
         (outcome,) = engine.run(Selection((("aws", "kms"),)), ctx, registry)
         deleted = deleted_ids(outcome)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     return _outcome(aws, caplog, capsys, deleted, error)
 
@@ -934,7 +934,7 @@ SKIP_SPECS: Sequence[Any] = [{}, None, {"a": []}, {"a": ["1"]}, {"a": ["x"]}, {"
 def _skip_outcome(decide: Callable[[Any], bool], tag_items: Any) -> tuple[str, Any]:
     try:
         return ("ok", decide(tag_items))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         return (type(e).__name__, str(e))
 
 

@@ -52,7 +52,7 @@ def attached_volume_ids(
             compartment_id=compartment_id,
             instance_id=instance_id,
         ).data
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - SAF-040 attachment list failure keeps the volumes
         logging.error("Failed to list volume attachments for %s: %s", instance_id, e)
         _logger.record_failure(region, instance_id, e)
         return None
@@ -98,7 +98,7 @@ def wait_terminated(
             if getattr(e, "status", None) == _HTTP_NOT_FOUND:
                 return True
             return _poll_failed(instance_id, e, region)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - SAF-040 best-effort wait, poll failure reported
             return _poll_failed(instance_id, e, region)
         time.sleep(settings.poll_interval_sec)
 
@@ -139,7 +139,7 @@ def volume_owned(
             compartment_id=owner.compartment_id,
             volume_id=volume_id,
         ).data
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - SAF-040 attachment list failure keeps the volume
         logging.error("Failed to list attachments of volume %s (keeping it): %s", volume_id, e)
         _logger.record_failure(region, volume_id, e)
         return _not_owned(volume_id, "attachment list failed")
@@ -163,7 +163,7 @@ def volume_passes_tag_check(
     is given) it is not owned by the terminated instance."""
     try:
         volume = block.get_volume(volume_id).data
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - SAF-040 a failed volume read keeps the volume
         logging.error("Failed to get volume %s for tag check (skipping): %s", volume_id, e)
         _logger.record_failure(region, volume_id, e)
         return False
@@ -184,7 +184,7 @@ def delete_leftover(
         block.delete_volume(volume_id)
         logging.info("Deleted leftover block volume %s", volume_id)
         done.append(volume_id)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - SAF-040 per-volume isolation, failure logged and recorded
         logging.error("Failed to delete leftover volume %s: %s", volume_id, e)
         _logger.record_failure(region, volume_id, e)
 

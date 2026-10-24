@@ -18,7 +18,7 @@ import pytest
 import crc.cli.scan as scan_module
 from crc.aws.vm import scan as aws_scan
 from crc.aws.vm.settings import all_regions
-from crc.cli.runner import CRC as NewCRC
+from crc.cli.runner import CRC as NEW_CRC
 from crc.cli.scan import scan_instances_with_tag
 from tests.helpers_cl2_crc import MIN_SEEN, Case, execute
 from tests.helpers_oracle import load_legacy_crc
@@ -83,7 +83,7 @@ def compare_scan(oracle_module: ModuleType, case: Case) -> None:
     if cloud not in ("aws", "other") and case.scenario.scan_supported:
         case = replace(case, scenario=replace(case.scenario, scan_supported=False))
     old = execute(oracle_module.CRC, [oracle_module], case)
-    new = execute_scan(NewCRC, routed_case(case))
+    new = execute_scan(NEW_CRC, routed_case(case))
     builds = [call for call in new["adapters"] if call[:1] == ("new",)]
     expected_builds = [call[:2] for call in old["adapters"] if call[:1] == ("new",)]
     assert [call[:2] for call in builds] == expected_builds, f"{case.name}: set-up calls"
@@ -105,7 +105,7 @@ def test_scan_unsupported_matches_main(oracle: ModuleType, case: Case) -> None:
 def test_scan_cases_are_not_vacuous(oracle: ModuleType) -> None:
     seen = {"hit": 0, "unsupported": 0, "invalid_cloud": 0}
     for param in SCAN_CASES[::7] + SCAN_UNSUPPORTED_CASES[::7]:
-        outcome = execute_scan(NewCRC, routed_case(param.values[0]))
+        outcome = execute_scan(NEW_CRC, routed_case(param.values[0]))
         result = outcome["result"]
         if result[0] == "ok":
             assert any(call[1] == "find_instances_with_tag" for call in outcome["adapters"][1:])

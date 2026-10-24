@@ -90,7 +90,7 @@ class SnapshotCleaner:
             except CONNECTIVITY_ERRORS as e:
                 skip_region(region, SKIP_CONTEXT, e)
                 continue
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - per-region isolation, region skipped and logged
                 skip_failed_region(region, e)
                 continue
             self._clients[region] = client
@@ -149,9 +149,9 @@ class SnapshotCleaner:
             return None
         try:
             client.delete_snapshot(SnapshotId=snap_id)
-            logging.info(f"Deleted snapshot {snap_id}")
-        except Exception as e:
-            logging.error(f"Failed to delete snapshot {snap_id}: {e}")
+            logging.info("Deleted snapshot %s", snap_id)
+        except Exception as e:  # noqa: BLE001 - per-resource isolation, failure logged and recorded, resource kept
+            logging.error("Failed to delete snapshot %s: %s", snap_id, e)
             run.fail(region, snap_id, e)
             return Failure(id=snap_id, error=str(e))
         run.action("deleted", region, snap_id)
@@ -177,7 +177,7 @@ class SnapshotCleaner:
             logger.current().skip("exception_tag")
             return Skipped(id=snap_id, reason="has an exception tag")
         if snap_id in used:
-            logging.debug(f"Skipping snapshot {snap_id}, used by AMI")
+            logging.debug("Skipping snapshot %s, used by AMI", snap_id)
             logger.current().skip("used_by_ami")
             return Skipped(id=snap_id, reason="used by AMI")
         return Candidate(id=snap_id, region=region, launch_time=start_time)

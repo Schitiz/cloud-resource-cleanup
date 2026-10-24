@@ -57,7 +57,7 @@ def log_summary(deleted: Sequence[str], *, dry_run: bool) -> None:
         logging.warning("No OCI disk to delete.")
 
     if not dry_run:
-        logging.warning(f"number of OCI disks deleted: {len(items)}")
-        logging.warning(f"List of OCI disk deleted: {items}")
+        logging.warning("number of OCI disks deleted: %s", len(items))
+        logging.warning("List of OCI disk deleted: %s", items)
     else:
-        logging.warning(f"List of OCI disk (Total: {len(items)}) which will be deleted: {items}")
+        logging.warning("List of OCI disk (Total: %s) which will be deleted: %s", len(items), items)

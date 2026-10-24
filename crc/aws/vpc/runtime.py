@@ -47,7 +47,7 @@ def skip_region(region: str, error: BaseException) -> None:
 def log_summary(deleted: Sequence[str], *, dry_run: bool) -> None:
     items = list(deleted)
     if dry_run:
-        logging.warning(f"List of AWS VPCs (Total: {len(items)}) which will be deleted: {items}")
+        logging.warning("List of AWS VPCs (Total: %s) which will be deleted: %s", len(items), items)
     else:
-        logging.warning(f"Number of AWS VPCs deleted: {len(items)}")
-        logging.warning(f"List of AWS VPCs deleted: {items}")
+        logging.warning("Number of AWS VPCs deleted: %s", len(items))
+        logging.warning("List of AWS VPCs deleted: %s", items)

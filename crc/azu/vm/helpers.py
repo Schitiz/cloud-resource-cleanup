@@ -36,4 +36,4 @@ def power_state(statuses: Sequence[InstanceStatus] | None) -> str | None:
 
 
 def log_processing_error(name: str, error: Exception) -> None:
-    logging.error(f"Error occurred while processing {name} instance: {error}")
+    logging.error("Error occurred while processing %s instance: %s", name, error)

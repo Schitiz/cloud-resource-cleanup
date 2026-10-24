@@ -112,7 +112,7 @@ CASES = [
     Case("age-days-none-fails-before-any-call", one(snap("a")), age_days=None),
     Case("age-days-string", one(snap("a")), age_days="90"),
     Case("age-days-overflow", one(snap("a")), age_days=10**12),
-    Case("naive-start-time", one({"SnapshotId": "a", "StartTime": datetime.datetime(2020, 1, 1)})),
+    Case("naive-start-time", one({"SnapshotId": "a", "StartTime": datetime.datetime(2020, 1, 1)})),  # noqa: DTZ001 - naive fixture time kept: an aware value is not provably identical
     Case("start-time-string", one({"SnapshotId": "a", "StartTime": "2020-01-01"})),
     Case("missing-start-time", one(snap("a"), snap("b", None))),
     Case("missing-snapshot-id", one(snap("a"), snap(None), snap("c"))),
@@ -424,7 +424,7 @@ def _run(
     error: tuple[str, str] | None = None
     try:
         cleaner.delete()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         error = (type(e).__name__, str(e))
     deleted = list(cleaner.get_deleted)
     return Outcome(
@@ -654,7 +654,7 @@ def _protected_outcome(
     caplog.clear()
     try:
         return ("ok", is_protected(tags, snap_id), _logs(caplog))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         return (type(e).__name__, str(e), _logs(caplog))
 
 
@@ -700,7 +700,7 @@ def test_is_protected_matches_main(
 def _ami_outcome(used: Callable[[Any], set[str]], ec2: Any) -> tuple[str, Any]:
     try:
         return ("ok", used(ec2))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - parity harness: the exception type and message are the outcome compared with the oracle
         return (type(e).__name__, str(e))
 
 
