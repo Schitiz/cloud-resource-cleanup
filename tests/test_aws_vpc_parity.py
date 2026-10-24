@@ -1,10 +1,11 @@
-"""Parity: `crc.aws.vpc.VPC` against main (`tests/legacy/aws_vpc.txt`).
+"""Parity: the VPC Cleaner, run through `crc.core.engine`, against main's `VPC`
+(`tests/legacy/aws_vpc.txt`).
 
-Both run against the same fake `boto3.client` / `boto3.resource` object graph; SDK calls (in
-order), results, log records, stdout and raised errors must be identical for every case. The
-registered `Cleaner` path (factory with a `RunContext`, `plan()` then `apply()` unless dry run)
-is compared per region on SDK calls, and on results, errors, stdout, log records and the
-summary lines.
+Both run against the same fake `boto3.client` / `boto3.resource` object graph. The Cleaner path
+(registered factory, `engine.run`: `plan()` then `apply()` unless dry run) is compared per region
+on SDK calls, and on results, errors, stdout, log records and the summary lines. The one allowed
+difference: `plan()` decides every VPC before `apply()` mutates, so a listing error stops the run
+before any mutation (fewer deletes, never more).
 
 Cases that trigger a fixed bug are not in `CASES`: they sit in `DIVERGING` with their bug ID,
 and the test asserts that the new code differs from the oracle and the exact new outcome
@@ -24,9 +25,10 @@ from typing import Any
 import pytest
 from botocore.exceptions import ClientError, ConnectTimeoutError, EndpointConnectionError
 
-from crc.aws.vpc import VPC, VpcCleaner, VpcRuntime, build_vpc_cleaner
+from crc.aws.vpc import VpcCleaner, build_vpc_cleaner
 from crc.core.cleaner import Cleaner, Operation, RunContext
 from crc.core.registry import get
+from tests.helpers_wc_aws2_engine import run_through_engine
 
 ORACLE = Path(__file__).parent / "legacy" / "aws_vpc.txt"
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0)
@@ -657,10 +659,6 @@ def _legacy(case: Case) -> Any:
     return _load_oracle().VPC(case.dry_run, case.filter_tags, case.exception_tags, case.notags)
 
 
-def _new(case: Case) -> Any:
-    return VPC(case.dry_run, case.filter_tags, case.exception_tags, case.notags)
-
-
 def _setup(
     case: Case,
     monkeypatch: pytest.MonkeyPatch,
@@ -702,22 +700,9 @@ def debug_logs(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG)
 
 
-@pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
-def test_matches_main(
-    case: Case,
-    debug_logs: None,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
-    assert new.calls == _expected_calls(case, old.calls)
-    assert new.error == old.error
-    assert new.deleted == old.deleted
-    assert new.count == old.count
-    assert new.logs == old.logs
-    assert new.stdout == old.stdout
+def _no_sleep(cleaner: Cleaner) -> None:
+    assert isinstance(cleaner, VpcCleaner)
+    cleaner.sleep = lambda seconds: None
 
 
 def _run_cleaner(
@@ -727,31 +712,39 @@ def _run_cleaner(
     capsys: pytest.CaptureFixture[str],
 ) -> Outcome:
     aws = _setup(case, monkeypatch, caplog, capsys)
-    ctx = RunContext(
-        dry_run=case.dry_run,
-        operation=Operation.DELETE,
-        options={
-            "filter_tags": case.filter_tags,
-            "exception_tags": case.exception_tags,
-            "notags": case.notags,
-        },
-        now=NOW,
+    options = {
+        "filter_tags": case.filter_tags,
+        "exception_tags": case.exception_tags,
+        "notags": case.notags,
+    }
+    run = run_through_engine(
+        "aws", "vpc", options, dry_run=case.dry_run, now=NOW, configure=_no_sleep
     )
-    cleaner = get("aws", "vpc")(ctx)
-    assert isinstance(cleaner, VpcCleaner)
-    cleaner.sleep = lambda seconds: None
-    error: tuple[str, str] | None = None
-    deleted: list[str] = []
-    try:
-        plan = cleaner.plan(ctx)
-        if case.dry_run:
-            deleted = [c.id for c in plan.candidates]
-        else:
-            deleted = list(cleaner.apply(plan, ctx).succeeded)
-    except Exception as e:
-        error = (type(e).__name__, str(e))
     logs = [(r.name, r.levelno, r.getMessage()) for r in caplog.records]
-    return Outcome(aws.calls, deleted, len(deleted), logs, capsys.readouterr().out, error)
+    return Outcome(
+        aws.calls, run.deleted, len(run.deleted), logs, capsys.readouterr().out, run.error
+    )
+
+
+@pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
+def test_matches_main(
+    case: Case,
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    old = _run(_legacy, case, monkeypatch, caplog, capsys)
+    new = _run_cleaner(case, monkeypatch, caplog, capsys)
+    assert new.error == old.error
+    assert new.stdout == old.stdout
+    if case.fails_in_plan:
+        assert _mutations(new.calls) == []
+        return
+    assert _mutations(new.calls) == _mutations(old.calls)
+    if new.error is None:
+        assert new.deleted == old.deleted
+        assert new.count == len(new.deleted or [])
 
 
 def _scan_free(calls: Sequence[tuple[Any, ...]]) -> list[tuple[Any, ...]]:
@@ -939,6 +932,16 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
 ]
 
 
+# Allowed change: plan() lists every region before apply() mutates, so an error stops the run
+# before the earlier region is deleted, and an error raised by the engine run records no ids.
+ENGINE_QUIRKS: Mapping[str, Callable[[Outcome], bool]] = {
+    "list-client-error-propagates": lambda o: o.error is not None and _mutations(o.calls) == [],
+    "missing-vpc-endpoints-key": lambda o: (
+        o.error == ("KeyError", "'VpcEndpoints'") and ("delete_vpc", W2, "vpc-1") not in o.calls
+    ),
+}
+
+
 @pytest.mark.parametrize(("case_id", "check"), QUIRKS, ids=[q[0] for q in QUIRKS])
 def test_quirk_is_preserved(
     case_id: str,
@@ -950,14 +953,9 @@ def test_quirk_is_preserved(
 ) -> None:
     case = _find(case_id)
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
+    new = _run_cleaner(case, monkeypatch, caplog, capsys)
     assert check(old), "oracle no longer shows the quirk"
-    assert check(new)
-
-
-def _sleepless(vpc: VPC) -> VPC:
-    vpc._runtime = VpcRuntime(sleep=lambda seconds: None)
-    return vpc
+    assert ENGINE_QUIRKS.get(case_id, check)(new)
 
 
 def _deletes(o: Outcome) -> list[tuple[Any, ...]]:
@@ -1118,14 +1116,10 @@ def test_diverges_from_main_by_design(
 ) -> None:
     assert bug in {"BUG-012", "BUG-083", "BUG-087", "BUG-088"}
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(lambda c: _sleepless(_new(c)), case, monkeypatch, caplog, capsys)
+    new = _run_cleaner(case, monkeypatch, caplog, capsys)
     assert (new.calls, new.error, new.deleted) != (old.calls, old.error, old.deleted), bug
     assert not check(old), bug
     assert check(new), bug
-    via_cleaner = _run_cleaner(case, monkeypatch, caplog, capsys)
-    assert via_cleaner.error == new.error
-    assert _mutations(via_cleaner.calls) == _mutations(new.calls)
-    assert via_cleaner.deleted == new.deleted
 
 
 SKIP_TAGS: Sequence[Any] = [
@@ -1150,11 +1144,18 @@ SKIP_SPECS: Sequence[tuple[Any, Any]] = [
 ]
 
 
-def _skip_outcome(obj: Any, tags: Any) -> tuple[str, Any]:
+def _skip_outcome(should_skip: Callable[[Any], bool], tags: Any) -> tuple[str, Any]:
     try:
-        return ("ok", obj._should_skip_vpc(tags))
+        return ("ok", should_skip(tags))
     except Exception as e:
         return (type(e).__name__, str(e))
+
+
+def _built(options: Mapping[str, Any]) -> VpcCleaner:
+    ctx = RunContext(dry_run=False, operation=Operation.DELETE, options=dict(options), now=NOW)
+    cleaner = get("aws", "vpc")(ctx)
+    assert isinstance(cleaner, VpcCleaner)
+    return cleaner
 
 
 @pytest.mark.parametrize("tags", SKIP_TAGS, ids=range(len(SKIP_TAGS)))
@@ -1165,9 +1166,9 @@ def test_should_skip_vpc_matches_main(
     monkeypatch.setattr("crc.service.init_logging", lambda *args, **kwargs: None)
     exception_tags, notags = spec
     old = _load_oracle().VPC(False, {}, exception_tags, notags)
-    new = VPC(False, {}, exception_tags, notags)
-    assert _skip_outcome(new, tags) == _skip_outcome(old, tags)
-    assert _skip_outcome(new, object()) == _skip_outcome(old, object())
+    new = _built({"exception_tags": exception_tags, "notags": notags})
+    assert _skip_outcome(new.should_skip, tags) == _skip_outcome(old._should_skip_vpc, tags)
+    assert _skip_outcome(new.should_skip, object()) == _skip_outcome(old._should_skip_vpc, object())
 
 
 @pytest.mark.parametrize(
@@ -1176,16 +1177,18 @@ def test_should_skip_vpc_matches_main(
 def test_get_filter_matches_main(filter_tags: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("crc.service.init_logging", lambda *args, **kwargs: None)
     old = _load_oracle().VPC(False, filter_tags, {}, {})
-    new = VPC(False, filter_tags, {}, {})
-    assert new._get_filter() == old._get_filter()
+    new = _built({"filter_tags": filter_tags})
+    assert new.build_filter() == old._get_filter()
 
 
 def test_get_vpc_ids_matches_main(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The oracle's `get_vpc_ids` is `[vpc.id for vpc in vpcs]`; the Cleaner lists the VPCs the
+    server side filter returns, in the same order."""
     monkeypatch.setattr("crc.service.init_logging", lambda *args, **kwargs: None)
     vpcs = [types.SimpleNamespace(id=i) for i in ("a", "b", "c")]
-    assert VPC(False, {}, {}, {}).get_vpc_ids(vpcs) == _load_oracle().VPC(
-        False, {}, {}, {}
-    ).get_vpc_ids(vpcs)
+    ec2: Any = types.SimpleNamespace(vpcs=types.SimpleNamespace(filter=lambda *, Filters: vpcs))
+    listed = _built({"filter_tags": {"env": ["test"]}}).list_vpcs(ec2, [])
+    assert [v.id for v in listed] == _load_oracle().VPC(False, {}, {}, {}).get_vpc_ids(vpcs)
 
 
 def test_registered_factory_builds_cleaner() -> None:
@@ -1196,18 +1199,19 @@ def test_registered_factory_builds_cleaner() -> None:
     assert (cleaner.cloud, cleaner.kind) == ("aws", "vpc")
 
 
-def test_runtime_injection_replaces_boto3(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("crc.service.init_logging", lambda *args, **kwargs: None)
+def test_injected_factories_replace_boto3(monkeypatch: pytest.MonkeyPatch) -> None:
     case = _find("delete-two-regions")
     aws = FakeAws(case)
     monkeypatch.setattr("boto3.client", lambda *a, **k: pytest.fail("boto3 used"))
     monkeypatch.setattr("boto3.resource", lambda *a, **k: pytest.fail("boto3 used"))
-    runtime = VpcRuntime(
-        client_factory=lambda region: FakeClient(aws, region),
-        resource_factory=lambda region: FakeResource(aws, region),
-        list_regions=lambda: list(case.regions),
+    cleaner = VpcCleaner(
+        lambda region: FakeClient(aws, region),
+        lambda region: FakeResource(aws, region),
+        lambda: list(case.regions),
+        {"env": ["test"]},
+        {},
+        {},
     )
-    vpc = VPC(False, {"env": ["test"]}, {}, {}, runtime)
-    vpc.delete()
-    assert vpc.get_deleted == ["vpc-1", "vpc-2", "vpc-3"]
-    assert vpc.delete_count == len(vpc.get_deleted)
+    ctx = RunContext(dry_run=False, operation=Operation.DELETE, options={}, now=NOW)
+    result = cleaner.apply(cleaner.plan(ctx), ctx)
+    assert list(result.succeeded) == ["vpc-1", "vpc-2", "vpc-3"]

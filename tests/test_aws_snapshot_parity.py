@@ -1,13 +1,16 @@
-"""Parity: `crc.aws.snapshot.Snapshot` against main's version (`tests/legacy/aws_snapshot.txt`).
+"""Parity: the snapshot Cleaner, run through `crc.core.engine`, against main's `Snapshot`
+(`tests/legacy/aws_snapshot.txt`).
 
-Both run against the same fake `boto3.client`; SDK calls (in order), results, log records,
-stdout and raised errors must be identical for every case. The table runs twice: through the
-legacy adapter class and through the registered Cleaner (`plan()` then `apply()`).
+Both run against the same fake `boto3.client`; SDK calls, results, log records, stdout and raised
+errors must match for every case. The one allowed difference: the Cleaner lists every region
+before it deletes, so only the interleaving of delete calls and delete log lines with the listing
+differs from main, and a listing error stops the run before any delete.
 """
 
 import datetime
 import logging
 import types
+from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,10 +19,12 @@ from typing import Any
 import pytest
 from botocore.exceptions import ClientError, ConnectTimeoutError, EndpointConnectionError
 
-from crc.aws.snapshot import Snapshot, SnapshotCleaner, SnapshotRuntime, build_snapshot_cleaner
+from crc.aws.snapshot import SnapshotCleaner, build_snapshot_cleaner
+from crc.aws.snapshot.protection import used_by_amis
 from crc.core import registry
 from crc.core.cleaner import Operation, RunContext
 from tests.helpers_log_fix import expected_logs, expected_outcome
+from tests.helpers_wc_aws2_engine import run_through_engine
 from tests.log_fix_aws_misc import RULES
 
 ORACLE = Path(__file__).parent / "legacy" / "aws_snapshot.txt"
@@ -388,11 +393,6 @@ def _legacy(case: Case) -> Any:
     return _load_oracle().Snapshot(case.dry_run, case.age_days, case.exception_tags)
 
 
-def _new(case: Case) -> Any:
-    runtime = SnapshotRuntime(clock=lambda: NOW)
-    return Snapshot(case.dry_run, case.age_days, case.exception_tags, runtime)
-
-
 def _prepare(
     case: Case,
     monkeypatch: pytest.MonkeyPatch,
@@ -439,24 +439,11 @@ def _run_cleaner(
     capsys: pytest.CaptureFixture[str],
 ) -> Outcome:
     aws = _prepare(case, monkeypatch, caplog, capsys)
-    ctx = RunContext(
-        dry_run=case.dry_run,
-        operation=Operation.DELETE,
-        options={"age_days": case.age_days, "exception_tags": case.exception_tags},
-        now=NOW,
+    options = {"age_days": case.age_days, "exception_tags": case.exception_tags}
+    run = run_through_engine("aws", "snapshot", options, dry_run=case.dry_run, now=NOW)
+    return Outcome(
+        aws.calls, run.deleted, len(run.deleted), _logs(caplog), capsys.readouterr().out, run.error
     )
-    cleaner = registry.get("aws", "snapshot")(ctx)
-    error: tuple[str, str] | None = None
-    deleted: list[str] = []
-    try:
-        plan = cleaner.plan(ctx)
-        if case.dry_run:
-            deleted = [c.id for c in plan.candidates]
-        else:
-            deleted = list(cleaner.apply(plan, ctx).succeeded)
-    except Exception as e:
-        error = (type(e).__name__, str(e))
-    return Outcome(aws.calls, deleted, len(deleted), _logs(caplog), capsys.readouterr().out, error)
 
 
 @pytest.fixture
@@ -476,13 +463,17 @@ def test_matches_main(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
-    assert new.calls == old.calls
+    new = _run_cleaner(case, monkeypatch, caplog, capsys)
     assert new.error == old.error
-    assert new.deleted == old.deleted
-    assert new.count == old.count
-    assert new.logs == expected_logs(old.logs, LOG_BUGS, rules=RULES)
     assert new.stdout == old.stdout
+    assert [c for c in new.calls if c[0] != "delete_snapshot"] == [
+        c for c in old.calls if c[0] != "delete_snapshot"
+    ]
+    if old.error is None:
+        assert Counter(new.calls) == Counter(old.calls)
+        assert new.deleted == old.deleted
+        assert new.count == old.count
+        assert Counter(new.logs) == Counter(expected_logs(old.logs, LOG_BUGS, rules=RULES))
 
 
 def _split_calls(calls: list[tuple[Any, ...]]) -> tuple[list[Any], list[Any]]:
@@ -632,10 +623,11 @@ def test_quirk_is_preserved(
 ) -> None:
     case = next(c for c in CASES if c.id == case_id)
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
+    new = _run_cleaner(case, monkeypatch, caplog, capsys)
     assert check(old), "oracle no longer shows the quirk"
     assert check(new)
-    assert new.logs == expected_logs(old.logs, LOG_BUGS, rules=RULES)
+    if old.error is None:
+        assert Counter(new.logs) == Counter(expected_logs(old.logs, LOG_BUGS, rules=RULES))
 
 
 def test_cases_cover_both_dry_run_and_real_runs() -> None:
@@ -654,11 +646,14 @@ def test_factory_defaults_age_days_to_ninety() -> None:
 
 
 def _protected_outcome(
-    obj: Any, tags: Any, snap_id: str, caplog: pytest.LogCaptureFixture
+    is_protected: Callable[[Any, str], bool],
+    tags: Any,
+    snap_id: str,
+    caplog: pytest.LogCaptureFixture,
 ) -> tuple[str, Any, list[tuple[str, int, str]]]:
     caplog.clear()
     try:
-        return ("ok", obj._is_protected(tags, snap_id), _logs(caplog))
+        return ("ok", is_protected(tags, snap_id), _logs(caplog))
     except Exception as e:
         return (type(e).__name__, str(e), _logs(caplog))
 
@@ -689,15 +684,22 @@ def test_is_protected_matches_main(
 ) -> None:
     monkeypatch.setattr("crc.service.init_logging", lambda *args, **kwargs: None)
     old = _load_oracle().Snapshot(False, 90, exception_tags)
-    new = Snapshot(False, 90, exception_tags)
-    assert _protected_outcome(new, tags, "snap-1", caplog) == expected_outcome(
-        _protected_outcome(old, tags, "snap-1", caplog), LOG_BUGS, rules=RULES
+    ctx = RunContext(
+        dry_run=False,
+        operation=Operation.DELETE,
+        options={"exception_tags": exception_tags},
+        now=NOW,
+    )
+    new = registry.get("aws", "snapshot")(ctx)
+    assert isinstance(new, SnapshotCleaner)
+    assert _protected_outcome(new.is_protected, tags, "snap-1", caplog) == expected_outcome(
+        _protected_outcome(old._is_protected, tags, "snap-1", caplog), LOG_BUGS, rules=RULES
     )
 
 
-def _ami_outcome(obj: Any, ec2: Any) -> tuple[str, Any]:
+def _ami_outcome(used: Callable[[Any], set[str]], ec2: Any) -> tuple[str, Any]:
     try:
-        return ("ok", obj._get_snapshots_used_by_amis(ec2))
+        return ("ok", used(ec2))
     except Exception as e:
         return (type(e).__name__, str(e))
 
@@ -720,11 +722,10 @@ def test_get_snapshots_used_by_amis_matches_main(
     monkeypatch.setattr("crc.service.init_logging", lambda *args, **kwargs: None)
     case = Case("ami-helper", {"us-west-2": Region([], images)})
     old = _load_oracle().Snapshot(False, 90, None)
-    new = Snapshot(False, 90, None)
     old_aws = FakeAws(case)
     new_aws = FakeAws(case)
-    assert _ami_outcome(new, FakeEc2(new_aws, "us-west-2")) == _ami_outcome(
-        old, FakeEc2(old_aws, "us-west-2")
+    assert _ami_outcome(used_by_amis, FakeEc2(new_aws, "us-west-2")) == _ami_outcome(
+        old._get_snapshots_used_by_amis, FakeEc2(old_aws, "us-west-2")
     )
     assert new_aws.calls == old_aws.calls
 
@@ -744,11 +745,11 @@ def test_snapshot_skip_lines_are_debug(
     code logs the same text at DEBUG and nothing else about the outcome changes."""
     case = next(c for c in CASES if c.id == case_id)
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
+    new = _run_cleaner(case, monkeypatch, caplog, capsys)
     skip_lines = [r for r in old.logs if r[2].startswith(("Skipping snapshot", "Snap "))]
     assert {r[1] for r in skip_lines} <= {logging.INFO}
-    assert new.calls == old.calls
+    assert _split_calls(new.calls) == _split_calls(old.calls)
     assert new.deleted == old.deleted
-    assert new.logs == expected_logs(old.logs, LOG_BUGS, rules=RULES)
+    assert Counter(new.logs) == Counter(expected_logs(old.logs, LOG_BUGS, rules=RULES))
     if skip_lines:
         assert new.logs != old.logs

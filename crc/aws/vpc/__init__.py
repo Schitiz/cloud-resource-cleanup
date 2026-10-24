@@ -3,12 +3,9 @@
 """AWS VPC cleaner package.
 
 `VpcCleaner` (`cleaner.py`) implements the `crc.core.cleaner.Cleaner` contract and is
-registered as `aws` / `vpc`. `VPC` is the legacy class `crc.py` uses; it keeps its
-constructor and attributes and drives the cleaner region by region, VPC by VPC, in the exact
-call order of the original implementation. The old import path `crc.aws.vpc` keeps working.
+registered as `aws` / `vpc` through `build_vpc_cleaner`.
 """
 
-from crc.aws.vpc.adapter import VPC
 from crc.aws.vpc.cleaner import VpcCleaner, build_vpc_cleaner
 from crc.aws.vpc.client import (
     Collection,
@@ -26,10 +23,8 @@ from crc.aws.vpc.client import (
     Vpc,
     VpcCollection,
 )
-from crc.aws.vpc.runtime import VpcRuntime
 
 __all__ = [
-    "VPC",
     "Collection",
     "Deletable",
     "DhcpOptionsHandle",
@@ -45,6 +40,5 @@ __all__ = [
     "Vpc",
     "VpcCleaner",
     "VpcCollection",
-    "VpcRuntime",
     "build_vpc_cleaner",
 ]

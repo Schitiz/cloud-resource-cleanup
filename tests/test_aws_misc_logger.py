@@ -18,10 +18,10 @@ from crc.aws import _regionlog
 from crc.aws.elastic_ips import ElasticIpCleaner
 from crc.aws.keypairs import KeyPairCleaner
 from crc.aws.kms import KmsCleaner, KmsSettings
-from crc.aws.snapshot import Snapshot, SnapshotCleaner, SnapshotRuntime
-from crc.aws.vpc import VPC, VpcCleaner, VpcRuntime
+from crc.aws.snapshot import SnapshotCleaner
+from crc.aws.vpc import VpcCleaner
 from crc.core import engine, logger
-from crc.core.cleaner import Operation, RunContext
+from crc.core.cleaner import Cleaner, Operation, RunContext
 from crc.core.registry import Registry
 from crc.core.selection import Selection
 from tests import test_aws_elastic_ips as eip_t
@@ -220,7 +220,24 @@ def test_kms_key_with_a_later_statement_error_is_skipped_not_selected(
 # Snapshot ----------------------------------------------------------------------------------
 
 
-def _snapshots(dry_run: bool, fail: dict[str, Exception] | None = None) -> Snapshot:
+def _through_engine(kind: str, cleaner: Cleaner, *, dry_run: bool, now: datetime.datetime) -> None:
+    registry = Registry()
+    registry.register("aws", kind)(lambda ctx: cleaner)
+    context = RunContext(dry_run=dry_run, operation=Operation.DELETE, options={}, now=now)
+    engine.run(Selection((("aws", kind),)), context, registry)
+
+
+class _Engine:
+    """A cleaner and the engine run that drives it: `delete()` runs `engine.run`."""
+
+    def __init__(self, kind: str, cleaner: Cleaner, *, dry_run: bool, now: datetime.datetime):
+        self.kind, self.cleaner, self.dry_run, self.now = kind, cleaner, dry_run, now
+
+    def delete(self) -> None:
+        _through_engine(self.kind, self.cleaner, dry_run=self.dry_run, now=self.now)
+
+
+def _snapshots(dry_run: bool, fail: dict[str, Exception] | None = None) -> _Engine:
     snaps = [
         snap_t.snap("old"),
         snap_t.snap("ami", tags=None),
@@ -229,12 +246,10 @@ def _snapshots(dry_run: bool, fail: dict[str, Exception] | None = None) -> Snaps
     ]
     images = [{"BlockDeviceMappings": [{"Ebs": {"SnapshotId": "ami"}}]}]
     clients = {"us-west-2": snap_t.FakeClient(snaps, images, fail)}
-    runtime = SnapshotRuntime(
-        client_factory=lambda region: clients[region],
-        list_regions=lambda: list(clients),
-        clock=lambda: snap_t.NOW,
+    cleaner = SnapshotCleaner(
+        lambda region: clients[region], lambda: list(clients), snap_t.AGE_DAYS, {"keep": []}
     )
-    return Snapshot(dry_run, snap_t.AGE_DAYS, {"keep": []}, runtime)
+    return _Engine("snapshot", cleaner, dry_run=dry_run, now=snap_t.NOW)
 
 
 def test_snapshot_dry_run_lines(run_lines: Any) -> None:
@@ -290,8 +305,8 @@ def test_snapshot_skipped_region_is_counted(run_lines: Any) -> None:
     def factory(region: str) -> Any:
         raise conn_error()
 
-    runtime = SnapshotRuntime(factory, lambda: ["us-west-2", "eu-west-1"], lambda: snap_t.NOW)
-    Snapshot(True, snap_t.AGE_DAYS, None, runtime).delete()
+    cleaner = SnapshotCleaner(factory, lambda: ["us-west-2", "eu-west-1"], snap_t.AGE_DAYS, None)
+    _Engine("snapshot", cleaner, dry_run=True, now=snap_t.NOW).delete()
     out = lines()
     assert not _run_lines(out, "REGION")
     assert " regions=0 regions_skipped=2 " in out[-1]
@@ -459,13 +474,16 @@ def test_elastic_ips_release_failure_and_skipped_region(run_lines: Any) -> None:
 # VPC ---------------------------------------------------------------------------------------
 
 
-def _vpc(aws: FakeAws, *, dry_run: bool) -> VPC:
-    runtime = VpcRuntime(
+def _vpc(aws: FakeAws, *, dry_run: bool) -> _Engine:
+    cleaner = VpcCleaner(
         lambda region: FakeClient(aws, region),
         lambda region: FakeResource(aws, region),
         lambda: list(aws.case.regions),
+        {"env": ["test"]},
+        None,
+        None,
     )
-    return VPC(dry_run, {"env": ["test"]}, None, None, runtime)
+    return _Engine("vpc", cleaner, dry_run=dry_run, now=datetime.datetime(2026, 3, 1, 12))
 
 
 def test_vpc_dry_run_and_real_run_lines(run_lines: Any) -> None:

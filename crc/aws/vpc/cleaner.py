@@ -4,7 +4,7 @@
 
 `VpcCleaner` implements the `crc.core.cleaner.Cleaner` contract: `plan()` lists the VPCs of
 every region (server side `tag:key` filter) and decides which are protected, `apply()` tears
-the VPCs down and deletes them. `VPC` (`adapter.py`) is the legacy class `crc.py` uses.
+the VPCs down and deletes them.
 """
 
 import logging
@@ -22,7 +22,6 @@ from crc.aws.vpc.runtime import (
     RegionLister,
     ResourceFactory,
     TagSpec,
-    VpcRuntime,
     all_regions,
     boto3_client,
     boto3_resource,
@@ -40,7 +39,6 @@ __all__ = [
     "ResourceFactory",
     "TagSpec",
     "VpcCleaner",
-    "VpcRuntime",
     "build_vpc_cleaner",
 ]
 

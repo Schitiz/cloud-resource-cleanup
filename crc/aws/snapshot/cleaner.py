@@ -4,7 +4,7 @@
 
 `SnapshotCleaner` implements the `crc.core.cleaner.Cleaner` contract: `plan()` lists the
 snapshots owned by the account (`describe_snapshots`, `describe_images`) and filters them,
-`apply()` calls `delete_snapshot`. The legacy class `crc.py` uses lives in `adapter.py`.
+`apply()` calls `delete_snapshot`.
 """
 
 import datetime
