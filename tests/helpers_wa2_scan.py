@@ -1,23 +1,23 @@
 """Drive `CRC` of the routed code on the oracle's scan scenarios, without legacy modules.
 
 The oracle side is `execute(oracle.CRC, [oracle], case)`: `main`'s `CRC` on fakes bound in the
-oracle module. The side under test must not depend on which module defines
-`CRC.scan_instances_with_tag`, so `execute_scan` never patches a name in a `crc.cli` module. It
-patches the SDK-facing VM classes through their own modules (`crc.aws.vm`, `crc.azu.vm`,
-`crc.gcp.vm`, `crc.oci.vm`): the module attribute (a seam looked up at call time) and, in place on
-the class object, its constructor and `find_instances_with_tag` (reaching code that already holds
-the class), then drives `CRC` as `execute` does.
+oracle module. The VM adapter classes are gone: the scan calls `crc.aws.vm.scan.scan_tag` for AWS
+and raises NotImplementedError for the other clouds. `execute_scan` replaces `_prepare_scan` (the
+set-up the adapter constructors did) and `scan_tag` through their modules by the recording fakes
+of the oracle, then drives `CRC` as `execute` does.
 """
 
-import importlib
 import io
 import itertools
 from collections.abc import Callable, Iterator
-from contextlib import ExitStack, contextmanager, redirect_stdout
+from contextlib import contextmanager, redirect_stdout
 from typing import Any
 
 import pytest
 
+import crc.cli.scan as scan_module
+from crc.aws.vm import scan as aws_scan
+from crc.cli.constants import CLOUDS as SUPPORTED_CLOUDS
 from tests.helpers_cl2_crc import (
     DATA,
     INFLUX_MODES,
@@ -30,11 +30,11 @@ from tests.helpers_cl2_crc import (
     make_fake,
 )
 
-VM_CLASSES: dict[str, tuple[str, str]] = {
-    "aws": ("crc.aws.vm", "AWS_VM"),
-    "azure": ("crc.azu.vm", "AZU_VM"),
-    "gcp": ("crc.gcp.vm", "GCP_VM"),
-    "oci": ("crc.oci.vm", "OCI_VM"),
+VM_CLASSES: dict[str, str] = {
+    "aws": "AWS_VM",
+    "azure": "AZU_VM",
+    "gcp": "GCP_VM",
+    "oci": "OCI_VM",
 }
 CLOUDS = ["aws", "azure", "gcp", "oci", "other"]
 
@@ -60,35 +60,31 @@ def scan_cases(
 
 @contextmanager
 def patched_vm_classes(scenario: Scenario, logs: Logs) -> Iterator[None]:
-    """Replace the SDK-facing VM class of every cloud by the recording fake of the oracle."""
-    with pytest.MonkeyPatch.context() as patch, ExitStack() as restore:
-        for module_name, adapter in VM_CLASSES.values():
-            _patch_vm_class(patch, restore, module_name, adapter, scenario, logs)
+    """Replace the two seams of `crc.cli.scan` by the recording fakes of the oracle.
+
+    `_prepare_scan` stands for the construction of the oracle's VM class (it records the `new`
+    entry with the cloud's adapter name); `crc.aws.vm.scan.scan_tag` stands for AWS's
+    `find_instances_with_tag`, which the oracle's fake only has when `scan_supported`.
+    """
+    fake_aws = make_fake(VM_CLASSES["aws"], scenario, logs)
+
+    def prepare(crc: Any) -> None:
+        name = VM_CLASSES.get(crc.cloud)
+        if name is None:
+            raise ValueError(
+                f"Invalid cloud provided: {crc.cloud}. Supported clouds are {SUPPORTED_CLOUDS}"
+            )
+        logs.adapters.append(("new", name))
+
+    def scan_tag(tag_key: str, tag_value: str) -> Any:
+        if "find_instances_with_tag" not in fake_aws.__dict__:
+            raise NotImplementedError(f"{fake_aws} does not implement find_instances_with_tag")
+        return fake_aws.__dict__["find_instances_with_tag"](None, tag_key, tag_value)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(scan_module, "_prepare_scan", prepare)
+        patch.setattr(aws_scan, "scan_tag", scan_tag)
         yield
-
-
-def _patch_vm_class(
-    patch: pytest.MonkeyPatch,
-    restore: ExitStack,
-    module_name: str,
-    adapter: str,
-    scenario: Scenario,
-    logs: Logs,
-) -> None:
-    module = importlib.import_module(module_name)
-    real = module.VM
-    fake = make_fake(adapter, scenario, logs)
-    patch.setattr(real, "__init__", fake.__dict__["__init__"])
-    if "find_instances_with_tag" in fake.__dict__:
-        find = fake.__dict__["find_instances_with_tag"]
-        patch.setattr(real, "find_instances_with_tag", find, raising=False)
-    elif hasattr(real, "find_instances_with_tag"):
-        patch.delattr(real, "find_instances_with_tag")
-    # `NotImplementedError` names `type(vm)`: make the real class print like the oracle's fake.
-    patch.setattr(real, "__module__", fake.__module__)
-    restore.callback(setattr, real, "__qualname__", real.__qualname__)
-    real.__qualname__ = fake.__qualname__
-    patch.setattr(module, "VM", fake)
 
 
 def execute_scan(crc_class: Any, case: Case) -> Recorded:

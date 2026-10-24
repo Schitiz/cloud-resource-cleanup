@@ -22,7 +22,7 @@ The names below are synced with this README by ARCH-002. The spot_vm subpackage 
 
 - `get_gcp_regions()`: returns the region names of a project (one Compute Engine regions client list call), a plain list in listing order. It builds a new client per call, has no fallback and lets every SDK error propagate.
 
-- `is_old_enough`: the shared age gate of the disk and VM cleaners: parses the timestamp, reads the custom age label (fail open, BUG-004), logs an "Updating age" line when it is set and returns whether the item is old enough for the effective age; pure apart from logging.
+- `is_old_enough`: the shared age gate of the disk and VM cleaners: parses the timestamp, reads the custom age label (fail closed, BUG-004: a present but bad label keeps the item), logs an "Updating age" line when it is set and returns whether the item is old enough for the effective age; pure apart from logging.
 - `ZoneScan`: counts the resources listed and selected in one zone or region and logs the REGION line through the current run log when finished; log text only (BUG-361).
 - `log_action`: logs the ACTION line (would_delete, deleted, would_stop or stopped) of one candidate through the current run log.
 - `AddressView`: Protocol of the two address fields read (name, status); tests pass fakes.
@@ -43,7 +43,7 @@ The names below are synced with this README by ARCH-002. The spot_vm subpackage 
 - `VmSettings`: frozen dataclass with the fields the cleaner reads (project_id, filter_labels, exception_labels, notags, age, custom_age_tag_key, instance_state, wait_sec and poll_sec for the zone operation wait).
 - `VmCleaner`: the Cleaner (supports DELETE and STOP, read-only plan, mutating apply, plus zones, plan_zone and apply_instance); plan_zone is a lazy generator.
 - `build_vm_cleaner()`: registry factory behind @register("gcp", "vm"); reads project_id (ValueError without it), filter_tags, exception_tags, notags, age, custom_age_tag_key and instance_state from RunContext.options; the operation (delete or stop) is the RunContext operation.
-- `VM`: the class the CLI scan calls (delete(instance_state), stop(), get_deleted, delete_count, get_stopped, stopped_count, instance_names_to_delete, instance_names_to_stop, service_name, service_version, default_instance_state, time_format); the optional eighth and ninth constructor arguments inject a client and a clock (default is the current time). Both lists accumulate over calls.
+- `VM`: legacy adapter class no production code uses (delete(instance_state), stop(), get_deleted, delete_count, get_stopped, stopped_count, instance_names_to_delete, instance_names_to_stop, service_name, service_version, default_instance_state, time_format); the optional eighth and ninth constructor arguments inject a client and a clock (default is the current time). Both lists accumulate over calls.
 
 ## Safety Invariants
 

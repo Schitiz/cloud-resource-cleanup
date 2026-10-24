@@ -5,7 +5,7 @@
 OCI compute instance cleaner (`--cloud oci --resource vm`). `VmCleaner` is a registered `Cleaner`
 (`@register("oci", "vm")`): `plan()` lists the instances of every region and decides on each one,
 `apply()` terminates (`delete`) or stops (`stop`) the selected instances. `crc/cli/routes/oci.py`
-routes the pair through `crc.core.engine`. `VM` is the class `crc/cli/scan.py` uses to list instances.
+routes the pair through `crc.core.engine`. `VM` is a legacy adapter no production code uses (the scan does not call it); only tests do.
 
 Modules, split by responsibility:
 
@@ -27,7 +27,7 @@ Modules, split by responsibility:
 - `VmCleaner`: the Cleaner (supports delete and stop, read-only plan, mutating apply, plus decide and act); built by the registry factory with the engine flag, see Safety Invariants.
 - `build_vm_cleaner()`: registry factory behind @register("oci", "vm"); reads filter_tags, exception_tags, notags, age, custom_age_tag_key and (delete only; stop always uses RUNNING) instance_state from RunContext.options.
 - `VmRuntime`: frozen dataclass with the injected API factory, region lister and clock (now) of `VM`; unset parts come from Base.
-- `VM`: class the instance scan in the CLI calls (delete(), stop(), get_deleted, get_stopped, delete_count, stopped_count, instance_names_to_delete, instance_names_to_stop); subclasses Service and Base; decides and acts instance by instance.
+- `VM`: legacy adapter class no production code uses (delete(), stop(), get_deleted, get_stopped, delete_count, stopped_count, instance_names_to_delete, instance_names_to_stop); subclasses Service and Base; decides and acts instance by instance.
 - `log_summary()`: the closing log lines of a VM run (settings module); the "nothing to do" warning looks at both name lists.
 - `log_for()`: `log_summary()` for a run that only fills one of the two lists.
 
