@@ -1,4 +1,4 @@
-"""FIX-AWS-KMS: BUG-007, BUG-008, BUG-014 and BUG-055 on `crc.aws.kms` (BUG-015 left open)."""
+"""BUG-007, BUG-008, BUG-014 and BUG-055 on `crc.aws.kms` (BUG-015 left open)."""
 
 import datetime
 import json
@@ -130,7 +130,7 @@ def test_bug_008_custom_age_tag_longer_than_age_keeps_the_key() -> None:
 
 
 def test_bug_008_bad_custom_age_tag_keeps_the_key() -> None:
-    # BUG-004 (FIX-CORE-AGE): a present but empty or unparseable age tag keeps the key.
+    # BUG-004: a present but empty or unparseable age tag keeps the key.
     tags = {"k1": _tags(max_retention_age="nope"), "k2": _tags(max_retention_age="")}
     selected, _ = _plan(tags, age={"days": 1}, custom_age_tag_key="max_retention_age")
     assert selected == []

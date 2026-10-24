@@ -1,4 +1,4 @@
-"""Tests of tests/log_fix_azure.py: the LOG-AZU rules only change levels, never text."""
+"""Tests of tests/log_fix_azure.py: the log rules only change levels, never text."""
 
 import logging
 

@@ -1,4 +1,4 @@
-"""LOG-AWS2: run-log call sites of the AWS KMS, snapshot, keypair, Elastic IP and VPC cleaners.
+"""Run-log call sites of the AWS KMS, snapshot, keypair, Elastic IP and VPC cleaners.
 
 Each test begins a run with a fake clock, drives one cleaner (dry run, real run, a failure or a
 skipped region) and asserts the exact INFO+ lines, `REGION ... ACTION ... SKIPPED ... RESULT`,
@@ -74,7 +74,7 @@ def _client_error(operation: str) -> ClientError:
 
 
 class MixedKms(kms_t.FakeKms):
-    """k-denied cannot be read, k-other has no AWS principal, k-ok is ours."""
+    """K-denied cannot be read, k-other has no AWS principal, k-ok is ours."""
 
     def list_resource_tags(self, *, KeyId: str) -> Any:
         if KeyId == "k-denied":

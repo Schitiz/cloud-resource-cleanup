@@ -9,7 +9,7 @@ before any mutation (fewer deletes, never more).
 
 Cases that trigger a fixed bug are not in `CASES`: they sit in `DIVERGING` with their bug ID,
 and the test asserts that the new code differs from the oracle and the exact new outcome
-(BUG-012, BUG-083, BUG-087, BUG-088; FIX-AWS-VPC). The call lists of the other cases are
+(BUG-012, BUG-083, BUG-087, BUG-088). The call lists of the other cases are
 compared with the instance scan reads removed (the scan runs first now, BUG-088).
 """
 

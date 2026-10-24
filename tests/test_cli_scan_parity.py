@@ -1,6 +1,6 @@
 """Parity: `crc.cli.scan.scan_instances_with_tag` against the CRC class of main (`crc_main.txt`).
 
-Lane WA-2. Moved out of `tests/test_cli_crc_parity.py` with the same oracle
+Moved out of `tests/test_cli_crc_parity.py` with the same oracle
 (`load_legacy_crc()`), the same scenario grid and the same compared fields. The oracle runs
 `main`'s `CRC` on fake adapters patched in the oracle module; the side under test runs
 `crc.cli.runner.CRC` as context with the SDK-facing VM classes patched through their own modules

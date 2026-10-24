@@ -1,4 +1,4 @@
-"""A fake OCI SDK for the frozen oracle adapters (`tests/legacy/oci_*.txt`), CL2-OCI.
+"""A fake OCI SDK for the frozen oracle adapters (`tests/legacy/oci_*.txt`).
 
 The oracle adapters talk to `oci.core.ComputeClient`, `BlockstorageClient` and
 `oci.identity.IdentityClient` and page through `oci.pagination.list_call_get_all_results`. The

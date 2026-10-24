@@ -1,6 +1,6 @@
 """Parity: the notification helpers of `crc.cli.notify` (main) against what production calls.
 
-Lane WA-1. Moved out of `tests/test_cli_crc_parity.py`: `get_msg`, `slack_lookup_user_by_email`,
+Moved out of `tests/test_cli_crc_parity.py`: `get_msg`, `slack_lookup_user_by_email`,
 `get_user_groups_list`, `write_influxdb` and `ping_on_slack` of the `CRC` of main
 (`load_legacy_crc()`) against `crc.core.report.get_msg`, `SlackNotifier` (with
 `crc.notify.slack_owners`) and `InfluxNotifier`. Same inputs, same fake Slack and Influx clients;

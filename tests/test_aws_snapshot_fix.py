@@ -1,4 +1,4 @@
-"""FIX-AWS-SNAP: BUG-144 (tolerant exception-tag reading) and BUG-149 (a non-connectivity
+"""BUG-144 (tolerant exception-tag reading) and BUG-149 (a non-connectivity
 error while listing a region skips only that region).
 
 The diverging parity cases (`DIVERGES` in `tests/test_aws_snapshot_parity.py`) are run through

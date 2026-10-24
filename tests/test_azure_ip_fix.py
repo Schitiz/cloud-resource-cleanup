@@ -1,4 +1,4 @@
-"""Behaviour fixes of rung FIX-AZU-IP: BUG-074, BUG-013, BUG-077 and BUG-076."""
+"""Behaviour fixes: BUG-074, BUG-013, BUG-077 and BUG-076."""
 
 import types
 from collections.abc import Iterator

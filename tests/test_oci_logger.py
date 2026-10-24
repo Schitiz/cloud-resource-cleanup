@@ -1,4 +1,4 @@
-"""LOG-OCI: the OCI cleaners report to `crc.core.logger` (REGION, ACTION, SKIPPED, FAILED,
+"""The OCI cleaners report to `crc.core.logger` (REGION, ACTION, SKIPPED, FAILED,
 RESULT) and move per-resource diagnostics to DEBUG. Exact lines of an attached run."""
 
 import datetime

@@ -859,7 +859,7 @@ def test_adapter_matches_main(
 def test_skip_lines_are_debug_only_in_new_code(
     debug_logs: None, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """BUG-356 (LOG-AWS1): the INFO "Skipping ..." lines of the oracle are DEBUG now."""
+    """BUG-356: the INFO "Skipping ..." lines of the oracle are DEBUG now."""
     differing = []
     for case in CASES:
         old = _run_class(_legacy, case, monkeypatch, caplog)
@@ -881,7 +881,7 @@ def _per_region(calls: list[tuple[Any, ...]]) -> dict[str, list[tuple[Any, ...]]
 def test_cleaner_matches_main(
     case: Case, debug_logs: None, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """plan() lists every region before apply() mutates: each region's call stream and the
+    """Plan() lists every region before apply() mutates: each region's call stream and the
     log lines are the same as main's; a single region is identical including order."""
     old = _run_class(_legacy, case, monkeypatch, caplog)
     new = _run_cleaner(case, monkeypatch, caplog)

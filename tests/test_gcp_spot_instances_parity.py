@@ -34,7 +34,7 @@ UTC = datetime.UTC
 NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=UTC)
 PROJECT = "proj-1"
 BUGS = {"BUG-358"}
-# BUG-228 (fixed in FIX-GCP-SPOT): an unlabelled Spot VM is kept when filter_labels is empty.
+# BUG-228 (fixed): an unlabelled Spot VM is kept when filter_labels is empty.
 # case id -> (bug, names of the VMs main deletes and the fixed code keeps, deleted names now).
 DIVERGES: dict[str, tuple[str, tuple[str, ...], list[str]]] = {
     "labels-none-no-filter": ("BUG-228", ("v",), []),

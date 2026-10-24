@@ -1,7 +1,7 @@
 """The Azure kinds of `ROUTED_CALLS` (tests/test_cli_main_parity.py), one table per cloud.
 
 `tests/test_cli_main_parity.py` imports `tests.helpers_routed_<cloud>.ROUTED_CALLS` when that
-module exists, so a cloud lane adds its own file and leaves the shared table alone. The keys are
+module exists, so a cloud adds its own file and leaves the shared table alone. The keys are
 the `RunContext.options` keys of the Azure route in the order of the oracle `CRC` call; a `None`
 key is an oracle argument the Azure adapter never used (the IP regexes), and the options the
 oracle gets from the `CRC` constructor (`resource_group`, `notags`) are asserted by the test itself.

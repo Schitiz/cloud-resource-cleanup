@@ -38,7 +38,8 @@ THREE = 3
 
 @dataclass(frozen=True)
 class Fixed:
-    """The new outcome of a case whose inputs trigger an in-scope bug (BEHAVIOUR_FIX.md 3)."""
+    """The new outcome of a case whose inputs trigger an in-scope bug
+    (`.cursor/skills/crc-maintain/fix-bug.md`)."""
 
     bug: str
     deleted: list[str]

@@ -1,5 +1,5 @@
 """Run-log lines (RUN START, ACTION, REGION, SKIPPED, ERRORS, FAILED, RESULT) of the legacy OCI
-adapters, frozen from the pre-CL2 test (`tests/test_cli_bridge_oci.py` at 2bd8e67).
+adapters, frozen from the earlier legacy-handler test.
 
 Captured once by running the then-current `CRC.delete_disks/delete_vm/stop_vm/delete_spot_instances`
 inside `logger.begin`/`logger.finish` on the same fake SDK data the test builds. `seconds=` and

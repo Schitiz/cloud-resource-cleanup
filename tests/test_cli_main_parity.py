@@ -782,7 +782,7 @@ def diverging_outcome(case: Case, expected: Outcome) -> tuple[str, Outcome] | No
 def without_reset(
     case: Case, expected: Outcome, events: Events, result: tuple[Any, ...]
 ) -> Outcome:
-    """FIX-CLI-MERGE: `main()` checks every pair before `MAX_AGE` is set, so an error leaves
+    """`main()` checks every pair before `MAX_AGE` is set, so an error leaves
     the environment untouched and nothing is printed."""
     original_max_age = {**DEFAULT_ENV, **case.env}["MAX_AGE"]
     return Outcome(events, "", expected.stderr, original_max_age, expected.warnings, result)
@@ -861,7 +861,7 @@ def expected_fixed(case: Case, bug: str, oracle: Outcome) -> Outcome:
 
 def fixed_all(case: Case, oracle: Outcome) -> Outcome:
     """`--cloud all`: vpc and snapshot run for AWS only; no CRC is built for the skipped clouds
-    (FIX-CLI-ALL rule) and each logs a skip warning."""
+    (the up-front pair check) and each logs a skip warning."""
     events: Events = []
     seen_snapshot = False
     drop_delete = False

@@ -1,4 +1,4 @@
-"""FIX-GCP-IP: BUG-001 (exception_regex excludes), BUG-063 (per-address delete errors are
+"""BUG-001 (exception_regex excludes), BUG-063 (per-address delete errors are
 recorded and the loop goes on), BUG-064 (wait for the delete operation). Fakes only."""
 
 import datetime

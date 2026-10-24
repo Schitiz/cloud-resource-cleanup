@@ -1,10 +1,10 @@
-"""Engine: run registered cleaners for a selection. Pure orchestration, nothing is wired yet.
+"""Engine: run registered cleaners for a selection. Pure orchestration; `crc/cli` calls it.
 
 For each `(cloud, kind)` the engine builds the cleaner from the registry, checks
 `supports(operation)`, calls `plan()` and calls `apply()` only when `context.dry_run` is
-False. Exceptions from a cleaner propagate (no catch-all), as in `crc.py`. Notifiers run
+False. Exceptions from a cleaner propagate (no catch-all). Notifiers run
 after each cleaner in the order given; only notifiers marked `fail_open` have their errors
-logged and swallowed (`crc.py` swallows Influx and per-message Slack failures).
+logged and swallowed (Influx and per-message Slack failures).
 """
 
 import logging
@@ -29,8 +29,8 @@ from crc.core.selection import Selection
 
 logger = logging.getLogger(__name__)
 
-# Report label of each resource kind, the labels `crc.py` passes to its notifiers.
-# `vpc` has no notification in `crc.py`; its label is a placeholder for the wiring rung.
+# Report label of each resource kind, the labels the notifiers receive.
+# `vpc` sends no notification (BUG-084), so its label never reaches a notifier.
 KIND_LABELS: dict[str, str] = {
     "disk": DISK,
     "ip": IP,

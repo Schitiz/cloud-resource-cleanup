@@ -1031,7 +1031,7 @@ def test_skip_lines_are_debug_only_in_new_code(
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """BUG-356 (LOG-AWS1): every INFO "Skipping volume ..." line of the oracle is DEBUG now."""
+    """BUG-356: every INFO "Skipping volume ..." line of the oracle is DEBUG now."""
     differing = 0
     for case in CASES:
         old = _run(_legacy, case, monkeypatch, caplog, capsys)

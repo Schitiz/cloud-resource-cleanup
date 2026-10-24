@@ -1,4 +1,4 @@
-"""LOG-AWS1: logger lines of the AWS VM, disk and spot instance request cleaners.
+"""Logger lines of the AWS VM, disk and spot instance request cleaners.
 
 Each test begins a run with a fixed clock, drives the cleaner (dry run, real run, a failure, a
 connectivity skip) and asserts the exact REGION / ACTION / SKIPPED / ERRORS / FAILED / RESULT

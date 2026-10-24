@@ -1,7 +1,7 @@
 """Pure filtering policy for CRC cleaners.
 
 Every function here reproduces one filtering variant catalogued in
-``docs/refactor/FILTER_VARIANTS.md`` exactly. Variants that behave differently are
+``docs/archive/FILTER_VARIANTS.md`` exactly. Variants that behave differently are
 separate, explicitly named functions: two different semantics are never merged behind
 a flag. Nothing here reads the environment, the clock or any SDK; callers fetch data,
 call :func:`normalize_tags`, and let these functions decide.

@@ -1,4 +1,4 @@
-"""FIX-OCI-DISK: unknown attachments keep the volumes (BUG-096, BUG-097, BUG-098).
+"""Unknown attachments keep the volumes (BUG-096, BUG-097, BUG-098).
 
 When the volume or boot volume attachments of a region cannot be listed (connectivity or auth
 error, availability domain listing failure, or no availability domain), every volume of that

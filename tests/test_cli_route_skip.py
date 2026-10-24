@@ -1,4 +1,4 @@
-"""ENG-CLEAN: a Route can skip a pair as the legacy `_spot_instances` handler did (SAF-037)."""
+"""A Route can skip a pair as the legacy `_spot_instances` handler did (SAF-037)."""
 
 import logging
 from typing import Any

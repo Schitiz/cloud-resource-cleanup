@@ -1,6 +1,6 @@
 """Parity: the routed CLI path against the CRC class of main (`tests/legacy/crc_main.txt`).
 
-Lane CL2-CRC. The oracle is `load_legacy_crc()`: main's `CRC` bound to main's adapters
+The oracle is `load_legacy_crc()`: main's `CRC` bound to main's adapters
 (`tests/legacy/`), driven on fake adapters, a fake Slack client and a fake Influx client. The
 other side is production: `crc.cli.bridge.run_routed` with the route of the pair and a recording
 fake cleaner that plans and applies the same ids (`tests/helpers_cl2_crc.py`). For every case the

@@ -1,5 +1,5 @@
 # ruff: noqa: E501 - frozen log lines
-"""Run-log lines (RUN START, REGION, ACTION, SKIPPED, ERRORS, RESULT) the pre-CL2 legacy GCP
+"""Run-log lines (RUN START, REGION, ACTION, SKIPPED, ERRORS, RESULT) the legacy GCP
 handlers logged for each case of `tests/test_cli_bridge_gcp.py`, frozen so the routed run is
 compared with fixed data (the frozen `main` oracles emit no run-log lines).
 

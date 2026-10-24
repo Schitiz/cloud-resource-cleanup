@@ -11,7 +11,7 @@ list/delete calls and log records (decision logs, "Deleted disk" logs and summar
 compared as three ordered groups).
 The module lists no regions, so there is no region fallback or region auth error to cover.
 
-Two bugs are fixed on purpose (FIX-AZU-DISK), so the oracle differs from the new code:
+Two bugs are fixed on purpose, so the oracle differs from the new code:
 BUG-172 (the listing is `disks.list_by_resource_group(<configured group>)` instead of the
 subscription-wide `disks.list()`; the fake yields the same disks for both, so every case still
 compares equal once the oracle's `("list",)` call is mapped to the new call) and BUG-174 (each
@@ -42,7 +42,7 @@ from tests.log_fix_azure import RULES
 _ADDRESS = re.compile(r"0x[0-9a-f]+")
 ORACLE = Path(__file__).parent / "legacy" / "azu_disk.txt"
 
-BUGS = {"BUG-358"}  # log-only divergences of the LOG-AZU rung
+BUGS = {"BUG-358"}  # log-only divergences from the oracle
 ENV_RESOURCE_GROUP = "env-rg"
 
 

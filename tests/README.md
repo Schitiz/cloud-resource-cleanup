@@ -6,28 +6,27 @@ Offline pytest suite (`pytest -q`, part of `make check`). No test calls a real c
 credentials; SDK clients are mocked. Layout:
 
 - `test_core_*.py`: pure tests of `crc/core` (age, policy, cleaner, registry, report, selection, engine, logger).
-  Some compare against `crc.py` itself, loaded under another module name.
+  Some compare against the frozen `main` oracle in `legacy/crc_main.txt`, or run `crc.py` by path.
 - `test_notify_slack.py`, `test_notify_influx.py`: `crc/notify` with fake clients asserting the exact calls.
-  `test_notify_parity.py` runs the same inputs through `legacy_crc_notify_reference.txt` (a frozen
-  copy of the old `crc.py` Slack and Influx methods, not a Python module), the current `crc.py` and
-  the notifiers.
+  `test_notify_parity.py` and `test_notify_crc_parity.py` (with `helpers_cl2_notify.py` and
+  `helpers_wa1_notify.py`) run the same inputs through `legacy/crc_main.txt` (`load_legacy_crc()`)
+  and the notifiers.
 - `helpers_oracle.py` (tested by `test_helpers_oracle.py`): loads `legacy/crc_main.txt` with its adapter
   imports bound to the module oracles (`legacy/<cloud>_<kind>.txt`), so a parity test's legacy side never
   needs a current adapter class.
-- `test_cli_args_parity.py`, `test_cli_crc_parity.py`, `test_cli_bridge_parity.py`, `test_cli_main_parity.py`, `test_cli_logger.py`, `test_cli_logging_init.py` (with `helpers_cli_routes.py`): `crc/cli` (flags, the
-  `CRC` class, `bridge` to `crc.core.engine`, `main()`, `logger` header/footer wiring and BUG-363 root handler initialisation) against `legacy/crc_main.txt`, on recording fakes.
+- `test_cli_args_parity.py`, `test_cli_crc_parity.py`, `test_cli_runner_parity.py`, `test_cli_scan_parity.py`, `test_cli_bridge_parity.py`, `test_cli_bridge_<cloud>.py` (`aws`, `azu`, `gcp`, `oci`), `test_cli_main_parity.py`, `test_cli_logger.py`, `test_cli_logging_init.py` (with `helpers_cli_routes.py`): `crc/cli` (flags, the
+  `CRC` run context, `--scan_tag`, `bridge` to `crc.core.engine`, `main()`, the `logger` header/footer and BUG-363 root handler initialisation) against `legacy/crc_main.txt`, on recording fakes.
 - `test_crc_service_parity.py`, `test_crc_service_is_old_parity.py` (with `helpers_crc_service.py`),
   `helpers_log_fix.py`, `test_log_fix_helpers.py` and `test_crc_utils_parity.py`, `test_crc_utils.py`:
   `crc/service.py` and `crc/utils.py` against `legacy/crc_service.txt` and `legacy/crc_utils.txt`, plus the
-  per-bug oracle log rewriter of the LOG rungs (`docs/refactor/LOGGING.md`).
+  per-bug oracle log rewriter (`docs/logging.md`).
 - `log_fix_aws_compute.py`, `log_fix_aws_misc.py`, `log_fix_azure.py`, `log_fix_gcp.py`, `log_fix_oci.py` and their
-  `test_log_fix_<lane>.py` (plus `test_aws_log_fix.py`): the per-bug log rules of each LOG cloud lane
+  `test_log_fix_<cloud>.py` (plus `test_aws_log_fix.py`): the per-bug log rules of each cloud
   (`RULES = {**helpers_log_fix.RULES, ...}`), passed as `rules=RULES` to `expected_logs` / `expected_outcome` by
-  that cloud's parity tests. Each file arrives with its lane branch (`logging/aws-compute`, `logging/aws-misc`,
-  `logging/azure`, `logging/gcp`, `logging/oci`); lanes never edit `helpers_log_fix.py` or this README.
+  that cloud's parity tests.
 - `test_aws_*.py`, `test_azure_*.py`, `test_azu_spot_vm.py`, `test_gcp_*.py`, `test_oci_*.py`: mocked tests of the
-  refactored cloud cleaners (`crc/aws`, `crc/azu`, `crc/gcp`, `crc/oci`). A `*_parity.py` file runs the frozen
-  `main` oracle in `legacy/` (see `legacy/README.md` for the full table) and the refactored module (adapter
+  cloud cleaners (`crc/aws`, `crc/azu`, `crc/gcp`, `crc/oci`). A `*_parity.py` file runs the frozen
+  `main` oracle in `legacy/` (see `legacy/README.md` for the full table) and the current module (adapter
   and registered `Cleaner`) on the same fake SDK clients and compares calls, logs, output and errors. The
   parity files are: AWS `test_aws_base_parity.py`, `test_aws_connectivity_parity.py`,
   `test_aws_disk_parity.py`, `test_aws_ip_parity.py` (Elastic IP), `test_aws_keypair_parity.py`,
@@ -42,9 +41,10 @@ credentials; SDK clients are mocked. Layout:
   Azure tests.
 - Five test files are the hash-locked safety tests (the only entries left in the legacy ratchet, so ruff
   and mypy skip them): `test_aws_disk.py`, `test_aws_spot_instance_requests.py`, `test_azu_spot_vm.py`,
-  `test_gcp_spot_vm.py`, `test_oci_spot_vm.py`. They build the adapter classes directly.
-- `legacy/`: the frozen `main` oracles (see `legacy/README.md`). `legacy_crc_notify_reference.txt` is the
-  Slack and Influx oracle outside that directory.
+  `test_gcp_spot_vm.py`, `test_oci_spot_vm.py`. They build the adapter classes directly; each has a
+  Cleaner-based companion `test_<name>_engine.py`.
+- `legacy/`: the frozen `main` oracles (see `legacy/README.md`). `legacy_crc_notify_reference.txt` is a
+  frozen copy of the old `crc.py` Slack and Influx methods outside that directory.
 - `archtest/`: mechanical architecture checks (see `tests/archtest/README.md`).
 
 ## Public API
@@ -65,5 +65,5 @@ This directory exposes no library. Run everything with `make check`, or only tes
 1. Name new files `test_<package>_<module>.py` and keep them typed (they are checked by ruff and mypy
    unless they are one of the five hash-locked files above; the legacy ratchet may only shrink).
 2. Cover the happy path, the fail-closed path, dry run without mutating calls, and call order for
-   destructive sequences (`.cursor/skills/crc-python-refactor/SKILL.md`, section 5).
+   destructive sequences (`.cursor/skills/crc-maintain/SKILL.md`).
 3. A new bug found by a test goes into `docs/refactor/BUGS.md`; the test preserves the quirk.

@@ -1,4 +1,4 @@
-"""FIX-GCP-SPOT: BUG-228 (unlabelled Spot VM), BUG-229 (failed delete), BUG-242 (disk age).
+"""BUG-228 (unlabelled Spot VM), BUG-229 (failed delete), BUG-242 (disk age).
 
 `tests/test_gcp_spot_vm.py` is hash-locked, so the tests of the fixes live here.
 """

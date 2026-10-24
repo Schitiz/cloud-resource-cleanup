@@ -1,4 +1,4 @@
-"""Behaviour fixes of `crc.oci.vm` (rung FIX-OCI-VM): BUG-158 (OKE / instance pool guard) and
+"""Behaviour fixes of `crc.oci.vm`: BUG-158 (OKE / instance pool guard) and
 BUG-162 (an error while evaluating one instance does not stop the run)."""
 
 import datetime

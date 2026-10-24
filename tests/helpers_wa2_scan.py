@@ -1,4 +1,4 @@
-"""Lane WA-2: drive `CRC` of the routed code on the oracle's scan scenarios, without legacy modules.
+"""Drive `CRC` of the routed code on the oracle's scan scenarios, without legacy modules.
 
 The oracle side is `execute(oracle.CRC, [oracle], case)`: `main`'s `CRC` on fakes bound in the
 oracle module. The side under test must not depend on which module defines

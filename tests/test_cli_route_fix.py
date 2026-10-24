@@ -1,4 +1,4 @@
-"""FIX-CLI-ROUTE: BUG-009, BUG-084 (AWS-only snapshot and vpc) and BUG-344 (blank --scan_tag)."""
+"""BUG-009, BUG-084 (AWS-only snapshot and vpc) and BUG-344 (blank --scan_tag)."""
 
 import logging
 import os

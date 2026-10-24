@@ -2,7 +2,8 @@
 
 One entry per kind: the oracle method, the `RunContext.options` keys in oracle argument order
 (`None` marks an argument the OCI adapter never read) and the oracle method of a stop run.
-`spot_instances` is routed in ENG-CLEAN; the oracle skips it under `--cloud all` as the route does.
+`spot_instances` is routed through the engine; the oracle skips it under `--cloud all`
+as the route does.
 """
 
 CALLS: dict[str, tuple[str, tuple[str | None, ...], str | None]] = {
