@@ -23,6 +23,9 @@ target-version = "py311"
 line-length = 100
 extend-exclude = []
 
+[tool.ruff.format]
+exclude = ["*.md"]
+
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "FURB", "SIM", "PERF", "C901", "PLR", "RUF"]
 
