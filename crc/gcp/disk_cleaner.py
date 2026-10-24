@@ -204,6 +204,8 @@ class DiskCleaner:
         tags = policy.normalize_tags(disk.labels)
         return policy.filter_tags_any_key(tags, self._settings.filter_labels)
 
+    # TODO(BUG-124): GCP disk cleanup accepts an empty or zero detach_age
+    #  labels: bug, risk-high, crc
     def _older_than_detach_age(self, disk: DiskView, clock: Clock) -> bool:
         settings = self._settings
         return is_old_enough(

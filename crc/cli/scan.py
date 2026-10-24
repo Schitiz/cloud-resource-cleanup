@@ -25,7 +25,7 @@ _NO_SCAN_CLASSES = {
 
 
 def _prepare_scan(crc: Any) -> None:
-    """What building the cloud's VM adapter did before the scan, which only AWS answers.
+    """Set-up before a scan: only AWS has a finder; the other clouds still set up first.
 
     Every cloud set up its logging; Azure read its credentials and resource group, OCI its
     private key, GCP built its client. A failure there is reported as "error scanning".

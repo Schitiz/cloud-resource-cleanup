@@ -3,7 +3,7 @@
 """AWS EC2 key pair cleaner package.
 
 `KeyPairCleaner` (`cleaner.py`) is the registered `aws` / `keypair` Cleaner; `crc/cli` runs it
-through `crc.core.engine` (the `KeyPairs` adapter is gone, ENG-0).
+through `crc.core.engine`.
 """
 
 from .cleaner import KeyPairCleaner, build_keypair_cleaner

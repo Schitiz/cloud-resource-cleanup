@@ -50,7 +50,7 @@ def _vm(options: Options) -> dict[str, Any]:
 
 
 def _spot_group(crc: Any, options: Options, targets: Targets) -> None:
-    """`delete_spot_instances` raised before it built the adapter when the group was empty."""
+    """An empty resource group raises before the Spot cleaner is built."""
     if not options.resource_group:
         raise ValueError(SPOT_NEEDS_GROUP)
 

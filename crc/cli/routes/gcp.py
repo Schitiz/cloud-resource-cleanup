@@ -64,7 +64,7 @@ def _spot(options: Options) -> dict[str, Any]:
 
 
 def _spot_project(crc: Any, options: Options, targets: Targets) -> None:
-    """`delete_spot_instances` raised before it built the adapter when the project was empty."""
+    """An empty project raises before the Spot cleaner is built."""
     if not options.project_id:
         raise ValueError("project_id is required for GCP Spot VM cleanup")
 

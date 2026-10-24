@@ -137,6 +137,8 @@ class VpcCleaner:
         """The VPCs of one region that match the server side filter."""
         return list(ec2.vpcs.filter(Filters=vpc_filter))
 
+    # TODO(BUG-083): AWS VPC cleanup has no age gate
+    #  labels: bug, risk-high, crc
     def plan_region(
         self,
         ec2: Ec2Resource,

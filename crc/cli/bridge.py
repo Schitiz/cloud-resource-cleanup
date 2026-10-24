@@ -2,7 +2,7 @@
 
 `route_for(cloud, kind)` reads the route tables in `crc/cli/routes/`. `run_routed` builds the
 `RunContext` and `Selection` of one pair and calls `crc.core.engine.run`; the Slack then Influx
-notifiers are the ones `crc.py` called after each adapter. `build_registry` and `build_notifiers`
+notifiers run after each pair. `build_registry` and `build_notifiers`
 are looked up in this module at call time, the seam the CLI parity tests patch.
 """
 
@@ -41,7 +41,7 @@ def is_routed_kind(kind: Any) -> bool:
 
 
 def init_run_logging() -> None:
-    """Initialise the log file and root handlers, as `Service.__init__` did in every adapter."""
+    """Initialise the log file and root handlers (`Service.__init__`) before a pair runs."""
     Service()
 
 

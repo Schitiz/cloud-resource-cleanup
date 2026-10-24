@@ -161,6 +161,8 @@ class SnapshotCleaner:
         """Whether an exception tag protects the snapshot (logs the matching key)."""
         return is_protected(tags, snap_id, self._exception_tags, tag_map)
 
+    # TODO(BUG-142): AWS snapshot cleanup filters by age only (no tag, name or owner guard)
+    #  labels: bug, risk-high, crc
     def _decide(
         self, snap: Mapping[str, Any], region: str, now: datetime.datetime, used: set[str]
     ) -> Decision:

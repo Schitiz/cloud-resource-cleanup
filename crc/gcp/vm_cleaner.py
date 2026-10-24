@@ -193,6 +193,8 @@ class VmCleaner:
         tags = policy.normalize_tags(instance.labels)
         return policy.filter_tags_all_keys(tags, self._settings.filter_labels)
 
+    # TODO(BUG-183): GCP VM cleanup accepts an empty or zero age
+    #  labels: bug, risk-high, crc
     def _is_old(self, instance: InstanceView, clock: Clock) -> bool:
         settings = self._settings
         return is_old_enough(

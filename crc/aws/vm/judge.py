@@ -112,6 +112,8 @@ class InstanceJudge:
             return Skipped(id=_safe_id(inst), reason="no Name tag")
         return name, tags
 
+    # TODO(BUG-213): AWS VM cleanup accepts an empty age (no require_positive_age)
+    #  labels: bug, risk-high, crc
     def _judge(
         self,
         client: VmClient,

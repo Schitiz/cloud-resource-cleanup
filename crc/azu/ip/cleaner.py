@@ -84,8 +84,8 @@ class AzureIpCleaner:
     def apply(self, plan: Plan, context: RunContext) -> Result:
         """Delete the planned addresses in plan order (nothing in a dry run).
 
-        A real run logs its REGION line here, after the deletes, as the adapter did: an error
-        from a delete leaves it out.
+        A real run logs its REGION line here, after the deletes: an error from a delete
+        leaves it out.
         """
         deleted: list[str] = []
         for candidate in plan.candidates:
@@ -116,6 +116,8 @@ class AzureIpCleaner:
         logging.info("Deleted IP address: %s", candidate.id)
         _logger.acted("deleted", self._resource_group, candidate.id)
 
+    # TODO(BUG-075): Azure IP cleanup has no age gate (SAF-011 not met)
+    #  labels: bug, risk-high, crc
     def decide(self, ip: Any) -> tuple[Candidate | None, str]:
         """Select one SDK address: the candidate, or None with the reason it was kept."""
         exception_tags = self._exception_tags or {}

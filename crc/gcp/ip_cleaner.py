@@ -97,6 +97,8 @@ class IpCleaner:
         _log_summary(deleted, dry_run=context.dry_run)
         return Result(succeeded=tuple(deleted), failed=tuple(self.failures))
 
+    # TODO(BUG-062): GCP IP cleanup has no age gate and no label filter
+    #  labels: bug, risk-high, crc
     def plan_region(self, region: str) -> Plan:
         """List one region and decide, in the order of `main`: log the address, read its
         name, skip other states, then the filter and the exception test."""

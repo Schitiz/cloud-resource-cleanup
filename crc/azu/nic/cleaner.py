@@ -178,6 +178,8 @@ class AzureNicCleaner:
         _logger.failed(self._resource_group, nic_name, last_exception or last_error)
         return last_error
 
+    # TODO(BUG-112): Azure NIC cleanup has no age gate and no tag filter
+    #  labels: bug, risk-high, crc
     def decide(self, nic: Any) -> tuple[Candidate | None, str]:
         """Select one SDK NIC: the candidate, or None with the reason it was kept."""
         if (

@@ -3,7 +3,7 @@
 `bridge.py` hands this object to the Slack and Influx notifiers (`slack_client`,
 `slack_channel`, `influxdb_client`, `influxdb_bucket`, `resource_suffix`) and to the route
 hooks (`get_msg` for the `snapshot` console line); `scan.py` reads `cloud`, `dry_run`, `notags`,
-`project_id` and `resource_group` to build the VM adapter of `--scan_tag`.
+`project_id` and `resource_group` to prepare the `--scan_tag` scan.
 """
 
 from typing import Any
@@ -14,8 +14,8 @@ class CRC:
 
     cloud: str
     dry_run: bool
-    # Any: the adapters declare narrower types than the unvalidated CLI values (None, a dict
-    # where an int is declared, BUG-197), and the call must stay as on main.
+    # Any: the unvalidated CLI values (None, a dict where an int is declared, BUG-197) are
+    # wider than the types the cleaners declare, and the call must stay as on main.
     project_id: Any
     notags: Any
     slack_client: Any

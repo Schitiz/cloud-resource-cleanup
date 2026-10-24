@@ -46,6 +46,17 @@ behaviour-fix rungs mark each diverging parity case with its bug ID instead of e
 The Slack and InfluxDB oracle is not in this directory: `tests/legacy_crc_notify_reference.txt`
 (a frozen copy of the old `crc.py` notify methods) is run by `tests/test_notify_parity.py`.
 
+## Retiring an oracle
+
+The oracles are a migration tool: they proved the refactor kept the behaviour of `main`. They
+are not a permanent requirement. A module may be moved off its oracle onto behaviour tests one
+kind at a time, when every parity case of that module is re-expressed as an explicit expected
+outcome (the calls, results, log lines and errors written out in the test, not compared with
+the oracle). Do this in a PR that keeps the number of cases equal or higher and weakens none.
+Once no test reads an oracle file, it is removed: the owner deletes the `.txt` file and runs
+`tests/archtest/update_frozen_inputs.py`, and the row leaves the table above. Agents never delete
+an oracle or run the updater.
+
 ## Public API
 
 This directory exposes no library, only reference text files (listed in the table above).
@@ -60,6 +71,7 @@ This directory exposes no library, only reference text files (listed in the tabl
 
 1. A rung that refactors a module freezes `git show main:<path>` here as `<package>_<module>.txt`,
    adds a parity test next to the other tests and a row to the table above.
-2. Never delete or edit an oracle (`AGENTS.md` rule 3).
+2. Never edit an oracle (`AGENTS.md` rule 3). Only the owner removes one, and only when no test
+   reads it (see Retiring an oracle).
 3. A behaviour-fix rung keeps the oracle and marks each diverging parity case with its bug ID
    ([fix-bug.md](../../.cursor/skills/crc-maintain/fix-bug.md)).

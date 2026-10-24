@@ -5,7 +5,7 @@
 Top-level package of the cleanup tool. The CLI entry point is `crc.py` in the repository root
 (same name as this package; `main()`, argument parsing, validators and the `CRC` run context live in `cli/`; `crc.py` is a thin entry point that re-exports `main`, `get_argparser` and the validators and ends with `if __name__ == "__main__": main()`); the cloud code lives in the sub-packages. Direct modules:
 
-- `service.py`: `Service`, the base class the cloud adapter classes inherit (age gate, custom age tag, `is_old`; it initialises logging).
+- `service.py`: `Service`, the age gate, custom age tag and `is_old` helpers over `crc/core/age.py`; constructing it initialises logging (`crc/cli/bridge.py` and `crc/cli/scan.py` do that).
   Age handling delegates to `crc/core/age.py`. Parity: `tests/test_crc_service_parity.py`, `tests/test_crc_service_is_old_parity.py` against `tests/legacy/crc_service.txt`.
 - `notifications.py`: compatibility shim re-exporting the Slack helpers that moved to `notify/slack.py`.
 - `utils.py`: `init_logging`. Parity: `tests/test_crc_utils_parity.py` against `tests/legacy/crc_utils.txt`.

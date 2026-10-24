@@ -103,6 +103,9 @@ def merge_metric_results(results: Sequence[Mapping[str, Any]]) -> dict[str, dict
     return merged
 
 
+# TODO(BUG-283): detach_age cannot see attachments to stopped instances
+#  labels: bug, risk-high, crc
+#  see also: crc/aws/disk/volumes.py `_detach_floor` (CreateTime floor); a full fix needs CloudTrail
 def volume_recently_attached(
     query_ids: Sequence[str], results_by_id: Mapping[str, Mapping[str, Any]]
 ) -> tuple[bool, str | None]:

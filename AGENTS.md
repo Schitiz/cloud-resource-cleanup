@@ -28,7 +28,7 @@ Timings measured on a 4-core VM with warm caches: `make check-fast` 24 s (about 
 `make check` 61 s (44,421 tests; the three slow parity files hold about 30,000 of them).
 
 Edit, `make test-file`, `make check-fast`, then `make check` once before you commit. A failing
-archtest check (ARCH-001..011, SAF-LOCK, the test-count floor) prints its rule ID, `file:line`
+archtest check (ARCH-001..012, SAF-LOCK, the test-count floor) prints its rule ID, `file:line`
 and a `REMEDIATION:` paragraph: follow it. Failures of ruff, mypy, import-linter and ordinary
 tests print no `REMEDIATION:`; read the tool's own message. Rule IDs are listed in
 [tests/archtest/README.md](tests/archtest/README.md); do not restate or bypass them.
@@ -64,7 +64,7 @@ Skills (task playbooks): [implement](.cursor/skills/crc-maintain/SKILL.md) for a
    `tests/legacy/*.txt`, `tests/archtest/*.json` or run the `update_*.py` scripts; never
    hand-edit `tests/archtest/test_count_floor.txt` (`make raise-test-floor` is the only way it
    changes). If a fix needs a locked test changed, stop and put the proposed change in the PR
-   description for the owner.
+   description for the owner. Oracles are a migration tool; the owner retires one when no test reads it ([tests/legacy/README.md](tests/legacy/README.md)).
 4. Keep the `CLEANUP_SAFETY.md` rules true. When behaviour of a destructive path changes, update
    that file in the same PR; never remove, weaken or renumber a `SAF-NNN` rule.
 5. Do not widen scope. A bug you notice on the way becomes a row in `docs/refactor/BUGS.md`
@@ -83,7 +83,9 @@ Skills (task playbooks): [implement](.cursor/skills/crc-maintain/SKILL.md) for a
    `main` lines that have moved or are gone; grep the ID, which also appears in package READMEs
    and tests.
 2. Write a failing offline test for the bug first, in the cleaner's test file.
-3. Fix it toward `CLEANUP_SAFETY.md` (fail closed). Mark the row `fixed in <PR or commit>`; keep it.
+3. Fix it toward `CLEANUP_SAFETY.md` (fail closed). Remove its `TODO(BUG-NNN)` comment in `crc/` and mark
+   the row `fixed in <PR or commit>`; keep the row. The `todo-to-issue` workflow then closes the issue.
+   Each open or partly fixed critical or high row has exactly one such comment (ARCH-012).
 4. `make check`. PR title names the ID. More in [fix-bug.md](.cursor/skills/crc-maintain/fix-bug.md).
 
 ## Workflow: add or change a cleaner

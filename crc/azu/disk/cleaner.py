@@ -154,6 +154,8 @@ class AzureDiskCleaner:
             return "matches notags"
         return ""
 
+    # TODO(BUG-173): Azure disk cleanup accepts an empty or missing age
+    #  labels: bug, risk-high, crc
     def _is_old_enough(self, disk: SdkDisk, now: datetime.datetime) -> bool:
         settings = self._settings
         retention_age: Any = core_age.get_retention_age(
