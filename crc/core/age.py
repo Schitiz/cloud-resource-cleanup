@@ -3,8 +3,9 @@
 ``is_old`` applies the ``MAX_AGE`` override, but this module reads no environment variable
 (ARCH-003): ``crc/cli`` installs a source with ``set_max_age_source`` (it reads ``MAX_AGE``
 there), and ``max_age_override`` calls it at each decision, as the original read the
-variable. The age spec and its validation live in ``crc.core.age_spec`` and the custom age tag parsing in
-``crc.core.age_tags``; both are re-exported here so ``crc.core.age.<name>`` keeps working.
+variable. The age spec and its validation live in ``crc.core.age_spec`` and the custom age
+tag parsing in ``crc.core.age_tags``; both are re-exported here so
+``crc.core.age.<name>`` keeps working.
 """
 
 import ast

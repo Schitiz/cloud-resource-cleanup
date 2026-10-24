@@ -165,7 +165,8 @@ def test_arch003_selftest_clock_ref_is_not_reported_twice_for_a_call(tmp_path: P
 
 
 def test_arch003_selftest_cli_may_call_the_clock(tmp_path: Path) -> None:
-    _write(tmp_path, "from datetime import UTC, datetime\n\nx = datetime.now(UTC)\n", "crc/cli/m.py")
+    source = "from datetime import UTC, datetime\n\nx = datetime.now(UTC)\n"
+    _write(tmp_path, source, "crc/cli/m.py")
     assert check_bans(tmp_path, frozenset()) == []
 
 

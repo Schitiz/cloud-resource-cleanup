@@ -30,7 +30,8 @@ An age spec is a dict with days and/or hours integer values.
 - `parse_literal()`: parse a tag value with ast.literal_eval, logging and returning None on error.
 - `get_retention_age()`: fail-closed custom age tag parse (BUG-004, BUG-016); None when absent, a keep marker age when the tag is present but bad (see Safety Invariants).
 - `get_min_age()`: return the shorter of two age specs; ties return the second.
-- `is_old()`: True when the resource is at least as old as the age; an empty age returns True; the MAX_AGE environment variable can replace a longer age.
+- `is_old()`: True when the resource is at least as old as the age; an empty age returns True; the MAX_AGE text from the source installed with `set_max_age_source()` (the CLI installs one that reads the variable) can replace a longer age.
+- `set_max_age_source()`, `max_age_override()`: install the MAX_AGE reader (None removes it, then no override applies) and read its raw text.
 
 Policy (module policy.py, a facade over policy_tags.py, policy_text.py, policy_managed.py and policy_age.py; every policy function keeps its name on the policy module). Tags are normalised first; every function takes `Tags`
 (a str to str dict) and a `TagSpec` (key to list of allowed values; an empty list means the
@@ -184,8 +185,8 @@ decides what a cleaner selects or deletes.
 
 ## Extension Rules
 
-1. Keep modules pure: typed plain functions, no SDK calls, no clock reads. The only
-   environment read is `MAX_AGE` in `is_old`.
+1. Keep modules pure: typed plain functions, no SDK calls, no clock reads, no environment reads
+   (ARCH-003): `MAX_AGE` comes in through `set_max_age_source`.
 2. Declare every public name in `__all__` of `__init__.py` and list it under Public API.
 3. Add table-driven tests under `tests/` for every branch, and never weaken them.
 4. Do not edit the import-linter contracts to make an import pass.
