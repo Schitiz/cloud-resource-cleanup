@@ -592,6 +592,9 @@ def test_added_resource_choices_parse_and_are_listed_in_help(
         )
         assert outcome[0] == "ok"
         assert dict(outcome[1])["resource"] == resource.kind
+    if added_table.RESOURCE_HELP is not None:
+        helped = _run(cli_args.get_argparser, ["-h"], monkeypatch, capsys)
+        assert " ".join(added_table.RESOURCE_HELP.split()) in " ".join(helped[2].split())
 
 
 def test_no_oracle_abbreviation_changed_meaning(
@@ -633,6 +636,8 @@ def test_unlisted_flag_fails_with_the_instruction_to_extend_added(
     new, old = _parser_with(oracle, monkeypatch)
     with pytest.raises(AssertionError, match=r"ADDED table in tests/helpers_ag_cli_added\.py"):
         added_args.check_additions(new, old)
+    added_args.strip_additions(new, old)
+    assert any(a.dest == "fake_flag" for a in new._actions)
 
 
 def test_unlisted_resource_choice_fails_with_the_instruction_to_extend_added(
@@ -642,6 +647,9 @@ def test_unlisted_resource_choice_fails_with_the_instruction_to_extend_added(
     monkeypatch.setattr(added_args, "ADDED_FLAGS", (_FAKE_FLAG,))
     with pytest.raises(AssertionError, match=r"ADDED table in tests/helpers_ag_cli_added\.py"):
         added_args.check_additions(new, old)
+    added_args.strip_additions(new, old)
+    action = next(a for a in new._actions if "--resource" in a.option_strings)
+    assert "fake_kind" in (action.choices or [])
 
 
 def test_listed_flag_and_resource_pass_and_the_rest_stays_exact(

@@ -1105,7 +1105,19 @@ def test_added_resources_reach_their_cleaner_through_main(
     cloud: str, kind: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A kind that is not in the oracle runs through `main()` and gets the parsed flags."""
-    argv = ("--cloud", cloud, "--resource", kind, "--dry_run", "--age", "{'days': 2}")
+    argv = (
+        "--cloud",
+        cloud,
+        "--resource",
+        kind,
+        "--resource_group",
+        "rg",
+        "--project_id",
+        "proj",
+        "--dry_run",
+        "--age",
+        "{'days': 2}",
+    )
     case = Case(f"added-{cloud}-{kind}", argv)
     fakes = Fakes(case)
     outcome = run_new(case, monkeypatch, fakes, strip=False)

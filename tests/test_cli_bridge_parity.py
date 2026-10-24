@@ -213,6 +213,19 @@ def test_route_tables_route_every_oracle_kind_and_only_added_extras() -> None:
         assert bridge.is_routed_kind(kind)
 
 
+def test_unlisted_or_missing_route_fails_route_table_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(added_table, "ADDED_RESOURCES", ())
+    monkeypatch.setitem(bridge.TABLES["aws"], "fake_kind", bridge.TABLES["aws"]["ip"])
+    with pytest.raises(AssertionError, match=r"ADDED table in tests/helpers_ag_cli_added\.py"):
+        test_route_tables_route_every_oracle_kind_and_only_added_extras()
+    monkeypatch.delitem(bridge.TABLES["aws"], "fake_kind")
+    monkeypatch.delitem(bridge.TABLES["aws"], "keypair")
+    with pytest.raises(AssertionError, match=r"aws no longer routes \['keypair'\]"):
+        test_route_tables_route_every_oracle_kind_and_only_added_extras()
+
+
 def test_notifiers_follow_the_clients_and_the_notify_flag() -> None:
     route = bridge.route_for("aws", "keypair")
     assert route is not None

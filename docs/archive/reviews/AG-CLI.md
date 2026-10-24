@@ -111,3 +111,30 @@ kind also needs a `KIND_LABELS` entry in `crc/core/engine.py` and a registered c
 Nothing planned is left. Not covered: a new `--cloud` choice (the route-table test fails on a new
 cloud on purpose), and `tests/test_cli_crc_parity.py` (not in this lane) is unchanged and still
 exact against the oracle.
+
+## Round 1 (Argon)
+
+### Findings & Fixes Applied in Review
+
+1. **`strip_additions` over-stripping fixed (`tests/helpers_ag_cli_args.py`):**
+   - Previously, `strip_additions(new, old)` removed *any* non-oracle action (`previous is None`) whether or not it was listed in `ADDED_FLAGS`, and unconditionally overwrote `action.choices = previous.choices` and `action.help = previous.help` on every oracle action before `parse_args()`. That meant the 600+ `_compare()` cases in `test_cli_args_parity.py` and the 8,000+ cases in `test_cli_main_parity.py` ran with the oracle's choices and help copied onto `new` (leaving only `test_raw_parser_definition_matches_main` to catch choice/help regressions).
+   - Tightened `strip_additions` so it removes an action only when `_flag_of(action) is not None` (explicitly listed in `ADDED_FLAGS`) and removes only choices listed in `added_choices(action.option_strings)` (restoring `previous.help` only when `action.help` matches the listed `ADDED` help). With an empty `ADDED` table, `strip_additions` now leaves the parser untouched.
+2. **`test_added_resource_choices_parse_and_are_listed_in_help` (`tests/test_cli_args_parity.py`) & route-table self-test (`tests/test_cli_bridge_parity.py`):**
+   - Added the missing `-h` assertion when `RESOURCE_HELP is not None`, asserted that `strip_additions` leaves unlisted flags and choices in place, added `test_unlisted_or_missing_route_fails_route_table_check` in `tests/test_cli_bridge_parity.py`, and passed `--resource_group rg --project_id proj` in `test_added_resources_reach_their_cleaner_through_main` so future Azure/GCP added kinds with prechecks also work.
+3. **Independent Jenkins contract flag checks (`tests/test_jenkins_contract.py`) & `test_core_selection.py` cleanup:**
+   - Added `--detach_age` and `--name_regex` to `LITERAL_FLAGS` in `tests/test_jenkins_contract.py` and removed the `if name in options` guard in `test_command_reaches_its_cleaner_with_the_flags` (except `(snapshot, age)` which maps to `age_days`), so dropping an option key from a route fails the independent check as well as the frozen-JSON check.
+   - Reverted an unrelated 4-line formatting diff in `tests/test_core_selection.py:run_crc_main` and pinned `list(RESOURCES[: len(oracle.RESOURCES)]) == oracle.RESOURCES` in `test_all_expansion_order_follows_crc_py`.
+
+### Verification & Gates
+
+1. **Task completeness & throwaway local experiments (reverted before commit):**
+   - Added unlisted `--zz_fake_flag` and `fake_kind` (`crc/cli/args.py`, `crc/cli/routes/aws.py`, `crc/core/selection.py`, `crc/core/engine.py`): `test_cli_args_parity.py`, `test_cli_bridge_parity.py`, and `test_core_selection.py` all failed with `add it to the ADDED table in tests/helpers_ag_cli_added.py (with default and help)`.
+   - Listed both in `tests/helpers_ag_cli_added.py`: `test_cli_args_parity.py`, `test_core_selection.py`, `test_jenkins_contract.py`, `test_cli_bridge_parity.py` (route check), and `test_cli_main_parity.py` (`test_script_entry_point_matches_oracle` and `test_added_resources_reach_their_cleaner_through_main`) all passed.
+   - Broke `crc/cli/routes/aws.py:_disk` by dropping `detach_age`: `tests/test_jenkins_contract.py` failed on both AWS disk Jenkins commands (`11-d68c09d92b` and `12-3a215916af`).
+2. **No CLI/behaviour change:** `crc/**` and `crc.py` are untouched; `python3 crc.py --help` output is unchanged.
+3. **No weakened checks or touched locks:** `tests/archtest/safety_lock.json`, `update_safety_lock.py`, the 5 hash-locked safety tests, `tests/legacy/*.txt`, `requirements.txt`, `tests/archtest/frozen_inputs.json`, and `tests/fixtures/jenkins_commands.txt` are untouched. `test_route_tables_route_the_aws_kinds` was replaced by `test_route_tables_route_every_oracle_kind_and_only_added_extras` + `test_unlisted_or_missing_route_fails_route_table_check`.
+4. **Lane ownership:** Only `docs/archive/reviews/AG-CLI.md`, `tests/archtest/test_count_floor.txt`, `tests/helpers_ag_cli_{added,args,jenkins}.py`, `tests/helpers_ag_cli_jenkins_expected.json`, `tests/test_cli_{args,bridge,main}_parity.py`, `tests/test_core_selection.py`, and `tests/test_jenkins_contract.py` changed in `a0b3d09..HEAD`.
+5. **Size & API limits:** New `.py` files are `60`, `215`, `156`, and `138` lines (`<= 250`); longest function in new files is `run_command` (`52` lines, `<= 60`); `ARCH-002` README Public API check is green.
+6. **`make check`:** `ruff check .`, `mypy` (371 files), `lint-imports` (5 contracts), `pytest -q -n auto`, and `ARCH-008` all green: **44,569 passed, 1 skipped in 52.94s** (total `make check` wall time **59.94s**; collected **44,570** tests, floor raised to **44,570**).
+
+VERDICT: APPROVE

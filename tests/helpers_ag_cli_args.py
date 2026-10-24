@@ -125,20 +125,25 @@ def _resource_choices(parser: argparse.ArgumentParser) -> list[str]:
 
 
 def strip_additions(new: argparse.ArgumentParser, old: argparse.ArgumentParser) -> None:
-    """Remove every flag and choice the oracle does not have (the ADDED ones) from `new`."""
+    """Remove only the flags and choices listed in ADDED from `new`."""
     old_by_dest = {a.dest: a for a in old._actions}
     for action in list(new._actions):
-        previous = old_by_dest.get(action.dest)
-        if previous is None:
+        if _flag_of(action) is not None and action.dest not in old_by_dest:
             for group in new._action_groups:
                 if action in group._group_actions:
                     group._group_actions.remove(action)
             new._actions.remove(action)
             for option in action.option_strings:
                 del new._option_string_actions[option]
-        else:
-            action.choices = previous.choices
-            action.help = previous.help
+            continue
+        previous = old_by_dest.get(action.dest)
+        listed = added_choices(action.option_strings)
+        if previous is not None and listed and action.choices is not None:
+            extra = {c for c, _ in listed}
+            action.choices = [c for c in action.choices if c not in extra]
+            helps = {h for _, h in listed if h is not None}
+            if len(helps) == 1 and action.help == next(iter(helps)):
+                action.help = previous.help
 
 
 def abbreviation_problems(new: argparse.ArgumentParser, old: argparse.ArgumentParser) -> list[str]:

@@ -48,6 +48,8 @@ LITERAL_FLAGS = {
     "--filter_tags": "filter_tags",
     "--exception_tags": "exception_tags",
     "--age": "age",
+    "--detach_age": "detach_age",
+    "--name_regex": "name_regex",
     "--notags": "notags",
 }
 
@@ -127,7 +129,7 @@ def test_command_reaches_its_cleaner_with_the_flags(
     options = seen.runs[0][2]
     for flag, name in LITERAL_FLAGS.items():
         raw = _flag_value(command, flag)
-        if name in options and raw is not None:
+        if raw is not None and (resource, name) != ("snapshot", "age"):
             assert options[name] == ast.literal_eval(raw)
     assert seen.dry_runs == [("--dry_run" in command.argv or "-d" in command.argv)]
     assert seen.channels == [_flag_value(command, "--slack_channel")]

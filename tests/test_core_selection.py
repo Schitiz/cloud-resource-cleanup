@@ -114,10 +114,7 @@ def run_crc_main(
     args.update(
         project_id="proj",
         resource_group="rg",
-        cloud=cloud,
-        resource=resource,
-        operation_type=operation,
-        dry_run=True,
+        cloud=cloud, resource=resource, operation_type=operation, dry_run=True
     )
     args.update(options)
     monkeypatch.setattr(cli_main, "get_argparser", lambda: args)
@@ -376,6 +373,7 @@ def test_all_expansion_order_follows_crc_py() -> None:
         unlisted = [r for r in RESOURCES if r not in oracle.RESOURCES and r not in in_all]
         assert not unlisted, f"--resource all expands to {unlisted}; {added_table.ADDED_HINT}"
         assert [r for r in RESOURCES if r in oracle.RESOURCES] == oracle.RESOURCES
+        assert list(RESOURCES[: len(oracle.RESOURCES)]) == oracle.RESOURCES
         assert sorted(RESOURCES) == sorted([*oracle.RESOURCES, *in_all])
         unlisted_extra = [r for r in EXTRA_RESOURCES if r not in ORACLE_EXTRA_RESOURCES]
         assert sorted(unlisted_extra) == sorted(outside_all), (
