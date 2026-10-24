@@ -89,14 +89,13 @@ max-args = 6
 [tool.mypy]
 python_version = "3.11"
 strict = true
-# `mypy` with no arguments checks these paths. crc.py is left out because, as a
-# top-level module, it is also named `crc` and clashes with the crc/ package;
-# the CLI rung must resolve that (for example by moving its logic into crc/).
+# `mypy` with no arguments checks these paths. crc.py is not listed: as a top-level module it
+# is also named `crc` and clashes with the crc/ package. tests/test_crc_entry_types.py
+# type-checks a copy of it under another module name with the same strict settings.
 files = ["crc", "tests", "scripts"]
-exclude = ['^crc\.py$']
 
 # LEGACY RATCHET: this list may only shrink. It is empty now; keep it in sync with ruff
-# `extend-exclude` above (crc.py is not listed here because mypy never checks it).
+# `extend-exclude` above (crc.py is not listed here: tests/test_crc_entry_types.py checks it).
 
 # SDKs without stubs or py.typed: only the SDK, never a repository module.
 [[tool.mypy.overrides]]

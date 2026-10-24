@@ -1,4 +1,4 @@
-"""ARCH-007: SHA-256 manifest of the frozen oracles (`tests/legacy/*.txt`, `requirements.txt`)."""
+"""ARCH-007: SHA-256 manifest of the frozen oracles (`tests/legacy/*.txt`, `requirements.txt`, `constraints.txt`)."""
 
 import hashlib
 import json
@@ -20,9 +20,9 @@ _REMEDIATION = (
 
 def frozen_paths(root: Path) -> list[Path]:
     paths = sorted((root / "tests" / "legacy").glob("*.txt"))
-    requirements = root / "requirements.txt"
-    if requirements.is_file():
-        paths.append(requirements)
+    for name in ("requirements.txt", "constraints.txt"):
+        if (root / name).is_file():
+            paths.append(root / name)
     return paths
 
 
