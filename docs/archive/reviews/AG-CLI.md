@@ -138,3 +138,85 @@ exact against the oracle.
 6. **`make check`:** `ruff check .`, `mypy` (371 files), `lint-imports` (5 contracts), `pytest -q -n auto`, and `ARCH-008` all green: **44,569 passed, 1 skipped in 52.94s** (total `make check` wall time **59.94s**; collected **44,570** tests, floor raised to **44,570**).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+### Round 1 fixes re-checked
+
+- `strip_additions` (`tests/helpers_ag_cli_args.py:187`) now strips only flags found by `_flag_of`
+  (listed in `ADDED_FLAGS`) and only choices from `added_choices`. It restores the oracle help only
+  when the help equals the listed ADDED help. With an empty table it changes nothing, so the 600+
+  `_compare` cases and 17,000+ main-parity cases run on the real parser. Confirmed.
+- `test_unlisted_or_missing_route_fails_route_table_check`, the `-h` assertion for `RESOURCE_HELP`,
+  the `--detach_age` / `--name_regex` independent checks and the `RESOURCES` prefix pin are all present.
+
+### Independent checks
+
+1. **Task items.** I opened the code for each claim.
+   - Additive contract: `check_additions` keeps the exact comparison of option strings, dest, nargs,
+     const, default, type, required, metavar, choices (order kept) and help for every oracle action.
+     It also checks the action order, `_defaults`, mutually exclusive groups and the action count.
+     Extras pass only through `ADDED_FLAGS` / `ADDED_CHOICES` / `ADDED_RESOURCES`. The route-table,
+     selection and main tests use the same table.
+   - Jenkins contract: 47 commands, 3 tests per command plus 1 coverage test (142). Each command is
+     shlex-split, parsed with `get_argparser`, put through all input validators and
+     `validate_targets`, resolved with `route_for`, and run through `main()` with `FakeCleaners`, fake
+     clients and a scrubbed environment. The test asserts exit code 0, the pairs that ran, and the
+     options and context, against frozen data plus an independent flag check.
+2. **No behaviour change.** `crc/**` and `crc.py` are untouched. `python3 crc.py --help` gives the
+   same output byte for byte at `a0b3d09` and at `HEAD`.
+3. **Nothing weakened; protected files untouched.** No diff in `tests/legacy`, `tests/fixtures`,
+   `requirements.txt`, `safety_lock.json`, `frozen_inputs.json`, `update_safety_lock.py` or
+   `docs/refactor`. The replaced `test_route_tables_route_the_aws_kinds` asserted the exact dict. Its
+   replacement asserts the same set of clouds, every oracle kind and no unlisted extra, so it equals
+   the old test when ADDED is empty. The old `list(RESOURCES) == oracle.RESOURCES` is still implied
+   (prefix pin plus sorted equality).
+
+   Throwaway experiments, all reverted and none committed:
+   - **Unlisted additions.** Added `--zz_fake_flag` and a `zz_kind` resource (`args.py` choice,
+     `routes/aws.py` route, `EXTRA_RESOURCES`, `KIND_LABELS`) with ADDED empty. The three expected
+     messages fired: `the parser has a flag ['--zz_fake_flag'] ... add it to the ADDED table in
+     tests/helpers_ag_cli_added.py (with default and help)`, `routed pairs [('aws', 'zz_kind')] are
+     not in the oracle; add it to the ADDED table ...` and `extra resources ['zz_kind'] differ from
+     ADDED_RESOURCES; add it to the ADDED table ...`.
+   - **Same additions, listed.** Added `AddedFlag("--zz_fake_flag", ..., examples=...)` and
+     `AddedResource("zz_kind", ("aws",))`. The args, bridge, selection, main (including the script
+     entry point) and Jenkins test files ran 22,305 passed and 1 failed. The failure was
+     `test_every_routed_pair_has_a_registered_cleaner`, a genuine requirement because the fake kind
+     had no cleaner.
+   - **Jenkins contract.** With `filter_tags` dropped in `crc/cli/routes/aws.py:_ip`, 4 tests failed:
+     both AWS ip commands, in the frozen test and in the independent test. With `exception_tags`
+     dropped instead, it stayed green, which is correct because no production ip command sets that
+     flag.
+   - **Loophole probe.** Listing an oracle kind (`AddedResource("disk", ("aws",))`) in ADDED, which
+     would remove `disk` from `ORACLE_KINDS` and from the routed-call check, fails
+     `test_raw_parser_definition_matches_main`, the route-table test and
+     `test_all_expansion_order_follows_crc_py`. So ADDED cannot be used to hide an oracle kind.
+4. **Owned files only.** The diff touches only the lane's tests, the `tests/helpers_ag_cli_*` files,
+   this review and `test_count_floor.txt` (via `make raise-test-floor`).
+5. **Sizes.**
+   - The new files have 60 / 215 / 156 / 138 lines.
+   - The longest new function is `run_command` (52 lines).
+   - `test_cli_args_parity.py` (778 to 924), `test_cli_main_parity.py` (1,079 to 1,128) and
+     `test_core_selection.py` (452 to 468) were already over 250 lines at base.
+   - `_structure_cases` (79 lines) and `run_crc_main` (66 lines) are pre-existing and unchanged.
+   - No `crc/**` change, so the README Public API needs no update (ARCH-002 green).
+6. **`make check`.** Run after `pip install -r requirements.txt -r requirements-dev.txt`: ruff,
+   mypy, import-linter, pytest and ARCH-008 are green. **44,569 passed, 1 skipped in 51.58s** (wall
+   time 70.5s). ARCH-008 reports 44,570 tests against a floor of 44,570.
+
+### Findings (no change needed)
+
+- The Jenkins harness replaces `bridge.build_notifiers` with `[]` and leaves `INFLUXDB_TOKEN` unset.
+  So the Slack channel and client count are pinned, but the Slack message text and the Influx write
+  are not. Those stay covered by `test_cli_main_parity.py`. This is within the task, which names the
+  exit code, pairs and options.
+- The expected data lives in `tests/helpers_ag_cli_jenkins_expected.json` rather than inline in the
+  test. That file is a lane-owned helper, is keyed by a hash of each command, and fails if the
+  fixture changes without a refresh.
+
+### New bugs
+
+None.
+
+ROUND 2 VERDICT: APPROVE
