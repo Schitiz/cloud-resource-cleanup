@@ -71,3 +71,48 @@ status wording beyond comments; the owner may align it).
 ### Left for later
 
 Nothing from the task list. `make check` is the gate and passed.
+
+
+## Round 1 (Argon)
+
+Reviewed `git diff c16a3ec..HEAD` against the Lane TD-1 specification and owner-approved contract.
+
+### Findings
+
+None blocking or requiring changes.
+
+### Checklist Verification
+
+1. **Open critical/high bugs (`docs/refactor/BUGS.md` and `crc/`):**
+   - Recomputed all 403 rows in `docs/refactor/BUGS.md`. All 5 critical rows (`BUG-001`, `002`, `074`, `111`, `172`) are already fixed.
+   - `BUG-355` (high): verified that line 27 of `tests/fixtures/jenkins_commands.txt` (from `yugabyte/cloud-resource-cleanup-triggers` `8ceee47`) passes `--age '{"days": 1}'` for Azure `spot_instances` and all 142 cases in `tests/test_jenkins_contract.py` pass; the row status is updated to `fixed in cloud-resource-cleanup-triggers #29 (8ceee47 passes \`--age\`; \`tests/test_jenkins_contract.py\` runs the production command)` with no `TODO`.
+   - The remaining 10 open or partly fixed high-risk rows (`BUG-062`, `075`, `083`, `112`, `124`, `142`, `173`, `183`, `213`, `283`) are each still present on `td/1` and each has exactly one `# TODO(BUG-NNN): <title>` (all titles 31–70 chars, well under 100) followed by `#  labels: bug, risk-high, crc` directly above the function implementing the behaviour (`IpCleaner.plan_region`, `AzureIpCleaner.decide`, `VpcCleaner.plan_region`, `AzureNicCleaner.decide`, `DiskCleaner._older_than_detach_age`, `SnapshotCleaner._decide`, `AzureDiskCleaner._is_old_enough`, `VmCleaner._is_old`, `InstanceJudge._judge`, and `volume_recently_attached` with a `#  see also:` line pointing to `crc/aws/disk/volumes.py` `_detach_floor`).
+2. **Workflow (`.github/workflows/todo-to-issue.yml`):**
+   - Triggers only on `push` to `branches: [main]` and `workflow_dispatch` (no `pull_request`).
+   - Guarded by `if: github.repository == 'yugabyte/cloud-resource-cleanup'`.
+   - Minimal permissions: `contents: read`, `issues: write`.
+   - Pinned to `alstr/todo-to-issue-action@37bb7b56e58569ef273b60678048030a7f0c261a  # v5.1.15` with `CLOSE_ISSUES: "true"`, `AUTO_ASSIGN: "false"`, `IDENTIFIERS: '[{"name": "TODO", "labels": []}]'`, `IGNORE: "tests/legacy/.*,docs/archive/.*"`, and header comment noting the repo admin workflow permission setting and that `INSERT_ISSUE_URLS` stays off.
+3. **ARCH-012 (`tests/archtest/todo_bugs.py`, `tests/archtest/test_arch012_todo_bugs.py`):**
+   - Uses `RULE = "ARCH-012"` and `_common.violation(...)` with actionable `REMEDIATION:` text for each failure mode.
+   - Enforces that every `TODO(BUG-NNN)` in `crc/` (`.py`, `.md`) names an `open` or `partly fixed` row in `docs/refactor/BUGS.md`, every `open` or `partly fixed` `critical`/`high` row has at least one `TODO(BUG-NNN)`, duplicate `TODO(BUG-NNN)` comments fail, and any `TODO` in `crc/` without a `BUG-NNN` ID fails (while `medium`/`low` rows are not required to have a `TODO`).
+   - Self-tests in `test_arch012_todo_bugs.py` (25 tests total) verify firing on missing `TODO` (`critical`/`high`, `open`/`partly fixed`), `TODO` on closed (`fixed`, `not a bug`, `wontfix`) or unknown (`BUG-999`) rows, `TODO` without a bug ID (including short IDs like `BUG-1`), and duplicate `TODO(BUG-NNN)`, and pass on the repository.
+   - Documented in `tests/archtest/README.md`, `AGENTS.md`, `.cursor/skills/crc-maintain/fix-bug.md`, and `docs/refactor/BUGS.md` rule 5.
+   - Frozen-oracle retirement note added in `tests/legacy/README.md` ("Retiring an oracle") and `AGENTS.md` rule 3.
+4. **No production behaviour change in `crc/` & contract compliance:**
+   - AST comparison against `c16a3ec` across all 15 modified `crc/**/*.py` files confirms zero executable AST changes (comments and docstrings only).
+   - Guardrail files (`tests/legacy/*.txt`, `tests/archtest/safety_lock.json`, `tests/archtest/frozen_inputs.json`, `requirements.txt`) are untouched.
+5. **No adapter wording left in `crc/` comments or READMEs:**
+   - `git grep -ni adapter crc` matches only the 3 parity-tested class-name strings in `_NO_SCAN_CLASSES` (`crc/cli/scan.py:21-23`).
+
+### Gates
+
+Ran `pip install -r requirements.txt -r requirements-dev.txt && make check`:
+- `ruff check .`: All checks passed!
+- `ruff format --check .`: 371 files already formatted
+- `mypy`: Success: no issues found in 370 source files
+- `lint-imports`: Contracts: 5 kept, 0 broken
+- `pytest -q -n auto`: **44,596 passed, 1 skipped in 56.49s** (44,597 collected, up from 44,572 at `c16a3ec`, +25)
+- `python3 -m tests.archtest.test_count check`: `ARCH-008: 44597 tests, floor 44597`
+- Total `make check` runtime: **1m16.0s** wall clock
+
+VERDICT: APPROVE
