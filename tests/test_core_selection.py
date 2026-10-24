@@ -23,6 +23,7 @@ from crc.core.selection import (
     RESOURCES,
     Selection,
 )
+from tests import helpers_ag_cli_added as added_table
 from tests.helpers_cli_routes import FakeCleaners
 from tests.helpers_oracle import load_legacy_crc
 
@@ -36,6 +37,8 @@ class _Options:
 
 
 ROOT = Path(__file__).resolve().parent.parent
+ORACLE_EXTRA_RESOURCES = ["vpc", "spot_instance_requests", "spot_instances"]
+ORACLE_KINDS = [r for r in [*RESOURCES, *EXTRA_RESOURCES] if r not in added_table.added_kinds()]
 KMS_OPTIONS = _Options(kms_key_description="desc", kms_user="arn:user")
 EBS_MESSAGE = "AWS EBS volume cleanup requires '--cloud aws --resource disk'"
 
@@ -364,10 +367,23 @@ def test_ebs_breaker_selects_nothing_before_raising(
 
 
 def test_all_expansion_order_follows_crc_py() -> None:
+    """The oracle order of `--cloud all` and `--resource all` stays; extras must be in ADDED."""
     oracle = load_legacy_crc("crc_cli_selection_order")
     try:
         assert list(CLOUDS) == oracle.CLOUDS
-        assert list(RESOURCES) == oracle.RESOURCES
+        in_all = [r.kind for r in added_table.ADDED_RESOURCES if r.in_all]
+        outside_all = [r.kind for r in added_table.ADDED_RESOURCES if not r.in_all]
+        unlisted = [r for r in RESOURCES if r not in oracle.RESOURCES and r not in in_all]
+        assert not unlisted, f"--resource all expands to {unlisted}; {added_table.ADDED_HINT}"
+        assert [r for r in RESOURCES if r in oracle.RESOURCES] == oracle.RESOURCES
+        assert list(RESOURCES[: len(oracle.RESOURCES)]) == oracle.RESOURCES
+        assert sorted(RESOURCES) == sorted([*oracle.RESOURCES, *in_all])
+        unlisted_extra = [r for r in EXTRA_RESOURCES if r not in ORACLE_EXTRA_RESOURCES]
+        assert sorted(unlisted_extra) == sorted(outside_all), (
+            f"extra resources {unlisted_extra} differ from ADDED_RESOURCES; "
+            f"{added_table.ADDED_HINT}"
+        )
+        assert [r for r in EXTRA_RESOURCES if r in ORACLE_EXTRA_RESOURCES] == ORACLE_EXTRA_RESOURCES
     finally:
         sys.modules.pop("crc_cli_selection_order", None)
 
@@ -457,7 +473,7 @@ def _expected_warnings(cloud: str, resource: str) -> tuple[str, ...]:
 
 
 @pytest.mark.parametrize("cloud", [*CLOUDS, "all"])
-@pytest.mark.parametrize("resource", [*RESOURCES, *EXTRA_RESOURCES, "all"])
+@pytest.mark.parametrize("resource", [*ORACLE_KINDS, "all"])
 @pytest.mark.parametrize("operation", [Operation.DELETE, Operation.STOP])
 def test_exhaustive_grid_matches_crc_main(
     crc_cli: ModuleType,

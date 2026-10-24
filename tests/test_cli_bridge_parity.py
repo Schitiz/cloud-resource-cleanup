@@ -19,6 +19,7 @@ from crc.cli.routes import NotifyMode, Route, skips
 from crc.cli.runner import CRC as NewCRC
 from crc.core.cleaner import Candidate, Cleaner, Operation, Plan, Result, RunContext
 from crc.core.registry import Registry
+from tests import helpers_ag_cli_added as added_table
 from tests.test_cli_crc_parity import (
     AGE,
     FULL,
@@ -170,27 +171,59 @@ def test_bridge_reaches_the_cleaner_with_the_flags(monkeypatch: pytest.MonkeyPat
     assert init_calls == [("logs/crc.log",)]
 
 
-def test_route_tables_route_the_aws_kinds() -> None:
-    assert {cloud: sorted(table) for cloud, table in bridge.TABLES.items()} == {
-        "aws": [
-            "disk",
-            "ip",
-            "keypair",
-            "kms",
-            "snapshot",
-            "spot_instance_requests",
-            "spot_instances",
-            "vm",
-            "vpc",
-        ],
-        "azure": ["disk", "ip", "nic", "spot_instance_requests", "spot_instances", "vm"],
-        "gcp": ["disk", "ip", "spot_instance_requests", "spot_instances", "vm"],
-        "oci": ["disk", "spot_instance_requests", "spot_instances", "vm"],
+ORACLE_ROUTED_KINDS = {
+    "aws": [
+        "disk",
+        "ip",
+        "keypair",
+        "kms",
+        "snapshot",
+        "spot_instance_requests",
+        "spot_instances",
+        "vm",
+        "vpc",
+    ],
+    "azure": ["disk", "ip", "nic", "spot_instance_requests", "spot_instances", "vm"],
+    "gcp": ["disk", "ip", "spot_instance_requests", "spot_instances", "vm"],
+    "oci": ["disk", "spot_instance_requests", "spot_instances", "vm"],
+}
+
+
+def test_route_tables_route_every_oracle_kind_and_only_added_extras() -> None:
+    """Every kind routed before is still routed; an extra kind must be listed in ADDED."""
+    assert sorted(bridge.TABLES) == sorted(ORACLE_ROUTED_KINDS), "the set of clouds changed"
+    for cloud, kinds in ORACLE_ROUTED_KINDS.items():
+        lost = sorted(set(kinds) - set(bridge.TABLES[cloud]))
+        assert not lost, f"{cloud} no longer routes {lost}"
+    extra = {
+        (cloud, kind)
+        for cloud, table in bridge.TABLES.items()
+        for kind in table
+        if kind not in ORACLE_ROUTED_KINDS[cloud]
     }
+    unlisted = sorted(extra - added_table.added_routed_pairs())
+    assert not unlisted, f"routed pairs {unlisted} are not in the oracle; {added_table.ADDED_HINT}"
+    stale = sorted(added_table.added_routed_pairs() - extra)
+    assert not stale, f"ADDED_RESOURCES lists pairs that are not routed: {stale}"
     assert bridge.is_routed_kind("keypair")
     assert bridge.is_routed_kind("disk")
     assert bridge.is_routed_kind("nic")
     assert bridge.route_for("azure", "keypair") is None
+    for kind in added_table.added_kinds():
+        assert bridge.is_routed_kind(kind)
+
+
+def test_unlisted_or_missing_route_fails_route_table_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(added_table, "ADDED_RESOURCES", ())
+    monkeypatch.setitem(bridge.TABLES["aws"], "fake_kind", bridge.TABLES["aws"]["ip"])
+    with pytest.raises(AssertionError, match=r"ADDED table in tests/helpers_ag_cli_added\.py"):
+        test_route_tables_route_every_oracle_kind_and_only_added_extras()
+    monkeypatch.delitem(bridge.TABLES["aws"], "fake_kind")
+    monkeypatch.delitem(bridge.TABLES["aws"], "keypair")
+    with pytest.raises(AssertionError, match=r"aws no longer routes \['keypair'\]"):
+        test_route_tables_route_every_oracle_kind_and_only_added_extras()
 
 
 def test_notifiers_follow_the_clients_and_the_notify_flag() -> None:
