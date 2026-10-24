@@ -74,6 +74,23 @@ ignore_missing_imports = true
 module = ["googleapiclient", "googleapiclient.*"]
 ignore_missing_imports = true
 
+# Cloud SDK namespace packages whose typing differs between releases: the gate must not depend
+# on the resolved version (constraints.txt pins one, these overrides make mypy indifferent).
+# `follow_imports = "skip"` stops mypy from analysing the installed SDK source at all.
+[[tool.mypy.overrides]]
+module = [
+    "google",
+    "google.*",
+    "azure",
+    "azure.*",
+    "msrestazure",
+    "msrestazure.*",
+    "msrest",
+    "msrest.*",
+]
+ignore_missing_imports = true
+follow_imports = "skip"
+
 [tool.importlinter]
 root_package = "crc"
 include_external_packages = true
