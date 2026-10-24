@@ -95,16 +95,38 @@ def _expr_kind(node: ast.AST) -> str | None:
     return "sys.exit" if dotted == "sys.exit" else None
 
 
+def _clock_aliases(tree: ast.Module) -> dict[str, str]:
+    """Local name -> full name for the clock modules and names a module imports."""
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name in {"datetime", "time"}:
+                    aliases[alias.asname or alias.name] = alias.name
+        elif isinstance(node, ast.ImportFrom) and node.module in {"datetime", "time"}:
+            for alias in node.names:
+                aliases[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+    return aliases
+
+
 def _clock_refs(tree: ast.Module) -> list[int]:
     """Lines where a clock function is referenced without being called."""
     called = {id(node.func) for node in ast.walk(tree) if isinstance(node, ast.Call)}
-    return [
-        node.lineno
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Attribute)
-        and id(node) not in called
-        and _dotted(node) in _CLOCK_REFS
-    ]
+    aliases = _clock_aliases(tree)
+    lines: list[int] = []
+    for node in ast.walk(tree):
+        if id(node) in called or not isinstance(node, ast.Attribute | ast.Name):
+            continue
+        if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
+            continue
+        dotted = _dotted(node)
+        if dotted is None:
+            continue
+        head, _, rest = dotted.partition(".")
+        full = ".".join(filter(None, (aliases.get(head, head), rest)))
+        if dotted in _CLOCK_REFS or full in _CLOCK_REFS:
+            lines.append(node.lineno)
+    return lines
 
 
 def find_bans(tree: ast.Module) -> list[tuple[int, str]]:

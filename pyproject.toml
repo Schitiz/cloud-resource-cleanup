@@ -45,7 +45,7 @@ strict = true
 # `mypy` with no arguments checks these paths. crc.py is left out because, as a
 # top-level module, it is also named `crc` and clashes with the crc/ package;
 # the CLI rung must resolve that (for example by moving its logic into crc/).
-files = ["crc", "tests"]
+files = ["crc", "tests", "scripts"]
 exclude = ['^crc\.py$']
 
 # LEGACY RATCHET: this list may only shrink. Each rung removes the modules it

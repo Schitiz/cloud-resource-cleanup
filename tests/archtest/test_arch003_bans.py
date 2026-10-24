@@ -143,7 +143,28 @@ CLOCK_REF_BAD = {
     ),
     "time-value": "import time\n\nCLOCK = time.time\n",
     "call-argument": "import datetime\n\nx = sorted([], key=datetime.datetime.now)\n",
+    "module-alias": "import datetime as dt\n\n\ndef f(now=dt.datetime.now):\n    return now\n",
+    "class-alias": "from datetime import datetime as DT\n\nF = DT.utcnow\n",
 }
+
+CLI_CLOCK_REF_BAD = {
+    "from-time-name": "from time import time\n\n\ndef f(now=time):\n    return now\n",
+    "from-time-alias": "from time import time as wall\n\nCLOCK = wall\n",
+}
+
+
+@pytest.mark.parametrize("snippet", list(CLI_CLOCK_REF_BAD.values()), ids=list(CLI_CLOCK_REF_BAD))
+def test_arch003_selftest_cli_clock_name_passed_as_value(tmp_path: Path, snippet: str) -> None:
+    _write(tmp_path, snippet, "crc/cli/new_mod.py")
+    messages = check_bans(tmp_path, frozenset())
+    assert len(messages) == 1
+    assert "`clock_ref`" in messages[0]
+
+
+def test_arch003_selftest_cli_may_call_an_imported_clock_name(tmp_path: Path) -> None:
+    source = "from time import time\n\nx = time()\ntime_s = 1\n"
+    _write(tmp_path, source, "crc/cli/m.py")
+    assert check_bans(tmp_path, frozenset()) == []
 
 
 @pytest.mark.parametrize("package", ["crc/core", "crc/cli"])
