@@ -97,3 +97,86 @@ None blocking. Every item of the lane task (`git diff a0b3d09..HEAD`) was verifi
   - `make check`: `ruff check .` passed, `mypy` passed (`367 source files`), `lint-imports` passed (`5 kept, 0 broken`), `pytest -q -n auto` passed (`44,421 passed in 50.87s`), `ARCH-008: 44421 tests, floor 44421` (`57.70s` total wall time).
 
 VERDICT: APPROVE
+
+## Round 2 (Opus)
+
+### Round 1 fixes and findings
+
+Round 1 made no code changes and raised no blocking finding. I rechecked its claims against
+the code and agree with them, with one exception (finding 1 below).
+
+### Findings
+
+1. Item (4) is not complete. `tests/archtest/test_count.py:17` (the ARCH-008 remediation)
+   still cites "AGENTS.md hard rule 1" for "tests may only be added or strengthened". That is
+   rule 3 (`AGENTS.md:61`); rule 1 is "never call a real cloud API". The file is not in this
+   lane's owned list (only the remediation strings of `bug_refs.py` and `frozen_inputs.py`
+   are), so I did not edit it. See Owner action. The other citations are correct:
+   `bug_refs.py:15` cites rule 5 (bugs go to `BUGS.md`), `frozen_inputs.py` cites rules 3
+   and 7, and `banned_constructs.py:11` cites rule 7 (no new dependencies).
+2. I accept the whole-row exemption for `BUGS.md` rows, which goes beyond the task's "exclude
+   the Location on main column". The non-location cells of the rows also name files that
+   exist only on `main` or were deleted during the refactor. Examples: BUG-403 names
+   `crc/cli/notify.py`, BUG-002 and BUG-004 name `crc/azu/vm.py`. Rows may not be edited, so
+   checking those cells would force a rule break. The header, the rules, the notes and every
+   link in `BUGS.md` (rows included) are still checked; I proved this with mutation M-doc
+   below.
+3. Item (1) checked in code. `dispatch.py` validates every pair (`validate_targets`) and then
+   loops. `bridge.route_for` and `run_routed` exist. `routes/skips.py` holds the warn-only
+   pairs. `pairs.SUPPORTED_CLOUDS`, `engine.KIND_LABELS`,
+   `tests/test_cli_main_parity.py` `ROUTED_CALLS`, `tests/helpers_routed_<cloud>.py` and
+   `tests/test_cli_bridge_<cloud>.py` all exist. SAF-004 ("the disk route reports first,
+   then re-raises") matches `routes/aws.py:127` `NotifyMode.REPORT_THEN_RERAISE` and
+   `bridge._ReportThenRaise`. A grep of the live docs finds no remaining mention of
+   `HANDLERS`, `vm_ops`, `resource_ops`, `CRC.delete_*`, `AWS_Disk` or `GCP_Disk`.
+4. Item (2) checked: `crc/core/age_tags.py:111-115` returns `KEEP_AGE`. The remaining "fail
+   open" lines are all in AG-ADAPT-owned VM READMEs (`crc/gcp/README.md:55`,
+   `crc/azu/vm/README.md:47`, `crc/oci/vm/README.md:39`), as the coder listed.
+   `gcp_ip_exception_excludes` and `nic_name_included` are still in `crc/core/policy_text.py`
+   and are called by no cleaner, so "dead helper (BUG-370)" is true. Merge risk: AG-ADAPT
+   may delete them, which also touches `crc/core/README.md:59-62`.
+5. Item (3) checked: the location rule is worded the same in `AGENTS.md:68-70`, `BUGS.md:3-12`,
+   `docs/refactor/README.md:21-22`, `docs/refactor/bugs/README.md:16-17`, `fix-bug.md:7-8` and
+   `bug_refs.py:15`. The `BUGS.md` links to `../archive/{FILTER_VARIANTS,STATUS,PLAN}.md`
+   resolve. No `BUGS.md` row changed in `a0b3d09..HEAD`.
+6. The `AGENTS.md` claim that `make check-fast` skips the floor check is true: in the
+   `Makefile`, only `check` runs `tests.archtest.test_count check`.
+
+### Gates
+
+- CLI: `python3 crc.py --help` exits 0. Its 128 lines are byte-identical to the output at
+  `a0b3d09`. No `.py` file under `crc/` and no `crc.py` changed.
+- Guardrails untouched: `safety_lock.json`, `update_safety_lock.py`, the hash-locked safety
+  tests, `tests/legacy/*.txt`, `requirements.txt` and `frozen_inputs.json`.
+  `test_count_floor.txt` changed only through `make raise-test-floor` (44415 to 44421).
+- Mutations, each made locally, run, then reverted; none committed:
+  - M-doc: I added a dead link, the deleted path `crc/cli/vm_ops.py`, the unmatched
+    placeholder `tests/helpers_nope_<cloud>.py` (all in `.cursor/rules/20-core.mdc`), a
+    missing `docs/` path in `docs/refactor/bugs/pending/README.md` and a missing path in the
+    `BUGS.md` footer. ARCH-011 reported all five, each with `REMEDIATION:`.
+  - Mutations of the checker in `doc_links.py`, each caught by its self-tests:
+    - M1, archive no longer skipped: 2 tests failed.
+    - M2, globs always count as a match: 1 failed.
+    - M3, row exemption applied to every file: 1 failed.
+    - M4, scan no longer recursive: 5 failed.
+    - M5, `:line` and `::test` suffixes no longer stripped: 1 failed.
+- Sizes: `doc_links.py` 113 lines, `test_arch011_doc_links.py` 163, `bug_refs.py` 56,
+  `frozen_inputs.py` 54. The longest function is 18 lines. `AGENTS.md` is 112 lines, within
+  ARCH-010's limit of 120. ARCH-002 (Public API sync) is green.
+- Changed files: all are owned by this lane, plus the floor file (changed by
+  `make raise-test-floor`) and this review file.
+- `make check` after `pip install -r requirements.txt -r requirements-dev.txt`: green.
+  44421 passed (pytest 54.6 s); `ARCH-008: 44421 tests, floor 44421`; 75 s wall time (cold
+  mypy cache). `make check-fast`: 14063 passed, 25 s wall time. Both match the timings
+  stated in `AGENTS.md`.
+
+### Owner action
+
+`tests/archtest/test_count.py` is outside this lane. Proposed diff:
+
+```diff
+-    "Tests may only be added or strengthened (AGENTS.md hard rule 1). A lower count means a "
++    "Tests may only be added or strengthened (AGENTS.md rule 3). A lower count means a "
+```
+
+ROUND 2 VERDICT: APPROVE
