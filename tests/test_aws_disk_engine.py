@@ -240,3 +240,129 @@ def test_saf_020_merge_metric_pages_keeps_earlier_values() -> None:
     }
     kept, _, _ = detach_run(page1, page2)
     assert kept == ["vol-idle"]
+
+
+def tags(**values: str) -> list[dict[str, str]]:
+    return [{"Key": key, "Value": value} for key, value in values.items()]
+
+
+def planned(volumes: list[dict[str, Any]], **options: Any) -> list[str]:
+    return plan_ids(cleaner(FakeEc2(volumes), **options))
+
+
+def test_infrastructure_and_prod_yb_task_volumes_are_kept() -> None:
+    volumes = [
+        volume("infra", Tags=tags(yb_task="infrastructure")),
+        volume("prod", Tags=tags(yb_task="prod")),
+        volume("dev", Tags=tags(yb_task="dev")),
+    ]
+    assert planned(volumes) == ["dev"]
+
+
+def test_an_eng_dev_unattached_volume_is_a_candidate() -> None:
+    eng = volume("eng", Tags=tags(yb_dept="eng", yb_task="dev", yb_owner="dev"))
+    assert planned([eng]) == ["eng"]
+
+
+def test_filter_tags_allow_itest() -> None:
+    assert planned([volume("t")], filter_tags={"yb_task": ["itest", "uitest"]}) == ["t"]
+
+
+def test_exception_tags_keep_the_volume() -> None:
+    keep = volume("keep", Tags=tags(yb_task="itest", autoclean="false"))
+    assert planned([keep], exception_tags={"autoclean": ["false", "False"]}) == []
+
+
+def test_filter_tags_are_anded_across_keys() -> None:
+    both = volume("both", Tags=tags(yb_task="itest", yb_owner="qateam"))
+    other_owner = volume("owner", Tags=tags(yb_task="itest", yb_owner="dev"))
+    only_task = volume("task", Tags=tags(yb_task="itest"))
+    found = planned(
+        [both, other_owner, only_task], filter_tags={"yb_task": ["itest"], "yb_owner": ["qateam"]}
+    )
+    assert found == ["both"]
+
+
+def test_filter_tags_honour_globs() -> None:
+    match = volume("m", Tags=tags(Name="jenkins-abc"))
+    miss = volume("x", Tags=tags(Name="prod-jenkins"))
+    assert planned([match, miss], filter_tags={"Name": ["jenkins-*"]}) == ["m"]
+
+
+def test_kubernetes_volumes_are_skipped_unless_filtered() -> None:
+    cluster = "kubernetes.io/cluster/shubin-test-cluster"
+    k8s = volume(
+        "k8s", Tags=[{"Key": cluster, "Value": "owned"}, *tags(Name="shubin-test-cluster-pvc")]
+    )
+    assert planned([k8s]) == []
+    assert planned([k8s], filter_tags={cluster: ["owned"]}) == ["k8s"]
+
+
+@pytest.mark.parametrize(
+    "value", ["Prod", "INFRA", " Production ", "prod-cluster", "infrastructure-shared"]
+)
+def test_sensitive_yb_task_is_kept_regardless_of_case(value: str) -> None:
+    assert planned([volume("s", Tags=tags(yb_task=value))]) == []
+
+
+def test_sensitive_yb_task_key_case_is_folded() -> None:
+    assert planned([volume("s", Tags=tags(YB_Task="prod"))]) == []
+
+
+def test_attached_volumes_are_never_candidates() -> None:
+    in_use = volume("in-use", State="in-use", Attachments=[{"InstanceId": "i-1"}])
+    attached = volume("attached", State="available", Attachments=[{"InstanceId": "i-1"}])
+    assert planned([in_use, attached]) == []
+
+
+def test_creation_age_gate() -> None:
+    old, fresh = volume("old", days=30), volume("new", days=1)
+    assert planned([old, fresh], age={"days": 7}) == ["old"]
+
+
+def test_multi_attach_volumes_are_never_candidates() -> None:
+    assert planned([volume("m", MultiAttachEnabled=True)]) == []
+
+
+def test_untagged_volumes_are_skipped_unless_notags_is_set() -> None:
+    untagged = volume("u")
+    untagged.pop("Tags")
+    assert planned([untagged]) == []
+    assert planned([untagged], notags={"yb_owner": []}) == ["u"]
+
+
+def test_volume_with_datapoints_is_dropped() -> None:
+    results = [complete(q) for q in ids_for(0)]
+    results += [complete(ids_for(1)[0], [3600.0]), *[complete(q) for q in ids_for(1)[1:]]]
+    kept, _, _ = detach_run({"MetricDataResults": results})
+    assert kept == ["vol-idle"]
+
+
+def test_without_detach_age_cloudwatch_is_not_called() -> None:
+    cloudwatch = ScriptedCloudWatch()
+    disk = cleaner(FakeEc2([volume("a"), volume("b")]), cloudwatch, age={"days": 7})
+    assert plan_ids(disk) == ["a", "b"]
+    assert cloudwatch.calls == 0
+
+
+def test_dry_run_never_deletes_a_volume() -> None:
+    ec2 = FakeEc2([volume()])
+    outcome = run_engine(cleaner(ec2, age={"days": 1}), dry_run=True)
+    assert ec2.deleted == []
+    assert outcome.result is None
+    assert [c.id for c in outcome.plan.candidates] == ["us-west-2/vol-1 yb_task=itest"]
+
+
+def test_live_run_deletes_the_volume() -> None:
+    ec2 = FakeEc2([volume()])
+    run_engine(cleaner(ec2, age={"days": 1}), dry_run=False)
+    assert ec2.deleted == ["vol-1"]
+
+
+def test_an_invalid_name_regex_raises_at_build_time() -> None:
+    with pytest.raises(ValueError):
+        cleaner(FakeEc2([]), name_regex=["test-*("])
+
+
+def test_a_tag_without_a_value_does_not_raise() -> None:
+    assert planned([volume("n", Tags=[{"Key": "Name"}])]) == ["n"]

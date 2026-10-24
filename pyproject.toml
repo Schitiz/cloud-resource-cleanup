@@ -21,13 +21,7 @@ testpaths = ["tests"]
 [tool.ruff]
 target-version = "py311"
 line-length = 100
-extend-exclude = [
-    "tests/test_aws_disk.py",
-    "tests/test_aws_spot_instance_requests.py",
-    "tests/test_azu_spot_vm.py",
-    "tests/test_gcp_spot_vm.py",
-    "tests/test_oci_spot_vm.py",
-]
+extend-exclude = []
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "FURB", "SIM", "PERF", "C901", "PLR", "RUF"]
@@ -48,18 +42,8 @@ strict = true
 files = ["crc", "tests"]
 exclude = ['^crc\.py$']
 
-# LEGACY RATCHET: this list may only shrink. Each rung removes the modules it
-# refactors. Keep it in sync with ruff `extend-exclude` above (crc.py is not
-# listed here because mypy never checks it, see `files`).
-[[tool.mypy.overrides]]
-module = [
-    "tests.test_aws_disk",
-    "tests.test_aws_spot_instance_requests",
-    "tests.test_azu_spot_vm",
-    "tests.test_gcp_spot_vm",
-    "tests.test_oci_spot_vm",
-]
-ignore_errors = true
+# LEGACY RATCHET: this list may only shrink. It is empty now; keep it in sync with ruff
+# `extend-exclude` above (crc.py is not listed here because mypy never checks it).
 
 # SDKs without stubs or py.typed: only the SDK, never a repository module.
 [[tool.mypy.overrides]]

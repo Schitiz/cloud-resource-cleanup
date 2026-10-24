@@ -25,6 +25,7 @@ from crc.core.registry import Registry
 from crc.core.selection import Selection
 from tests.test_aws_spot_instance_requests_cleaner import MUTATING, OPTIONS, _methods, _setup
 from tests.test_aws_spot_instance_requests_parity import (
+    LEFT,
     NOW,
     QA,
     Case,
@@ -40,6 +41,7 @@ from tests.test_aws_spot_instance_requests_parity import (
     tagged,
     vol,
 )
+from tests.test_aws_spot_instance_requests_parity import FakeEc2 as FakeSpotEc2
 
 
 def mutations(aws: FakeAws) -> list[tuple[str, dict[str, Any]]]:
@@ -403,3 +405,102 @@ def test_the_registered_cleaner_is_the_spot_request_cleaner(
 ) -> None:
     _, cleaner, _ = _setup(Case("x", one(std())), monkeypatch, True)
     assert isinstance(cleaner, SpotRequestCleaner)
+
+
+def test_persistent_and_one_time_requests_are_both_planned(monkeypatch: pytest.MonkeyPatch) -> None:
+    requests = [req("sir-p", "i-p", "persistent"), req("sir-o", "i-o", "one-time")]
+    instances = {"i-p": inst(dot_false=()), "i-o": inst(dot_false=())}
+    case = Case("x", one(Spec(requests, instances, {})))
+    assert plan_ids(case, monkeypatch) == ["sir-p", "sir-o", "i-p", "i-o"]
+
+
+def test_young_requests_are_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
+    case = Case("x", one(std(requests=[req(days=2)])), age={"days": 10})
+    assert plan_ids(case, monkeypatch, age={"days": 10}) == []
+
+
+def test_a_failed_describe_instances_aborts_before_cancel_or_terminate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    denied = ce("UnauthorizedOperation", "DescribeInstances")
+    aws, _ = run_engine(
+        Case("x", one(std(errors={"describe_instances": denied}))), monkeypatch, dry_run=False
+    )
+    assert mutations(aws) == []
+
+
+def test_a_create_tags_timeout_invalidates_both_volumes(monkeypatch: pytest.MonkeyPatch) -> None:
+    spec = std(
+        instances={"i-1": inst(dot_false=("vol-a", "vol-b"))},
+        volumes={"vol-a": vol(), "vol-b": vol()},
+    )
+    real_create = FakeSpotEc2.create_tags
+
+    def flaky(self: FakeSpotEc2, *, Resources: list[str], Tags: list[dict[str, str]]) -> Any:
+        if Resources == ["vol-b"]:
+            self._rec("create_tags", Resources=Resources, Tags=Tags)
+            raise conn()
+        return real_create(self, Resources=Resources, Tags=Tags)
+
+    monkeypatch.setattr(FakeSpotEc2, "create_tags", flaky)
+    aws, _ = run_engine(Case("x", one(spec)), monkeypatch, dry_run=False)
+    cleared = {c[2]["Resources"][0] for c in aws.calls if c[1] == "delete_tags"}
+    assert cleared == {"vol-a", "vol-b"}
+    assert "cancel_spot_instance_requests" not in _methods(aws)
+
+
+def test_a_dry_run_lists_the_leftover_volume_without_mutating(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    aws, outcome = run_engine(Case("x", one(std())), monkeypatch, dry_run=True)
+    assert mutations(aws) == []
+    assert outcome.plan.related["Disk"] == ("vol-1",)
+
+
+def test_filter_tags_honour_globs(monkeypatch: pytest.MonkeyPatch) -> None:
+    tags = [*QA, {"Key": "yb_task", "Value": "itest-123"}]
+    case = Case("x", one(std(requests=[req(tags=tags)])))
+    assert plan_ids(case, monkeypatch, filter_tags={"yb_task": ["itest*"]}) == ["sir-1", "i-1"]
+
+
+def test_the_sweep_rejects_the_terminate_failed_sentinel(monkeypatch: pytest.MonkeyPatch) -> None:
+    case = Case("x", one(swept(tags=[{"Key": LEFT, "Value": LEFTOVER_INVALID_VALUE}])))
+    aws, _ = run_engine(case, monkeypatch, dry_run=False)
+    assert mutations(aws) == []
+    lookups = [c for c in aws.calls if c[1] == "describe_spot_instance_requests"]
+    assert [c[2].get("SpotInstanceRequestIds") for c in lookups] == [None]
+
+
+def test_the_sweep_skips_another_owner_and_in_use_volumes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    other = [{"Key": LEFT, "Value": "sir-x"}, {"Key": "yb_owner", "Value": "prod"}]
+    spec = Spec(
+        [],
+        volumes={
+            "vol-other": vol("available", other, 7, None),
+            "vol-busy": vol("in-use", tagged("sir-gone"), 10, "i-9"),
+        },
+    )
+    aws, _ = run_engine(Case("x", one(spec)), monkeypatch, dry_run=False)
+    assert mutations(aws) == []
+
+
+def test_the_sweep_skips_a_live_untagged_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    spec = swept("sir-live", requests=[req("sir-live", None, tags=[])])
+    aws, _ = run_engine(Case("x", one(spec), filter_tags={}), monkeypatch, dry_run=False)
+    assert "delete_volume" not in _methods(aws)
+
+
+def test_the_sweep_skips_a_young_live_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    spec = swept("sir-live", requests=[req("sir-live", None, days=2)])
+    case = Case("x", one(spec), age={"days": 10})
+    aws, _ = run_engine(case, monkeypatch, dry_run=False)
+    assert "delete_volume" not in _methods(aws)
+
+
+def test_the_sweep_deletes_a_tagged_orphan_volume(monkeypatch: pytest.MonkeyPatch) -> None:
+    aws, outcome = run_engine(Case("x", one(swept())), monkeypatch, dry_run=False)
+    assert ("delete_volume", {"VolumeId": "vol-s"}) in mutations(aws)
+    assert outcome.result is not None
+    assert outcome.result.related["Disk"] == ("vol-s",)
