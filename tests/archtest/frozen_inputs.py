@@ -1,4 +1,4 @@
-"""ARCH-007: SHA-256 manifest of the frozen oracles (`tests/legacy/*.txt`, `requirements.txt`, `constraints.txt`)."""
+"""ARCH-007: SHA-256 manifest of the frozen oracles and the locked dependency files."""
 
 import hashlib
 import json

@@ -87,8 +87,8 @@ def _custom_age_keeps(
     disk: Mapping[str, Any], labels: dict[str, str], settings: SpotSettings, clock: Clock | None
 ) -> str | None:
     """BUG-242: the keep reason when the disk carries the custom age label and is younger than
-    it, or when the label is invalid or the disk age is unreadable or no clock was injected (fail closed). None when the
-    disk has no custom age label, or is old enough for it."""
+    it, or when the label is invalid, the disk age is unreadable or no clock was injected (fail
+    closed). None when the disk has no custom age label, or is old enough for it."""
     try:
         retention_age = core_age.validated_retention_age(labels, settings.custom_age_tag_key or "")
     except ValueError:

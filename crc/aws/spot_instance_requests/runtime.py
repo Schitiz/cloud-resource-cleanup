@@ -17,7 +17,7 @@ from crc.core import age as core_age
 
 @dataclass(frozen=True, slots=True)
 class SpotRuntime:
-    """Injected collaborators: SDK client factory, region lister and wait. `now` is `RunContext.now`."""
+    """Injected collaborators: SDK client factory, region lister and wait."""
 
     client_factory: ClientFactory = boto3_client
     list_regions: RegionLister = all_regions
