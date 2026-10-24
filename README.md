@@ -86,7 +86,7 @@ Get started with `cloud-resource-cleanup` today and see the difference it can ma
 ```
 git clone https://github.com/yugabyte/cloud-resource-cleanup.git
 cd cloud-resource-cleanup
-pip install -r requirements.txt
+pip install -r requirements.txt -c constraints.txt
 ```
 
 ## Environment Variables

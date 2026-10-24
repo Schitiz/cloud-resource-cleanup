@@ -256,10 +256,10 @@ No SAF ID is assigned to these yet.
 | Path | Notes |
 |------|--------|
 | `crc.py` | Entry point and re-export shim: `main`, `CRC`, the cleaner classes and constants are re-exported from `crc/cli/` and the cloud packages; holds no logic |
-| `crc/cli/` | CLI: `args.py` (flags), `inputs.py` (checks, target resolution), `pairs.py` (supported pairs), `dispatch.py` (`validate_targets`, AWS EBS breaker, the cloud and resource loops), `bridge.py` and `routes/<cloud>.py` (every pair runs through `crc.core.engine`), `scan.py` (read-only `--scan_tag`), `main.py`, `runner.py` (`CRC`, the run settings) |
+| `crc/cli/` | CLI: `crc/cli/args.py` (flags), `crc/cli/inputs.py` (checks, target resolution), `crc/cli/pairs.py` (supported pairs), `crc/cli/dispatch.py` (`validate_targets`, AWS EBS breaker, the cloud and resource loops), `crc/cli/bridge.py` and `routes/<cloud>.py` (every pair runs through `crc.core.engine`), `crc/cli/scan.py` (read-only `--scan_tag`), `crc/cli/main.py`, `crc/cli/runner.py` (`CRC`, the run settings) |
 | `crc/service.py` | Shared `is_old` / `require_positive_age` / retention tags — empty age is True unless a module rejects it; `get_retention_age` returns `KEEP_AGE` for a bad tag |
-| `crc/core/` | Age helpers (`age.py`, `KEEP_AGE`), tag and age policy (`policy.py`), run log |
-| `crc/aws/disk/` | AWS EBS; age validation in `settings.py`; detach_age via CloudWatch (`detach.py`); per-region errors logged (region-list auth failures still raise) |
+| `crc/core/` | Age helpers (`crc/core/age.py`, `KEEP_AGE`), tag and age policy (`crc/core/policy.py`), run log |
+| `crc/aws/disk/` | AWS EBS; age validation in `crc/aws/disk/settings.py`; detach_age via CloudWatch (`crc/aws/disk/detach.py`); per-region errors logged (region-list auth failures still raise) |
 | `crc/gcp/disk_cleaner.py` | GCP disks; detach_age via `last_detach_timestamp`; `--age` ignored; custom label replaces detach_age; notags and name_regex applied; delete waits for the zone operation; per-disk and per-zone errors are recorded and skipped |
 | `crc/oci/disk/` | OCI block and boot volumes; unknown attachment state keeps the volume |
 | `crc/aws/spot_instance_requests/` | cancel→terminate→DoT=false EBS; cancel-fail skips terminate; age required; cancelled+InstanceId retried |

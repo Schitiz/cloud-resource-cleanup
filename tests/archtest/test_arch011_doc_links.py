@@ -2,6 +2,9 @@
 
 from pathlib import Path
 
+import pytest
+
+from tests.archtest import doc_links
 from tests.archtest._common import REPO_ROOT
 from tests.archtest.doc_links import check_doc_links
 
@@ -110,6 +113,7 @@ def test_arch011_selftest_globs_and_placeholders_need_a_match(tmp_path: Path) ->
 
 def test_arch011_selftest_directories_and_ignored_spans(tmp_path: Path) -> None:
     _write(tmp_path, "crc/aws/keypairs/README.md")
+    _write(tmp_path, "crc.py")
     text = (
         "dir `crc/aws/keypairs/` missing dir `crc/aws/gone/`\n"
         "not paths `python crc.py` `crc.py` `main:crc/aws/disk.py` `crc/aws/disk` `see crc/x.py` "
@@ -161,3 +165,73 @@ def test_arch011_selftest_root_relative_links(tmp_path: Path) -> None:
     messages = check_doc_links(tmp_path)
     assert len(messages) == 1
     assert "links to /gone.md" in messages[0]
+
+
+def _first_lines(messages: list[str]) -> list[str]:
+    return [m.split("\n")[0] for m in messages]
+
+
+def test_arch011_selftest_bare_filename_resolves_next_to_the_document(tmp_path: Path) -> None:
+    _write(
+        tmp_path, "crc/cli/README.md", "ok `bridge.py` `bridge.py:12` `routes.md` gone `ghost.py`\n"
+    )
+    _write(tmp_path, "crc/cli/bridge.py")
+    _write(tmp_path, "crc/cli/routes.md")
+    messages = check_doc_links(tmp_path)
+    assert _first_lines(messages) == [
+        "ARCH-011: crc/cli/README.md:1 names `ghost.py`, "
+        "found in neither its directory nor the root"
+    ]
+    assert "\n\nREMEDIATION: " in messages[0]
+    assert "BARE_NAME_ALLOWLIST" in messages[0]
+
+
+def test_arch011_selftest_bare_filename_falls_back_to_the_repo_root(tmp_path: Path) -> None:
+    for name in ("BUGS.md", "crc.py", "constraints.txt", "settings.json", "ci.yml"):
+        _write(tmp_path, name)
+    text = "`BUGS.md` `crc.py` `constraints.txt` `settings.json` `ci.yml` `other.yml`\n"
+    _write(tmp_path, "docs/refactor/bugs/README.md", text)
+    assert _first_lines(check_doc_links(tmp_path)) == [
+        "ARCH-011: docs/refactor/bugs/README.md:1 names `other.yml`, "
+        "found in neither its directory nor the root"
+    ]
+
+
+def test_arch011_selftest_bare_filename_ignores_non_files_fences_and_register_rows(
+    tmp_path: Path,
+) -> None:
+    text = (
+        "not names `python crc.py` `crc` `.py` `x.pyc` `a.b.c` `Makefile` `<name>.py` `*.py`\n"
+        "```\n`fenced.py`\n```\n"
+        "| BUG-001 | `old.py` | `gone.md` | yes | cosmetic | low | R1 | open |\n"
+        "footer `footer_gone.py`\n"
+    )
+    _write(tmp_path, "docs/refactor/BUGS.md", text)
+    assert _first_lines(check_doc_links(tmp_path)) == [
+        "ARCH-011: docs/refactor/BUGS.md:6 names `footer_gone.py`, "
+        "found in neither its directory nor the root"
+    ]
+
+
+def test_arch011_selftest_bare_filename_allowlist_needs_a_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write(tmp_path, "AGENTS.md", "`main.py` `other.py`\n")
+    monkeypatch.setitem(doc_links.BARE_NAME_ALLOWLIST, "main.py", "names the file on main only")
+    assert _first_lines(check_doc_links(tmp_path)) == [
+        "ARCH-011: AGENTS.md:1 names `other.py`, found in neither its directory nor the root"
+    ]
+
+
+def test_arch011_bare_name_allowlist_entries_have_reasons() -> None:
+    assert all(reason.strip() for reason in doc_links.BARE_NAME_ALLOWLIST.values())
+
+
+def test_arch011_selftest_skips_markdown_behind_a_symlinked_directory(tmp_path: Path) -> None:
+    _write(tmp_path, ".cursor/skills/s/SKILL.md", "[bad](gone.md)\n")
+    (tmp_path / ".agents").mkdir()
+    (tmp_path / ".agents" / "skills").symlink_to("../.cursor/skills")
+    messages = check_doc_links(tmp_path)
+    assert _first_lines(messages) == [
+        "ARCH-011: .cursor/skills/s/SKILL.md:1 links to gone.md, which does not exist"
+    ]

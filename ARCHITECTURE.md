@@ -86,14 +86,15 @@ Types are frozen dataclasses in `crc/core/cleaner.py`: `Candidate`, `Skipped`, `
 
 Pure functions on plain data, no I/O: `crc/core/policy*.py` (tags, `notags`, exception tags, name
 regex, managed-resource checks, age) and `crc/core/age*.py` (parse `--age`, `--detach_age`,
-`--max_age`, custom age tags, `is_old`). One exception: `is_old` reads the `MAX_AGE` environment
-variable that `main` sets from `--max_age`. Fail closed: an unreadable custom age tag or bad age keeps
+`--max_age`, custom age tags, `is_old`). `crc/core` reads no environment (ARCH-003): `is_old` calls the
+`MAX_AGE` source that `crc/cli/context.py` installs (`install_max_age_source`, which passes
+`read_max_age_env` to `crc.core.age.set_max_age_source`); `main` exports the variable from `--max_age`. Fail closed: an unreadable custom age tag or bad age keeps
 the resource and records a skip. Cleaners fetch and normalise; policy decides. See
 `crc/core/README.md` for the function list.
 
 ## Notify and run log
 
-`crc/notify/slack.py` and `influx.py` build messages and points from the `Report`
+`crc/notify/slack.py` and `crc/notify/influx.py` build messages and points from the `Report`
 (`crc/core/report.py`); they hold no cloud logic. `crc/core/logger.py` is the per-run log
 (`RUN START`, `ACTION`, `RESULT`, ...); format and rules are in [docs/logging.md](docs/logging.md).
 
@@ -103,8 +104,9 @@ Use `crc/aws/keypairs/` (cleaner) and `crc/cli/routes/aws.py` (route) as the mod
 
 1. Read `CLEANUP_SAFETY.md`, `docs/refactor/BUGS.md` rows for the resource, and the nearest cleaner
    of the same cloud and its package README.
-2. Create `crc/<cloud>/<kind>/` with `client.py` (a `Protocol` for the SDK calls you use),
-   `cleaner.py`, `__init__.py` with `__all__`, and a `README.md` with the four required sections.
+2. Create `crc/<cloud>/<kind>/` with `crc/<cloud>/<kind>/client.py` (a `Protocol` for the SDK
+   calls you use), `crc/<cloud>/<kind>/cleaner.py`, `crc/<cloud>/<kind>/__init__.py` with
+   `__all__`, and a `README.md` with the four required sections.
 3. Write the cleaner class with `supports`, `plan` and `apply` as above. Require a real age gate
    for destructive kinds; fail closed on missing or invalid age, tags or telemetry.
 4. Register a factory: `@register("<cloud>", "<kind>")` on a function that builds the cleaner from
@@ -116,14 +118,18 @@ Use `crc/aws/keypairs/` (cleaner) and `crc/cli/routes/aws.py` (route) as the mod
    (`crc/cli/constants.py`) and the `--resource` choices (`crc/cli/args.py`); its pair rule in
    `crc/cli/pairs.py` (`SUPPORTED_CLOUDS`) when some clouds lack it; a label constant in
    `crc/core/report.py` and its entry in `KIND_LABELS` (`crc/core/engine.py`). This changes the
-   CLI contract: follow the flag workflow in [AGENTS.md](AGENTS.md).
+   CLI contract: follow the flag workflow in [AGENTS.md](AGENTS.md). Add one `AddedResource` (and
+   the new `RESOURCE_HELP`) to the ADDED tables of `tests/helpers_ag_cli_added.py`; the oracle
+   `tests/legacy/crc_main.txt` is never edited, and new kinds are not blocked.
 7. Tests, all offline: the cleaner (happy path, fail-closed path, dry run makes no mutating call,
    call order of destructive steps) and the routed CLI path. Extend the CLI parity tests that
    reach the cleaner through the route: `tests/test_cli_main_parity.py` `ROUTED_CALLS` (AWS kinds;
    the other clouds are in `tests/helpers_routed_<cloud>.py`) and the per-cloud
-   `tests/test_cli_bridge_<cloud>.py` (`test_cli_bridge_parity.py` covers `keypair`). They use
+   `tests/test_cli_bridge_<cloud>.py` (`tests/test_cli_bridge_parity.py` covers `keypair`). They use
    `FakeCleaners` from `tests/helpers_cli_routes.py`, which records the options the route passed
-   to the factory. A flag or kind that is new to the CLI also changes the oracle-equality
-   tests `tests/test_cli_args_parity.py` and `tests/test_core_selection.py`; see AGENTS.md.
+   to the factory. The production Jenkins commands are in `tests/fixtures/jenkins_commands.txt`,
+   checked by `tests/test_jenkins_contract.py`; keep it green unchanged.
 8. Update the package README and, for destructive behaviour, `CLEANUP_SAFETY.md`; then
-   `make check` and `make raise-test-floor`.
+   `pip install -r requirements.txt -r requirements-dev.txt -c constraints.txt` (once),
+   `make check`, `make smoke-offline` (a dry run per Jenkins `(cloud, kind)` pair, SDKs faked, network denied) and
+   `make raise-test-floor`.

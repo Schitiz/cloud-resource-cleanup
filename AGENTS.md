@@ -14,18 +14,19 @@ variable and JSON-style value (`--age '{"days": 1}'`) must keep working.
 ## Commands
 
 ```
-pip install -r requirements.txt -r requirements-dev.txt   # once; Python 3.11 (CI) or newer
+pip install -r requirements.txt -r requirements-dev.txt -c constraints.txt   # once; Python 3.11 or newer
 make check-fast            # lint + tests minus the three slow CLI parity files, about 25 s
 make check                 # everything CI runs, about 60 s; green before every commit
 make lint                  # ruff check, ruff format --check, mypy, lint-imports only
+make smoke-offline         # dry run per Jenkins (cloud, kind) pair, SDKs faked, network denied
 make test-file F=tests/test_x.py     # one file while iterating
 make raise-test-floor      # after adding tests, raises the floor (never lowers it); never edit the file by hand
 ```
 
 Ruff rule set (`pyproject.toml`): E F W I B UP FURB SIM PERF C901 PLR RUF DTZ BLE G LOG C4 RET N, plus `ruff format`; a broad `except Exception` needs `# noqa: BLE001 - <reason>`.
 
-Timings measured on a 4-core VM with warm caches: `make check-fast` 24 s (about 14,060 tests),
-`make check` 61 s (44,421 tests; the three slow parity files hold about 30,000 of them).
+Timings measured on a 4-core VM with warm caches: `make check-fast` 26 s (14,233 tests),
+`make check` 58 s (44,603 tests; the three slow parity files hold about 30,370 of them).
 
 Edit, `make test-file`, `make check-fast`, then `make check` once before you commit. A failing
 archtest check (ARCH-001..012, SAF-LOCK, the test-count floor) prints its rule ID, `file:line`
@@ -39,7 +40,7 @@ tests print no `REMEDIATION:`; read the tool's own message. Rule IDs are listed 
 | Path | What is there |
 |------|---------------|
 | `crc.py` | Thin entry point; re-exports `crc/cli` so `python crc.py` works |
-| `crc/cli/` | Flags (`args*.py`), validation, `main()`, dispatch, engine bridge (`bridge.py`), route tables (`routes/<cloud>.py`) |
+| `crc/cli/` | Flags (`args*.py`), validation, `main()`, dispatch, engine bridge (`crc/cli/bridge.py`), route tables (`routes/<cloud>.py`) |
 | `crc/core/` | Engine, registry, `Cleaner` protocol, report, pure policy and age code, run log |
 | `crc/<cloud>/<kind>/` | Cleaners per cloud (`aws`, `azu`, `gcp`, `oci`), one package per resource kind |
 | `crc/notify/` | Slack and InfluxDB sinks that consume the report |
@@ -53,6 +54,8 @@ tests print no `REMEDIATION:`; read the tool's own message. Rule IDs are listed 
 
 Skills (task playbooks): [implement](.cursor/skills/crc-maintain/SKILL.md) for any change,
 [review](.cursor/skills/crc-maintain/review.md) for a PR, [fix a bug](.cursor/skills/crc-maintain/fix-bug.md).
+The playbooks live in `.cursor/skills/`; `.claude/skills` and `.agents/skills` link to them, so Claude
+Code, Codex and Cursor find the same files.
 
 ## Rules no check enforces
 
@@ -79,9 +82,9 @@ Skills (task playbooks): [implement](.cursor/skills/crc-maintain/SKILL.md) for a
 
 ## Workflow: fix a bug
 
-1. Find the row in `docs/refactor/BUGS.md` (or add it). An old row's location column cites
-   `main` lines that have moved or are gone; grep the ID, which also appears in package READMEs
-   and tests.
+1. Find the row in `docs/refactor/BUGS.md` (or add it): search it by ID or resource with `rg`,
+   do not read it whole. An old row's location column cites `main` lines that have moved or are
+   gone; the ID also appears in package READMEs, tests and `TODO(BUG-NNN)` comments.
 2. Write a failing offline test for the bug first, in the cleaner's test file.
 3. Fix it toward `CLEANUP_SAFETY.md` (fail closed). Remove its `TODO(BUG-NNN)` comment in `crc/` and mark
    the row `fixed in <PR or commit>`; keep the row. The `todo-to-issue` workflow then closes the issue.
@@ -100,13 +103,13 @@ destructive change, `CLEANUP_SAFETY.md`.
 
 Flags are an external contract. Never rename, remove, re-type or change the default or meaning of
 an existing flag, choice or value form. A new flag must be optional with a default that keeps
-today's behaviour. Before any change, search the `cloud-resource-cleanup-triggers` repo
-(`Jenkinsfile` and job definitions) for the flag with `gh search code` or a clone; if you cannot
-see that repo, treat every flag as in use. Edit the matching `_add_*_args` group in
-`crc/cli/args.py` or `args_run.py`. `tests/test_cli_args_parity.py` asserts the parser equals the
-frozen oracle `tests/legacy/crc_main.txt` flag for flag, so a new flag fails it until that test
-gains an allowance for additions that still compares every existing flag; never touch the oracle.
-State in the PR which trigger jobs are affected (or "none, additive").
+today's behaviour. New flags and kinds are not blocked: edit the matching `_add_*_args` group in
+`crc/cli/args.py` or `crc/cli/args_run.py`, then add one entry to the ADDED tables of
+`tests/helpers_ag_cli_added.py` (the parity tests still compare every existing flag with the
+frozen oracle `tests/legacy/crc_main.txt`; never touch the oracle). The 47 production Jenkins
+commands are in `tests/fixtures/jenkins_commands.txt`, checked by `tests/test_jenkins_contract.py`:
+no need to see the `cloud-resource-cleanup-triggers` repo, and that test stays green unchanged.
+Run `make smoke-offline`. State in the PR which trigger jobs are affected (or "none, additive").
 
 ## How to review a PR
 

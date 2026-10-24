@@ -7,7 +7,8 @@ alwaysApply: false
 # Core, notifiers and CLI
 
 - `crc/core` policy and age code is pure: plain data in, decision out, no I/O, and time only
-  through the injected `now` (existing exception: `is_old` reads `MAX_AGE`; add no new env read).
+  through the injected `now`; `crc/core` reads no environment (`MAX_AGE` is injected by
+  `crc/cli/context.py`, `install_max_age_source`, through `age.set_max_age_source`).
   Fail closed on unparseable input.
 - Notifiers consume the `Report` only and hold no cloud logic.
 - New env reads, prints and exits go in `crc/cli` (other layers: ARCH-003); it parses and

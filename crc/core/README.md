@@ -13,8 +13,8 @@ The contracts cleaners plug into live here too: `crc.core.cleaner` (the `Cleaner
 and its frozen DTOs), `crc.core.registry` (decorator registration by cloud and kind) and
 `crc.core.report` (the report model of the Slack messages and InfluxDB points).
 `crc.core.engine` runs the registered cleaners of a selection and `crc.core.selection`
-holds the `Selection` the engine runs and the `--cloud` / `--resource` expansion and opt-in
-gates of the CLI. Every cleaner of the four cloud packages is registered (AWS: disk, ip, keypair, kms, snapshot, spot_instance_requests, vm, vpc; Azure: disk, ip, nic, spot_instances, vm; GCP: disk, ip, spot_instances, vm; OCI: disk, spot_instances, vm). The CLI runs them through the engine: CLI -> `crc/cli/bridge.py` -> route tables -> `engine.run` ->
+holds only the `Selection` the engine runs and the cloud and resource order constants; the CLI
+does the `--cloud` / `--resource` expansion (`resolve_targets` in `crc/cli/inputs.py`) and the AWS disk opt-in gate (`Route.precheck`). Every cleaner of the four cloud packages is registered (AWS: disk, ip, keypair, kms, snapshot, spot_instance_requests, vm, vpc; Azure: disk, ip, nic, spot_instances, vm; GCP: disk, ip, spot_instances, vm; OCI: disk, spot_instances, vm). The CLI runs them through the engine: CLI -> `crc/cli/bridge.py` -> route tables -> `engine.run` ->
 registered cleaners -> notifiers. The Slack and Influx notifiers that implement the engine's
 `Notifier` protocol live in `crc.notify`.
 
@@ -120,7 +120,7 @@ Report (module report.py). Pure model and text builders; sending stays in the no
 - `SNAPSHOT`: label of snapshots.
 - `SPOT_INSTANCE_REQUEST`: label of AWS spot requests and their instances.
 
-Selection (module selection.py). The selection model of the engine and the cloud and resource order constants of the CLI.
+Selection (module selection.py). Only constants and the `Selection` dataclass: no expansion or gate logic.
 
 - `Selection`: the ordered pairs (items) and the warning texts of skipped pairs (warnings).
 - `CLOUDS`: the --cloud all order.

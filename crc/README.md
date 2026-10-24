@@ -12,7 +12,7 @@ Top-level package of the cleanup tool. The CLI entry point is `crc.py` in the re
 - `cli/` (see `crc/cli/README.md`): `main()` (inputs, clients, scan and dispatch), the argparse definition (`get_argparser`), the input validators, the `CRC` run context and the bridge that runs each (cloud, kind) pair through `crc.core.engine`.
 - `core/` (see `crc/core/README.md`), `notify/` (see `crc/notify/README.md`), `aws/`, `azu/`, `gcp/`, `oci/` (cleaners registered with `crc.core.registry`, one README each). The run path is CLI -> bridge -> routes -> engine -> registered cleaners -> notify.
 
-`crc/__init__.py` holds only a copyright comment. Every module under `crc/` is strict-checked; none is in the legacy ratchet (`pyproject.toml` lists only five hash-locked safety test files). Any change must follow `ARCHITECTURE.md`.
+`crc/__init__.py` holds only a copyright comment. Every module under `crc/` is strict-checked; the legacy ratchet in `pyproject.toml` is empty. Any change must follow `ARCHITECTURE.md`.
 
 ## Public API
 
@@ -40,6 +40,6 @@ Not synced with ARCH-002: the check skips the modules directly in `crc/` (`packa
 
 1. New code for cloud resources goes in `crc/<cloud>/` following `ARCHITECTURE.md`; shared pure
    logic goes in `crc/core/`.
-2. Do not add modules to the legacy lists in `pyproject.toml`; they may only shrink.
+2. Never add a module to the legacy ratchet in `pyproject.toml`; it is empty.
 3. A new sub-directory needs a `README.md` with the four sections (ARCH-002).
 4. Record every new bug or quirk in `docs/refactor/BUGS.md` (a new row cites the current `file:line` in `crc/`).

@@ -440,7 +440,7 @@ items), [STATUS.md](../archive/STATUS.md) (rung log), [PLAN.md](../archive/PLAN.
 
 ## Counts
 
-403 rows: critical 5, high 27, medium 65, low 306. 63 fixed and 5 partly fixed (the LOG rungs, wave FIX-1, ENG-0, ENG-1, ENG-AZU, ENG-GCP, ENG-OCI and ENG-CLEAN); the others are open. BUG-366 to BUG-379 were found by the FIX-1 reviews, BUG-380 to BUG-387 by the W2 reviews, BUG-388 to BUG-390 by ENG-0, BUG-391 to BUG-409 by the ENG lanes (IDs 398, 399 and 404 to 407 unused).
+403 rows: critical 5, high 27, medium 65, low 306. 64 fixed and 5 partly fixed (the LOG rungs, wave FIX-1, ENG-0, ENG-1, ENG-AZU, ENG-GCP, ENG-OCI and ENG-CLEAN); the others are open. BUG-366 to BUG-379 were found by the FIX-1 reviews, BUG-380 to BUG-387 by the W2 reviews, BUG-388 to BUG-390 by ENG-0, BUG-391 to BUG-409 by the ENG lanes (IDs 398, 399 and 404 to 407 unused).
 
 ## Notes
 
@@ -448,8 +448,8 @@ items), [STATUS.md](../archive/STATUS.md) (rung log), [PLAN.md](../archive/PLAN.
   without deallocate, unchecked `statuses[1]`) were known before R2c and are scheduled as
   behaviour fixes in [PLAN.md](../archive/PLAN.md).
 - R2c found one correction to earlier documentation: AWS Elastic IP `notags` does not
-  "never skip" as `FILTER_VARIANTS.md` section 2 and `crc.core.policy.aws_eip_should_skip`
+  "never skip" as `docs/archive/FILTER_VARIANTS.md` section 2 and `crc.core.policy.aws_eip_should_skip`
   describe; the call `all(<bool>,)` raises `TypeError` (BUG-011). Policy keeps the
   documented reading until a behaviour-fix rung decides.
 - The fail-open custom age tag is listed with the 9 call sites found by `git grep` on `main`;
-  `FILTER_VARIANTS.md` section 7 counts 11 modules.
+  `docs/archive/FILTER_VARIANTS.md` section 7 counts 11 modules.
