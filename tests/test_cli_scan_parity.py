@@ -17,6 +17,7 @@ import pytest
 
 import crc.cli.scan as scan_module
 from crc.aws.vm import scan as aws_scan
+from crc.aws.vm.settings import all_regions
 from crc.cli.runner import CRC as NewCRC
 from crc.cli.scan import scan_instances_with_tag
 from tests.helpers_cl2_crc import MIN_SEEN, Case, execute
@@ -84,7 +85,8 @@ def compare_scan(oracle_module: ModuleType, case: Case) -> None:
     old = execute(oracle_module.CRC, [oracle_module], case)
     new = execute_scan(NewCRC, routed_case(case))
     builds = [call for call in new["adapters"] if call[:1] == ("new",)]
-    assert len(builds) == (0 if case.cloud == "other" else 1), f"{case.name}: set-up calls"
+    expected_builds = [call[:2] for call in old["adapters"] if call[:1] == ("new",)]
+    assert [call[:2] for call in builds] == expected_builds, f"{case.name}: set-up calls"
     new["adapters"] = drop_new(new["adapters"])
     for key in old:
         assert new[key] == production_view(old[key]), f"{case.name}: {key} differs"
@@ -178,3 +180,27 @@ def test_prepare_scan_reports_missing_credentials(
     monkeypatch.setattr(scan_module, "Service", lambda: None)
     with pytest.raises(KeyError):
         scan_module._prepare_scan(FakeCrc(cloud))
+
+
+def test_aws_scan_tag_delegates_to_find_instances_with_tag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list[tuple[str, str, Any, Any, Any]] = []
+
+    def fake_find(
+        key: str, value: str, session_f: Any, client_f: Any, regions_f: Any
+    ) -> list[dict[str, str]]:
+        captured.append((key, value, session_f, client_f, regions_f))
+        return [{"id": "i-42"}]
+
+    monkeypatch.setattr(aws_scan, "find_instances_with_tag", fake_find)
+    assert aws_scan.scan_tag("auto_clean", "false") == [{"id": "i-42"}]
+    assert captured == [
+        (
+            "auto_clean",
+            "false",
+            aws_scan._boto3_session,
+            aws_scan._boto3_scan_client,
+            all_regions,
+        )
+    ]
