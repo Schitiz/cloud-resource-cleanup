@@ -31,7 +31,7 @@ with `file:line`; then the verdict.
 
 - [ ] `plan()` makes no mutating call; every mutation is in `apply()`.
 - [ ] New behaviour is on the engine path (`crc/cli/routes/<cloud>.py` plus a registered
-      cleaner), not a new legacy handler.
+      cleaner); `crc/cli` gains no per-kind code.
 - [ ] Policy and age decisions use `crc/core`; no SDK object or raw response dict crosses the
       cleaner boundary; SDK clients are injected.
 - [ ] Errors are specific, carry the resource id, chain with `from e`; no silent broad catch; no

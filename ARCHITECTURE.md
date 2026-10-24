@@ -10,9 +10,9 @@ How CRC is built today. Safety rules for destructive behaviour are in
 python crc.py <flags>
   crc/cli/args*.py        parse flags (get_argparser), JSON-style values via ast.literal_eval
   crc/cli/main.py         read tokens, validate flags and targets, set MAX_AGE, build clients
-  crc/cli/dispatch.py     loop over (cloud, resource); begin/finish the run log per pair
-    crc/cli/bridge.py     route_for(cloud, kind) -> Route?  yes: run_routed (engine path)
-    HANDLERS[kind]        no: legacy CRC method and adapter class (being retired)
+  crc/cli/dispatch.py     validate every pair, then loop over (cloud, resource); begin/finish
+                          the run log per pair
+    crc/cli/bridge.py     route_for(cloud, kind) -> Route; run_routed runs the pair
   crc/core/engine.py      registry.get(cloud, kind)(context) -> plan() -> apply() -> Report
   crc/notify/*            Slack then Influx send the Report
 ```
@@ -41,9 +41,9 @@ notifiers from `build_notifiers` (Slack when a client is set, then Influx when o
 `Route(options, notify, precheck)`. The `options` builder turns parsed flags into the
 `context.options` keys that the cleaner factory reads; values stay raw (`None` stays `None`).
 `bridge.build_registry` and `build_notifiers` are looked up at call time so tests can patch them
-(`tests/helpers_cli_routes.py`). A kind in no route table still runs through the legacy
-adapter path (`dispatch.HANDLERS`, `crc/cli/vm_ops.py`, `crc/cli/resource_ops.py`); those kinds are
-moving to routes and no new legacy handler is added.
+(`tests/helpers_cli_routes.py`). Every supported pair has a route, so every pair runs through the
+engine; the two warn-only pairs (`spot_instances` on AWS, `spot_instance_requests` off AWS) have
+skip-only routes (`crc/cli/routes/skips.py`) and register no cleaner.
 
 ## Engine and registry
 
@@ -112,15 +112,18 @@ Use `crc/aws/keypairs/` (cleaner) and `crc/cli/routes/aws.py` (route) as the mod
 5. Route it: in `crc/cli/routes/<cloud>.py` import the package (`# noqa: F401`), add an options
    builder from `Options` to the keys the factory reads, and `"<kind>": Route(builder)`. Put gates
    the CLI must still raise (for example the AWS disk opt-in) in `Route.precheck`.
-6. A kind that is new to the CLI also needs: the value in `RESOURCES` (`crc/cli/constants.py`) and
-   `--resource` choices (`crc/cli/args.py`), its pair rule in `crc/cli/pairs.py`, and a label in
-   `KIND_LABELS` (`crc/core/engine.py`) and `crc/core/report.py`. This changes the CLI contract:
-   follow the flag workflow in [AGENTS.md](AGENTS.md).
-7. Moving a legacy kind to the engine: delete its adapter, its `CRC` method and its
-   `dispatch.HANDLERS` entry (keep the entry while another supported cloud still runs the kind
-   on the legacy path), and retarget the tests below.
-8. Tests, all offline: the cleaner (happy path, fail-closed path, dry run makes no mutating call,
-   call order of destructive steps) and the routed CLI path (`tests/test_cli_bridge_parity.py`,
-   `FakeCleaners` in `tests/helpers_cli_routes.py`).
-9. Update the package README and, for destructive behaviour, `CLEANUP_SAFETY.md`; then
+6. A kind that is new to the CLI also needs, in this order: the value in `RESOURCES`
+   (`crc/cli/constants.py`) and the `--resource` choices (`crc/cli/args.py`); its pair rule in
+   `crc/cli/pairs.py` (`SUPPORTED_CLOUDS`) when some clouds lack it; a label constant in
+   `crc/core/report.py` and its entry in `KIND_LABELS` (`crc/core/engine.py`). This changes the
+   CLI contract: follow the flag workflow in [AGENTS.md](AGENTS.md).
+7. Tests, all offline: the cleaner (happy path, fail-closed path, dry run makes no mutating call,
+   call order of destructive steps) and the routed CLI path. Extend the CLI parity tests that
+   reach the cleaner through the route: `tests/test_cli_main_parity.py` `ROUTED_CALLS` (AWS kinds;
+   the other clouds are in `tests/helpers_routed_<cloud>.py`) and the per-cloud
+   `tests/test_cli_bridge_<cloud>.py` (`test_cli_bridge_parity.py` covers `keypair`). They use
+   `FakeCleaners` from `tests/helpers_cli_routes.py`, which records the options the route passed
+   to the factory. A flag or kind that is new to the CLI also changes the oracle-equality
+   tests `tests/test_cli_args_parity.py` and `tests/test_core_selection.py`; see AGENTS.md.
+8. Update the package README and, for destructive behaviour, `CLEANUP_SAFETY.md`; then
    `make check` and `make raise-test-floor`.

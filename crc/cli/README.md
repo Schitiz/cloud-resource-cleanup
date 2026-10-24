@@ -73,14 +73,16 @@ plain `dict`, as on `main`.
 - `main()` keeps the order of `main` on the main branch: parse flags, read the two tokens, `SLACK_BOT_TOKEN` then `INFLUXDB_TOKEN` errors, stop-only-for-vm, all-needs-all, slack user label, KMS description and user, the list and dict type checks, the Slack client, the InfluxDB field check and client, `MAX_AGE` set, then the scan path (exit) or the loops, then `MAX_AGE` reset. Errors keep their type (`OSError`, which `EnvironmentError` is an alias of) and message.
 - `scan.py` never deletes: it forces `dry_run`, builds `CRC` per cloud and only calls `scan_instances_with_tag` (looked up in `scan` at call time); it always ends in `sys.exit(0)`.
 - The AWS EBS breaker lives in `Route.precheck` of the AWS disk route (`routes/aws.py`) and, since FIX-CLI-ALL (BUG-018), also in `dispatch.validate_targets`: any `aws` + `disk` pair that is not `--cloud aws --resource disk` (so `--cloud all --resource disk|all`) raises `ValueError` before any cleaner of any cloud runs; it does not run.
-- One pair rule (FIX-CLI-ALL BUG-017 merged with FIX-CLI-ROUTE BUG-009/BUG-084, as FIX-CLI-MERGE): `dispatch.SUPPORTED_CLOUDS` lists the clouds each resource runs on, and `dispatch.validate_targets` checks every (cloud, resource) pair before the first cleaner. `main()` calls it before `MAX_AGE` is set (not on the read-only `--scan_tag` path) and `run_dispatch` calls it again. The pairs are `keypair` and `kms` (AWS), `nic` (Azure), `ip` (not OCI) and `snapshot` and `vpc` (AWS only). An unsupported pair of an explicit cloud raises `ValueError` up front (the unsupported-pair message; `--resource <r> is AWS-only; use --cloud aws (got --cloud <c>)` for `snapshot` and `vpc`), so nothing runs and `MAX_AGE` is untouched. Under `--cloud all` it also raises up front when a supported pair would run after it (`--cloud all --resource nic`: `main` stopped on aws, so Azure NICs are never deleted); otherwise it is skipped with a WARNING (`<r> is not supported on <cloud>; skipped under --cloud all`) plus a `RUN START` / `SKIPPED reason=unsupported_cloud_resource` / `RESULT` log triple. So `--cloud all --resource snapshot|vpc` runs once, for AWS. `CRC`, `WebClient`, `InfluxDBClient`, `notify_cleanup` and `scan_instances_with_tag` are looked up in `context`, `clients` and `scan` at call time; `tests/test_cli_main_parity.py` runs the oracle `main()` and this one on recording fakes.
+- One pair rule (FIX-CLI-ALL BUG-017 merged with FIX-CLI-ROUTE BUG-009/BUG-084, as FIX-CLI-MERGE): `pairs.SUPPORTED_CLOUDS` (re-exported by `dispatch`) lists the clouds each resource runs on, and `dispatch.validate_targets` checks every (cloud, resource) pair before the first cleaner. `main()` calls it before `MAX_AGE` is set (not on the read-only `--scan_tag` path) and `run_dispatch` calls it again. The pairs are `keypair` and `kms` (AWS), `nic` (Azure), `ip` (not OCI) and `snapshot` and `vpc` (AWS only). An unsupported pair of an explicit cloud raises `ValueError` up front (the unsupported-pair message; `--resource <r> is AWS-only; use --cloud aws (got --cloud <c>)` for `snapshot` and `vpc`), so nothing runs and `MAX_AGE` is untouched. Under `--cloud all` it also raises up front when a supported pair would run after it (`--cloud all --resource nic`: `main` stopped on aws, so Azure NICs are never deleted); otherwise it is skipped with a WARNING (`<r> is not supported on <cloud>; skipped under --cloud all`) plus a `RUN START` / `SKIPPED reason=unsupported_cloud_resource` / `RESULT` log triple. So `--cloud all --resource snapshot|vpc` runs once, for AWS. `CRC`, `WebClient`, `InfluxDBClient` and `scan_instances_with_tag` are looked up in `context`, `clients` and `scan` at call time; `tests/test_cli_main_parity.py` runs the oracle `main()` and this one on recording fakes.
 - An empty or blank `--scan_tag` raises `ValueError` from `inputs.check_scan_tag` before `MAX_AGE` is set and before any cleaner runs (BUG-344, fixed in FIX-CLI-ROUTE); it used to be falsy, skip the read-only scan and run the destructive cleanup.
 - Known quirks (kept): `docs/refactor/BUGS.md` rows `BUG-028` to `BUG-044`, `BUG-333` to `BUG-350` except `BUG-344`. `BUG-009` and `BUG-084` keep only the hard-coded `age_days=90` and the missing Slack and Influx notification of `snapshot`.
 
 ## Extension Rules
 
-1. A new flag is added to the matching `_add_*_args` group in `args.py`, with a row in the parity
-   table of `tests/test_cli_args_parity.py`.
+1. A new flag is added to the matching `_add_*_args` group in `args.py` or `args_run.py`.
+   `tests/test_cli_args_parity.py` asserts the parser equals the frozen oracle flag for flag, so
+   it fails for an added flag until it gains an allowance for additions that still compares
+   every existing flag (see the flag workflow in `AGENTS.md`).
 2. Keep each file at 250 lines or fewer and each function within the ruff limits; split by group of
    flags or by responsibility, not by line count.
 3. Route a kind through the engine (pattern: AWS `keypair`, `routes/aws.py`). In the cloud's route file
@@ -90,8 +92,8 @@ plain `dict`, as on `main`.
    pair needs one. Gates (the AWS disk opt-in) go in `Route.precheck`. Test it with the CLI parity
    tests (`test_cli_main_parity.py` `ROUTED_CALLS` (AWS; every other cloud has its own
    `tests/helpers_routed_<cloud>.py` with a `ROUTED_CALLS` table), `test_cli_logger.py`), which use
-   `tests/helpers_cli_routes.FakeCleaners`: it patches `bridge.build_registry` and
+   `FakeCleaners` of `tests/helpers_cli_routes.py`: it patches `bridge.build_registry` and
    `bridge.build_notifiers` so the fake cleaner records the flags it received; add the kind to
-   `tests/test_cli_bridge_parity.py` to compare Slack, Influx, output and errors with the oracle.
+   the per-cloud `tests/test_cli_bridge_<cloud>.py` (`test_cli_bridge_parity.py` for `keypair`) to compare Slack, Influx, output and errors with the oracle.
 4. `args.py`, `validate.py`, `constants.py` and `inputs.py` import no cloud package, no `crc.notify`, no SDK; the SDK client, adapter and
    notifier imports live in `clients.py`, `bridge.py`, `scan.py` and `dispatch.py` only.

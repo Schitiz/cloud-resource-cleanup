@@ -3,10 +3,12 @@
 Companion of [SKILL.md](SKILL.md). One bug, one PR, named by its ID.
 
 1. Record it. Find the row in `docs/refactor/BUGS.md` or add one with the next free `BUG-NNN`
-   (ARCH-009 rejects an ID in code or tests that has no row). Give the current `file:line` and the
-   risk; never reuse or delete an ID. Pending rows from other agents live in
+   (ARCH-009 rejects an ID in code or tests that has no row). Give the risk; never reuse or delete
+   an ID. Location rule: a new row cites the current `file:line` in
+   `crc/`; an old row keeps its main location. Pending rows from other agents live in
    `docs/refactor/bugs/pending/`.
-2. Locate the code. The location column may cite older `main` lines. Grep the ID
+2. Locate the code. An old row's location column cites `main` lines that have moved or are gone.
+   Grep the ID
    (`rg "BUG-NNN"`): it appears in package READMEs, tests and the register. Read the owning
    package `README.md`. Old investigation notes, if the row points to one, are in
    `docs/archive/reviews/`.

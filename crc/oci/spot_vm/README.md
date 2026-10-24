@@ -71,4 +71,4 @@ Modules, split by responsibility:
 2. Tag, age and OKE decisions stay in `decide.py` and call `crc.core.policy` / `crc.core.age`; no `re`, no wall-clock read, no `os.environ`, no `print` (ARCH-003). The clock is injected; only `time.monotonic` and `time.sleep` are used for the wait.
 3. Every SDK call goes through `ComputeClient` or `BlockClient`; add a method to the Protocol only for a call the cleaner really makes.
 4. `plan()` stays read-only: every mutating call belongs in `apply()` (`terminate()`, `delete_leftover()`).
-5. Record every new bug or quirk in `docs/refactor/BUGS.md` with its `main` file:line.
+5. Record every new bug or quirk in `docs/refactor/BUGS.md` (a new row cites the current `file:line` in `crc/`).

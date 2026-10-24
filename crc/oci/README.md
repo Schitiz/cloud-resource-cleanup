@@ -47,4 +47,4 @@ The names below are synced with this README by ARCH-002. The disk, vm and spot_v
    constructor.
 3. `plan()` of `DiskCleaner` (`disk/`) and `VmCleaner` (`vm/`) stays read-only: every mutating call belongs in `apply()` / `remove()`.
 4. Update this README and its symbol list with any public change.
-5. Record every new bug or quirk in `docs/refactor/BUGS.md` with its `main` file:line.
+5. Record every new bug or quirk in `docs/refactor/BUGS.md` (a new row cites the current `file:line` in `crc/`).

@@ -10,7 +10,7 @@ Bug and quirk rows not yet merged into `docs/refactor/BUGS.md` (see `docs/refact
 
 ## Safety Invariants
 
-- Rows use the `BUGS.md` columns with ID `NEW`, and cite the `main` file:line.
+- Rows use the `BUGS.md` columns with ID `NEW`, and cite the current `file:line` in `crc/`.
 - No row is a fix; behaviour stays as it is until a fix with its own test and `BUGS.md` status.
 
 ## Extension Rules
