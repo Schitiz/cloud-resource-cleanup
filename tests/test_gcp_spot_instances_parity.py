@@ -1059,6 +1059,7 @@ QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
 ]
 
 
+# BUG-409: plan() lists every zone before apply(), so the later-zone KeyError deletes nothing.
 ENGINE_QUIRKS: Mapping[str, Callable[[Outcome], bool]] = {
     "zone-without-name-after-first-zone": (
         lambda o: o.error is not None and o.error[0] == "KeyError" and o.deleted == []

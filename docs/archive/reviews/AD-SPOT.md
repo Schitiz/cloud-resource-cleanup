@@ -98,3 +98,67 @@ The initial commit (`2ef9b22`) retargeted only `tests/test_oci_spot_instances_pa
      - `python3 -m tests.archtest.test_count check`: `ARCH-008: 44417 tests, floor 44417`
 
 VERDICT: APPROVE
+
+
+## Round 2 (Opus)
+
+Scope: `git diff 7a8c936..HEAD` on `ad/spot` (commits `2ef9b22`, `71f5741`). Round 1's claims
+were re-checked independently; they hold.
+
+### Findings
+
+1. Nothing production uses was deleted: the diff touches no file in `crc/cli/**`, `crc.py` or
+   `crc/core/**`; the five `@register` factories (`aws/disk`, `aws/spot_instance_requests`,
+   `azure|gcp|oci/spot_instances`) are in place. `crc/aws/spot_instance_requests/runtime.py`
+   (`SpotRuntime`, `Clock`) and `crc/gcp/spot_vm/settings.py` stay: the cleaners and
+   `crc/gcp/disk_*` import them. `git grep` finds no import or call of `crc.aws.disk.Disk`,
+   `crc.aws.spot_instance_requests.SpotInstanceRequests`, `crc.azu|gcp|oci.spot_vm.SpotVM` or
+   `SpotVmRuntime` in `crc/`, `crc.py` or `tests/`; the remaining hits are the frozen oracles'
+   own classes (`_load_oracle().SpotVM`, `.Disk`, `.SpotInstanceRequests`) and the
+   `tests/helpers_cl2_crc.py` fake names. The `from crc.aws.spot_instance_requests import
+   SpotInstanceRequests` line in `tests/legacy/crc_main.txt` is rebound to the module oracle by
+   `tests/helpers_oracle.load_legacy_crc`, so it does not need the deleted class.
+2. Retargeted tests: per-file collected test counts over the 13 touched test files are
+   1057 at `7a8c936` and 1057 at HEAD; every adapter test was renamed one to one with the same
+   parametrisation (for example `test_matches_main` 149 → `test_engine_matches_main` 149 in the
+   AWS disk parity test). The engine tests reuse the existing cleaner-protocol comparison (same
+   oracle cases; calls per region in order, results, stdout and errors exact, logs as a
+   multiset and exact for single-region cases). That is the plan-before-apply difference the
+   contract allows. The repeated-delete tests compare the list lines by count only, because the
+   engine does not accumulate `get_deleted` across runs; everything else is still compared.
+   Sabotage (local, reverted, not committed): skipping `terminate_instances` in
+   `crc/aws/spot_instance_requests/cleanup.py` (38 of 112 engine parity cases fail), skipping
+   the NIC delete in `crc/azu/spot_vm/removal.py` (55 of 83 fail) and renaming the deleted
+   instance in `crc/gcp/spot_vm/client.py` (83 of 144 fail). Round 1 covered OCI and AWS disk.
+3. Fixed in this round: `ENGINE_QUIRKS` in `tests/test_gcp_spot_instances_parity.py` asserts the
+   engine-only outcome of `zone-without-name-after-first-zone` (KeyError, nothing deleted, where
+   main deleted `a1`, `a2`) without naming its bug. Marked it `BUG-409` (the `docs/refactor/BUGS.md`
+   row for GCP/OCI `spot_instances` listing before acting). The assertion is unchanged.
+4. READMEs of the five packages and `crc/{aws,azu,oci}/README.md` describe only the cleaners;
+   no rung, refactor, hash-lock or deleted-adapter wording, and every linked doc exists. Out of
+   lane, not changed: `crc/aws/README.md:7` and the `crc/azu/README.md` engine-path line still say
+   the `VM` adapter class "stays for its tests" (the VM lane owns those lines).
+5. No file in `tests/legacy/**`, `tests/archtest/**`, `docs/refactor/BUGS.md`,
+   `CLEANUP_SAFETY.md`, `AGENTS.md`, `ARCHITECTURE.md`, `pyproject.toml`, `Makefile` or
+   `requirements*.txt` changed. Locked functions in touched files
+   (`test_aws_disk_cleaner.py::test_connectivity_error_skips_the_region`,
+   `test_aws_spot_instance_requests_cleaner.py::test_apply_runs_in_safety_order` and
+   `::test_dry_run_plan_reports_and_apply_does_nothing`) are not in the diff; SAF-LOCK green.
+6. Size: touched `crc/` files are at most 248 lines; ARCH-004 and ARCH-002 green.
+
+### Owner action
+
+None.
+
+### New bugs
+
+None found.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt`, then `make check`: ruff passed, mypy
+`Success: no issues found in 367 source files`, lint-imports `5 kept, 0 broken`, pytest
+`44417 passed in 52.29s`, `ARCH-008: 44417 tests, floor 44417`; wall time 1m11.7s. Re-run after
+the fix: all gates green, `44417 passed in 52.48s`, wall time 59.4s.
+
+ROUND 2 VERDICT: APPROVE
