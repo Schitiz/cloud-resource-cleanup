@@ -169,9 +169,7 @@ def test_arch003_selftest_cli_may_call_an_imported_clock_name(tmp_path: Path) ->
 
 @pytest.mark.parametrize("package", ["crc/core", "crc/cli"])
 @pytest.mark.parametrize("snippet", list(CLOCK_REF_BAD.values()), ids=list(CLOCK_REF_BAD))
-def test_arch003_selftest_clock_passed_as_value(
-    tmp_path: Path, package: str, snippet: str
-) -> None:
+def test_arch003_selftest_clock_passed_as_value(tmp_path: Path, package: str, snippet: str) -> None:
     _write(tmp_path, snippet, f"{package}/new_mod.py")
     messages = check_bans(tmp_path, frozenset())
     assert len(messages) == 1

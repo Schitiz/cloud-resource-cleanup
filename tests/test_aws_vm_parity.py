@@ -911,8 +911,8 @@ def test_find_instances_with_tag_matches_main(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     legacy = _scan_run(
-        lambda: _load_oracle().VM(*([False, {}, {}, {}, None, {}])).find_instances_with_tag(
-            "k", "v"
+        lambda: (
+            _load_oracle().VM(*([False, {}, {}, {}, None, {}])).find_instances_with_tag("k", "v")
         ),
         regions,
         mode,

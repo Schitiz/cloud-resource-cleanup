@@ -388,9 +388,7 @@ def test_gcp_managed_or_gke(
         ({"a": "broker"}, {}, {}, True),
     ],
 )
-def test_oci_managed_or_oke(
-    freeform: Any, defined: Any, metadata: Any, expected: bool
-) -> None:
+def test_oci_managed_or_oke(freeform: Any, defined: Any, metadata: Any, expected: bool) -> None:
     assert p.oci_is_managed_or_oke_node(freeform, defined, metadata) is expected
 
 

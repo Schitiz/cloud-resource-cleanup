@@ -116,6 +116,4 @@ def run(
     """Run every selected cleaner in order; the first exception from a cleaner ends the run."""
     for warning in selection.warnings:
         logger.warning("%s", warning)
-    return [
-        _run_one(cloud, kind, context, registry, notifiers) for cloud, kind in selection.items
-    ]
+    return [_run_one(cloud, kind, context, registry, notifiers) for cloud, kind in selection.items]
