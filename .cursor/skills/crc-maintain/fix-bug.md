@@ -27,7 +27,7 @@ Companion of [SKILL.md](SKILL.md). One bug, one PR, named by its ID.
 7. Remove the bug's `TODO(BUG-NNN)` comment in `crc/` (ARCH-012 fails if a closed row keeps one),
    then update the row: status `fixed in <PR>`; keep the row. The `todo-to-issue` workflow closes
    the issue after the merge to `main`. A new critical or high row needs its comment before the
-   check passes, two lines above the function where the behaviour lives:
+   check passes, a two-line comment directly above the function where the behaviour lives:
    `# TODO(BUG-NNN): <title under 100 chars>` and `#  labels: bug, risk-<critical|high>, crc`.
    Fix any README or doc line the bug made false.
 8. `make check`, `make raise-test-floor` when tests were added. PR title: `fix(BUG-NNN): ...`.

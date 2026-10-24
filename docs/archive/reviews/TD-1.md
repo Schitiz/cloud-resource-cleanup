@@ -116,3 +116,65 @@ Ran `pip install -r requirements.txt -r requirements-dev.txt && make check`:
 - Total `make check` runtime: **1m16.0s** wall clock
 
 VERDICT: APPROVE
+
+
+## Round 2 (Opus)
+
+Re-checked Round 1 (no findings, APPROVE), then checked `git diff c16a3ec..HEAD` independently.
+
+### Findings
+
+1. Fixed (wording): `.cursor/skills/crc-maintain/fix-bug.md` step 7 said the new comment goes
+   "two lines above the function", which reads as a two-line gap. It now says "a two-line comment
+   directly above the function". Docs only.
+2. Not blocking, for the owner: `crc/aws/disk/README.md` lines 50 and 53 call BUG-283 "fixed",
+   but the register row says "partly fixed" and the code keeps `TODO(BUG-283)`. This lane may
+   edit crc READMEs only to remove adapter wording, so the line is left as it is (the coder noted
+   it as well).
+3. Not blocking: `actions/checkout@v4` in `todo-to-issue.yml` is pinned by tag, not by SHA. That
+   matches `ci.yml`, and the task required a SHA pin only for the todo action.
+4. Confirmed correct to leave: `git grep -niw adapter crc` finds only two `_NO_SCAN_CLASSES`
+   strings in `crc/cli/scan.py` (azure and oci; Round 1 said three, which is the count for the
+   case-insensitive grep without `-w`). They are the `--scan_tag` NotImplementedError output, so
+   they are behaviour and not comment wording. No comment or README in `crc/` still mentions
+   adapter classes.
+
+### Checks
+
+1. Bugs: recomputed from the 403 rows. No critical row is open. Ten high rows are open or partly
+   fixed (BUG-062, 075, 083, 112, 124, 142, 173, 183, 213, 283), and each has exactly one
+   `# TODO(BUG-NNN): <title>` plus `#  labels: bug, risk-high, crc` directly above the function
+   that holds the behaviour. All titles are under 100 characters, and BUG-283 has a `see also`
+   line for `volumes.py` `_detach_floor`. Spot-checked that the bugs are still true: there is no
+   `require_positive_age` or age gate in the AWS VM, GCP VM, GCP disk or Azure disk paths, and no
+   age check at all in Azure NIC, Azure IP, GCP IP, AWS VPC or AWS snapshot (age only). BUG-355:
+   `tests/fixtures/jenkins_commands.txt:27` passes `--age '{"days": 1}'` for Azure
+   `spot_instances`, and `tests/test_jenkins_contract.py` passes (142). The row is marked fixed
+   in triggers #29 and has no TODO.
+2. Workflow: runs on `push` to `main` and `workflow_dispatch` only, `if:
+   github.repository == 'yugabyte/cloud-resource-cleanup'`, permissions `contents: read` and
+   `issues: write`. `gh api .../git/ref/tags/v5.1.15` resolves to
+   `37bb7b56e58569ef273b60678048030a7f0c261a`, the pinned SHA. It sets `CLOSE_ISSUES` "true",
+   `AUTO_ASSIGN` "false", `IDENTIFIERS` TODO only and the `IGNORE` list, and the header comment
+   names the admin setting and `INSERT_ISSUE_URLS` off. Outside `crc/` and the ignored paths, no
+   comment starts with TODO (the self-tests build the keyword from two pieces), so the action
+   opens only the ten intended issues.
+3. ARCH-012: the self-tests cover a missing TODO (critical and high, open and partly fixed), a
+   TODO for a fixed, not-a-bug, wontfix or unknown row, a TODO without an id, and a duplicate.
+   The check passes on the repository. Two mutations on the real repository: deleting
+   `TODO(BUG-183)` fires "has no TODO(BUG-183)", and marking BUG-062 fixed fires "is not an open
+   or partly fixed row". Both were reverted.
+4. No behaviour change: in the 16 changed `crc/**/*.py` files, the AST with docstrings blanked is
+   identical to `c16a3ec`. `tests/legacy/*.txt`, `safety_lock.json`, `frozen_inputs.json` and
+   `requirements.txt` are untouched. AGENTS.md is 116 lines (budget 120).
+5. Docs: the oracle note is in `tests/legacy/README.md` ("Retiring an oracle") and in AGENTS.md
+   rule 3. The ARCH-012 row is in `tests/archtest/README.md`, and the fix-a-bug steps in AGENTS.md
+   and `fix-bug.md` say to remove the TODO and mark the row fixed.
+
+### Gates
+
+`pip install -r requirements.txt -r requirements-dev.txt && make check`: ruff clean, 371 files
+formatted, mypy clean (370 files), import-linter 5 contracts kept, **44,596 passed, 1 skipped
+(44,597 collected) in 58.95 s** pytest, ARCH-008 floor 44,597. `make check` wall clock **1m21s**.
+
+ROUND 2 VERDICT: APPROVE
