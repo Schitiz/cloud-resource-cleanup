@@ -36,7 +36,7 @@ Modules, one per responsibility:
 - `VmScanClient`: Protocol of the EC2 client surface of the tag scan (get_paginator, exceptions).
 - `VmSession`: Protocol of the boto3 session call of the tag scan (get_available_regions).
 - `instance_name()`: value of the first Name tag of an instance, or None.
-- `scan_tag()`: (scan.py) `find_instances_with_tag` with the default boto3 session, clients and region lister; what `--scan_tag` calls for AWS.
+- `scan_tag()`: (scan.py) find_instances_with_tag with the default boto3 session, clients and region lister; what the scan_tag flag calls for AWS.
 - `find_instances_with_tag()`: read-only scan of instances carrying a tag in every region.
 - `ClientFactory`, `RegionLister`, `ScanClientFactory`, `SessionFactory`, `Filters`: type aliases of the injected factories and of the describe_instances filter list.
 - `SERVICE_NAME`, `DEFAULT_REGION`, `DEFAULT_STATE`: constants (the service ec2, the region us-west-2 of the region lookup, and the default instance state running).
