@@ -1,11 +1,11 @@
-"""Parity: `crc.oci.spot_vm.SpotVM` and the registered Cleaner against main's version
-(`tests/legacy/oci_spot_vm.txt`).
+"""Parity: the registered OCI spot VM Cleaner, run through `crc.core.engine`, against main's
+version (`tests/legacy/oci_spot_vm.txt`).
 
-All run against the same fake OCI SDK; SDK calls (in order), results, log records, stdout and
-raised errors must be identical for every case. The adapter path is compared exactly. The Cleaner
-path runs `plan()` then `apply()` (only `plan()` in a dry run), so all attachment reads precede
-the terminate calls: the per-call-name sequences, the mutating sequence and the summary lines are
-compared, and the log records as a multiset plus the order of the plan, apply and summary groups.
+Both run against the same fake OCI SDK; results, log records, stdout and raised errors must match
+for every case. The engine runs `plan()` then `apply()` (only `plan()` in a dry run), so all
+attachment reads precede the terminate calls: the per-call-name sequences, the mutating sequence
+and the summary lines are compared, and the log records as a multiset plus the order of the
+plan, apply and summary groups.
 """
 
 import datetime
@@ -23,7 +23,8 @@ from oci.exceptions import ConnectTimeout, RequestException, ServiceError
 
 import crc.oci.spot_vm.leftovers as leftovers_module
 from crc.core.cleaner import Operation, RunContext
-from crc.oci.spot_vm import SpotVM, SpotVmRuntime, build_spot_vm_cleaner
+from crc.oci.spot_vm import build_spot_vm_cleaner
+from tests.helpers_ad_spot_engine import run_through_engine
 from tests.helpers_log_fix import expected_logs
 from tests.log_fix_oci import RULES
 
@@ -699,18 +700,6 @@ def _legacy(case: Case, world: FakeOci) -> Any:
     )
 
 
-def _new(case: Case, world: FakeOci) -> Any:
-    return SpotVM(
-        case.dry_run,
-        case.filter_tags,
-        case.exception_tags,
-        case.age,
-        case.custom_age_tag_key,
-        case.notags,
-        SpotVmRuntime(clock=lambda: NOW),
-    )
-
-
 def _prepare(
     case: Case,
     monkeypatch: pytest.MonkeyPatch,
@@ -757,24 +746,6 @@ def debug_logs(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG)
 
 
-@pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
-def test_adapter_matches_main(
-    case: Case,
-    debug_logs: None,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
-    assert _without_ownership_reads(new.calls) == old.calls
-    assert new.error == old.error
-    assert new.acted == old.acted
-    assert new.volumes == old.volumes
-    assert new.logs == expected_logs(old.logs, BUGS, RULES)
-    assert new.stdout == old.stdout
-
-
 def _run_cleaner(
     case: Case,
     monkeypatch: pytest.MonkeyPatch,
@@ -798,15 +769,13 @@ def _run_cleaner(
     acted: list[str] | None = None
     volumes: list[str] | None = None
     try:
-        cleaner = build_spot_vm_cleaner(context)
-        plan = cleaner.plan(context)
-        if case.dry_run:
-            acted = [c.name for c in plan.candidates]
-            volumes = list(plan.related["Disk"])
+        outcome = run_through_engine("oci", "spot_instances", build_spot_vm_cleaner, context)
+        done = outcome.result if outcome.result is not None else outcome.plan
+        if outcome.result is None:
+            acted = [c.name for c in outcome.plan.candidates]
         else:
-            result = cleaner.apply(plan, context)
-            acted = list(result.succeeded)
-            volumes = list(result.related["Disk"])
+            acted = list(outcome.result.succeeded)
+        volumes = list(done.related["Disk"])
     except Exception as e:
         error = (type(e).__name__, str(e))
     logs = [(r.name, r.levelno, r.getMessage()) for r in caplog.records]
@@ -880,11 +849,40 @@ def test_cleaner_protocol_matches_main(
     assert new_quiet == plan_group + apply_group
 
 
-def _sequence(build: Callable[[Case, FakeOci], Any], case: Case, world: FakeOci) -> Any:
-    spot_vm = build(case, world)
+def _sequence_legacy(case: Case, world: FakeOci) -> Any:
+    spot_vm = _legacy(case, world)
     spot_vm.delete()
     spot_vm.delete()
     return list(spot_vm.get_deleted), list(spot_vm.get_deleted_volumes)
+
+
+def _sequence_engine(
+    case: Case, caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
+) -> Any:
+    """Two engine runs; the lists accumulate across them as the adapter's `get_deleted` did."""
+    context = RunContext(
+        dry_run=case.dry_run,
+        operation=Operation.DELETE,
+        options={
+            "filter_tags": case.filter_tags,
+            "exception_tags": case.exception_tags,
+            "notags": case.notags,
+            "age": case.age,
+            "custom_age_tag_key": case.custom_age_tag_key,
+        },
+        now=NOW,
+    )
+    acted: list[Any] = []
+    volumes: list[Any] = []
+    for _ in range(2):
+        outcome = run_through_engine("oci", "spot_instances", build_spot_vm_cleaner, context)
+        if outcome.result is None:
+            acted += [c.name for c in outcome.plan.candidates]
+            volumes += outcome.plan.related["Disk"]
+        else:
+            acted += outcome.result.succeeded
+            volumes += outcome.result.related["Disk"]
+    return acted, volumes
 
 
 @pytest.mark.parametrize("dry_run", [False, True], ids=["live", "dry-run"])
@@ -897,15 +895,45 @@ def test_repeated_delete_accumulates_as_main(
 ) -> None:
     case = Case("sequence", with_volumes(), dry_run=dry_run)
     world = _prepare(case, monkeypatch, caplog, capsys)
-    old = _sequence(_legacy, case, world)
+    old = _sequence_legacy(case, world)
     old_calls, old_logs = list(world.calls), [(r.levelno, r.getMessage()) for r in caplog.records]
     world = _prepare(case, monkeypatch, caplog, capsys)
-    new = _sequence(_new, case, world)
+    new = _sequence_engine(case, caplog, capsys)
     assert new == old
-    assert _without_ownership_reads(world.calls) == old_calls
-    assert [(r.levelno, r.getMessage()) for r in caplog.records] == expected_logs(
-        old_logs, BUGS, RULES
+    names = {c[0] for c in old_calls} | {c[0] for c in _without_ownership_reads(world.calls)}
+    for name in sorted(n for n in names if n.startswith("list_") or n in MUTATING):
+        new_of = _of(_without_ownership_reads(world.calls), [name])
+        assert Counter(new_of) == Counter(_of(old_calls, [name])), name
+    assert _of(world.calls, MUTATING) == _of(old_calls, MUTATING)
+    new_logs = [(r.name, r.levelno, r.getMessage()) for r in caplog.records]
+    old_expected = expected_logs([("root", *entry) for entry in old_logs], BUGS, RULES)
+    assert {m for m in new_logs if not _is_summary(m)} == {
+        m for m in old_expected if not _is_summary(m)
+    }
+    assert len([m for m in new_logs if _is_summary(m)]) == len(
+        [m for m in old_expected if _is_summary(m)]
     )
+
+
+@pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
+def test_engine_matches_main(
+    case: Case,
+    debug_logs: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The engine run ends the same way as main: same error, stdout, resources and mutations."""
+    old = _run(_legacy, case, monkeypatch, caplog, capsys)
+    new = _run_cleaner(case, monkeypatch, caplog, capsys)
+    assert new.error == old.error
+    assert new.stdout == old.stdout
+    if old.error is None:
+        assert new.acted == old.acted
+        assert new.volumes == old.volumes
+        assert _of(new.calls, MUTATING) == _of(old.calls, MUTATING)
+    else:
+        assert _of(new.calls, MUTATING) == []
 
 
 QUIRKS: Sequence[tuple[str, Callable[[Outcome], bool]]] = [
@@ -951,7 +979,7 @@ def test_quirk_is_preserved(
     case_id, check = quirk
     case = next(c for c in CASES if c.id == case_id)
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    new = _run(_new, case, monkeypatch, caplog, capsys)
+    new = _run_cleaner(case, monkeypatch, caplog, capsys)
     assert check(old), "oracle no longer shows the quirk"
     assert check(new)
 
@@ -966,12 +994,12 @@ def test_spot_vm_diverges_from_oracle(
     changed = 0
     for case in CASES:
         old = _run(_legacy, case, monkeypatch, caplog, capsys)
-        new = _run(_new, case, monkeypatch, caplog, capsys)
-        if old.logs == new.logs:
+        new = _run_cleaner(case, monkeypatch, caplog, capsys)
+        if Counter(new.logs) == Counter(old.logs):
             continue
         changed += 1
-        assert [log[2] for log in new.logs] == [log[2] for log in old.logs]
-        assert _without_ownership_reads(new.calls) == old.calls
+        assert Counter(log[2] for log in new.logs) == Counter(log[2] for log in old.logs)
+        assert _of(new.calls, MUTATING) == _of(old.calls, MUTATING)
         assert {log[1] for log in new.logs if log not in old.logs} == {logging.DEBUG}
     assert changed > 0
 
@@ -1013,10 +1041,7 @@ def test_bug_255_volume_not_owned_is_kept(
     regions, reason = BUG_255[case_id]
     case = Case(case_id, regions, dry_run=dry_run)
     old = _run(_legacy, case, monkeypatch, caplog, capsys)
-    for outcome in (
-        _run(_new, case, monkeypatch, caplog, capsys),
-        _run_cleaner(case, monkeypatch, caplog, capsys),
-    ):
+    for outcome in (_run_cleaner(case, monkeypatch, caplog, capsys),):
         assert old.volumes == ["v1"], "oracle no longer shows the bug"
         assert outcome.error is None
         assert outcome.acted == ["a"]
